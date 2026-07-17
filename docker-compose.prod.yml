@@ -1,0 +1,122 @@
+# 生产/试用部署 —— 本地与任意 docker 机器通用
+# 用法：
+#   cp .env.example .env  # 填值
+#   docker compose -f docker-compose.prod.yml up -d --build
+name: skdy_prod
+
+services:
+  db:
+    build:
+      context: ./backend
+      dockerfile: db.Dockerfile
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.service"
+    restart: unless-stopped
+    networks:
+      - skdy-net
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.service"
+    restart: unless-stopped
+    networks:
+      - skdy-net
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.service"
+        env: "LOG_LEVEL"
+    restart: unless-stopped
+    networks:
+      - skdy-net
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    ports:
+      - "${WEB_PORT}:80"
+    depends_on:
+      - api
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.service"
+    restart: unless-stopped
+    networks:
+      - skdy-net
+
+  loki:
+    image: grafana/loki:3.0.0
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./infra/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    restart: unless-stopped
+    networks:
+      - skdy-net
+
+  fluentbit:
+    image: fluent/fluent-bit:3.0
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./infra/fluentbit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./infra/fluentbit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+    depends_on:
+      - loki
+    restart: unless-stopped
+    networks:
+      - skdy-net
+
+networks:
+  skdy-net:
+
+volumes:
+  pgdata:
+  loki-data:
