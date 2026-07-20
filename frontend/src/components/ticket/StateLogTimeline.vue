@@ -77,6 +77,18 @@
             </div>
             <div v-if="node.article.body" class="addition-body">{{ node.article.body }}</div>
             <div v-if="node.article.append_reason" class="addition-reason">追加原因：{{ node.article.append_reason }}</div>
+            <div v-if="node.article.attachments?.length" class="attachment-list">
+              <a
+                v-for="att in node.article.attachments"
+                :key="att.id"
+                :href="att.url"
+                target="_blank"
+                class="attachment-thumb-link"
+                :title="att.original_filename"
+              >
+                <img :src="att.url" :alt="att.original_filename" />
+              </a>
+            </div>
           </template>
 
           <!-- 催办节点 -->
@@ -476,5 +488,33 @@ function repliesForState(log: TicketStateLog): Article[] {
   margin-top: 6px;
   font-size: 11.5px;
   color: var(--color-text-tertiary);
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.attachment-thumb-link {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-page);
+}
+
+.attachment-thumb-link img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.attachment-thumb-link:hover img {
+  transform: scale(1.04);
 }
 </style>

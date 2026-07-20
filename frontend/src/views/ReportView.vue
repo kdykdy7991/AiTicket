@@ -33,10 +33,6 @@
             {{ (report.metrics.sla_breach_rate * 100).toFixed(1) }}%
           </div>
         </div>
-        <div class="metric-card">
-          <div class="metric-label">一次解决率</div>
-          <div class="metric-value success">{{ (report.metrics.first_contact_resolution_rate * 100).toFixed(1) }}%</div>
-        </div>
       </div>
 
       <!-- 每日新增/闭环趋势 -->
@@ -219,7 +215,7 @@ onBeforeUnmount(() => {
 .filter-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .date-range { font-size: 13px; color: var(--color-text-tertiary); font-variant-numeric: tabular-nums; }
 
-.metric-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 20px; }
+.metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; }
 .metric-card { background: var(--color-bg-card); border: 1px solid var(--color-border-light); border-radius: var(--radius-lg); padding: 18px 20px; }
 .metric-label { font-size: 13px; color: var(--color-text-tertiary); margin-bottom: 8px; }
 .metric-value { font-size: 26px; font-weight: 700; color: var(--color-text-primary); }

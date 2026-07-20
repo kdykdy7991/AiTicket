@@ -71,6 +71,8 @@ services:
     restart: unless-stopped
     networks:
       - skdy-net
+    volumes:
+      - uploads:/app/uploads
 
   web:
     build:
@@ -120,3 +122,4 @@ networks:
 volumes:
   pgdata:
   loki-data:
+  uploads:

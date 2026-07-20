@@ -1,18 +1,21 @@
 """Articles router — list and create communication records."""
 
+import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.exceptions import NotFoundError
-from app.models.ticket import Article, Ticket, TicketStateLog
+from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
 from app.models.user import User
-from app.schemas.article import ArticleCreate, ArticleOut
 from app.services.notification import remind_handler
 from app.services.state_machine import TERMINAL_STATES, validate_transition
 
@@ -45,14 +48,16 @@ async def list_articles(
     if not ticket.scalar_one_or_none():
         raise NotFoundError("工单", ticket_id)
 
+    # 避免与参数名冲突
+    article_type = type
     query = (
         select(Article)
-        .options(selectinload(Article.sender))
+        .options(selectinload(Article.sender), selectinload(Article.attachments))
         .where(Article.ticket_id == ticket_id)
         .order_by(Article.created_at.asc())
     )
-    if type:
-        query = query.where(Article.type == type)
+    if article_type:
+        query = query.where(Article.type == article_type)
 
     result = await db.execute(query)
     articles = result.scalars().all()
@@ -68,14 +73,80 @@ async def list_articles(
             "append_reason": a.append_reason,
             "created_at": a.created_at.isoformat() if a.created_at else None,
             "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+            "attachments": [
+                {
+                    "id": att.id,
+                    "filename": att.filename,
+                    "original_filename": att.original_filename,
+                    "content_type": att.content_type,
+                    "size": att.size,
+                    "url": _attachment_url(att.storage_path),
+                    "created_at": att.created_at.isoformat() if att.created_at else None,
+                }
+                for att in a.attachments
+            ],
         })
     return {"data": data}
+
+
+def _attachment_url(storage_path: str) -> str:
+    """Return the public URL for a stored attachment."""
+    public_path = settings.PUBLIC_UPLOAD_URL.rstrip("/")
+    return f"{public_path}/{storage_path}"
+
+
+async def _save_attachments(
+    article_id: int,
+    ticket_id: int,
+    attachments: list[UploadFile],
+) -> list[ArticleAttachment]:
+    """Persist uploaded image files and return attachment records."""
+    upload_root = Path(settings.UPLOAD_DIR)
+    article_dir = upload_root / "articles" / str(ticket_id) / uuid.uuid4().hex
+    article_dir.mkdir(parents=True, exist_ok=True)
+
+    records: list[ArticleAttachment] = []
+    for upload in attachments:
+        if not upload.content_type or not upload.content_type.startswith("image/"):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"仅支持图片文件， got {upload.content_type}",
+            )
+
+        content = await upload.read()
+        if len(content) > settings.UPLOAD_MAX_SIZE:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"单张图片不能超过 {settings.UPLOAD_MAX_SIZE // 1024 // 1024} MB",
+            )
+
+        original = upload.filename or "untitled"
+        ext = Path(original).suffix.lower() or ".bin"
+        stored_name = f"{uuid.uuid4().hex}{ext}"
+        dest = article_dir / stored_name
+        dest.write_bytes(content)
+
+        storage_path = str(dest.relative_to(upload_root))
+        records.append(
+            ArticleAttachment(
+                article_id=article_id,
+                filename=stored_name,
+                original_filename=original,
+                content_type=upload.content_type,
+                size=len(content),
+                storage_path=storage_path,
+            )
+        )
+    return records
 
 
 @router.post("/tickets/{ticket_id}/articles", status_code=status.HTTP_201_CREATED)
 async def create_article(
     ticket_id: int,
-    body: ArticleCreate,
+    type: Annotated[str, Form()],
+    body: Annotated[str, Form()] = "",
+    append_reason: Annotated[str | None, Form()] = None,
+    attachments: list[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -93,7 +164,7 @@ async def create_article(
         )
 
     # internal_note type has been removed
-    if body.type == "internal_note":
+    if type == "internal_note":
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="内部备注功能已下线"
@@ -102,7 +173,7 @@ async def create_article(
     # 处理说明：只有当前处理人可提交，且工单须处于处理中/暂缓
     # 提交后自动流转到「已处理(resolved)」，处理说明挂在对应 resolved 节点下
     reply_log = None
-    if body.type == "reply":
+    if type == "reply":
         if ticket.owner_id is None or user.id != ticket.owner_id:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
@@ -115,7 +186,7 @@ async def create_article(
             )
 
     # 追加：仅指定角色 + 指定状态
-    if body.type == "addition":
+    if type == "addition":
         if user.role not in ADDITION_ALLOWED_ROLES:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
@@ -128,7 +199,7 @@ async def create_article(
             )
 
     # 催办：仅客服团队 + 非终态前三种状态 + 整个生命周期只能催办一次
-    if body.type == "reminder":
+    if type == "reminder":
         if user.role not in URGE_ALLOWED_ROLES:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
@@ -146,17 +217,17 @@ async def create_article(
             )
 
     # Validate type-specific rules
-    if body.type == "addition" and not body.append_reason:
+    if type == "addition" and not append_reason:
         raise HTTPException(422, detail="追加类型必须填写追加原因")
 
-    if body.type == "reminder":
-        content = body.body.strip() if body.body else ""
+    if type == "reminder":
+        content = body.strip() if body else ""
         if not content:
             raise HTTPException(422, detail="催办内容不能为空")
         if len(content) > URGE_MAX_LENGTH:
             raise HTTPException(422, detail=f"催办内容最多 {URGE_MAX_LENGTH} 字")
 
-    if body.type == "reply":
+    if type == "reply":
         old_state = ticket.state
         validate_transition(old_state, "resolved")
         now = datetime.now(timezone.utc)
@@ -201,17 +272,25 @@ async def create_article(
             ticket.sla_solution_breached = True
 
     article = Article(
-        ticket_id=ticket_id, type=body.type, sender_id=user.id,
-        body=body.body,
-        state_key=str(reply_log.id) if reply_log else (ticket.state if body.type == "reminder" else None),
-        append_reason=body.append_reason if body.type == "addition" else None,
+        ticket_id=ticket_id, type=type, sender_id=user.id,
+        body=body,
+        state_key=str(reply_log.id) if reply_log else (ticket.state if type == "reminder" else None),
+        append_reason=append_reason if type == "addition" else None,
     )
     db.add(article)
     await db.flush()
     await db.refresh(article)
 
+    # 保存附件（仅追加类型允许上传截图）
+    saved_attachments: list[ArticleAttachment] = []
+    if type == "addition" and attachments:
+        saved_attachments = await _save_attachments(article.id, ticket_id, attachments)
+        for att in saved_attachments:
+            db.add(att)
+        await db.flush()
+
     # 催办副作用：记录催办时间/催办人，并触发通知扩展点
-    if body.type == "reminder":
+    if type == "reminder":
         now = datetime.now(timezone.utc)
         ticket.urged_at = now
         ticket.urged_by_id = user.id
@@ -219,16 +298,18 @@ async def create_article(
         await remind_handler(ticket, article)
 
     # 追加信息副作用：标记工单已有追加信息
-    if body.type == "addition":
+    if type == "addition":
         ticket.has_addition = True
 
     # 追加/回复/催办后同步更新工单 updated_at，让列表和详情时间一致
     ticket.updated_at = datetime.now(timezone.utc)
     await db.flush()
 
-    # Reload with sender
+    # Reload with sender and attachments
     result = await db.execute(
-        select(Article).options(selectinload(Article.sender)).where(Article.id == article.id)
+        select(Article)
+        .options(selectinload(Article.sender), selectinload(Article.attachments))
+        .where(Article.id == article.id)
     )
     article = result.scalar_one()
 
@@ -241,5 +322,18 @@ async def create_article(
             "state_key": article.state_key,
             "append_reason": article.append_reason,
             "created_at": article.created_at.isoformat() if article.created_at else None,
+            "updated_at": article.updated_at.isoformat() if article.updated_at else None,
+            "attachments": [
+                {
+                    "id": att.id,
+                    "filename": att.filename,
+                    "original_filename": att.original_filename,
+                    "content_type": att.content_type,
+                    "size": att.size,
+                    "url": _attachment_url(att.storage_path),
+                    "created_at": att.created_at.isoformat() if att.created_at else None,
+                }
+                for att in article.attachments
+            ],
         }
     }

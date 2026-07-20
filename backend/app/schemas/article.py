@@ -5,6 +5,18 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class AttachmentOut(BaseModel):
+    id: int
+    filename: str
+    original_filename: str
+    content_type: str
+    size: int
+    url: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ArticleCreate(BaseModel):
     type: str = Field(default="reply")  # reply / addition / reminder
     body: str = Field(..., min_length=1)
@@ -23,5 +35,6 @@ class ArticleOut(BaseModel):
     append_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+    attachments: list[AttachmentOut] = []
 
     model_config = {"from_attributes": True}

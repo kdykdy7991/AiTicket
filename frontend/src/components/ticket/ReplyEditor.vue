@@ -45,7 +45,36 @@
           :placeholder="placeholder"
           :disabled="inputDisabled"
           resize="vertical"
+          @paste="onPaste"
         />
+      </div>
+
+      <!-- 追加模式：图片附件上传 -->
+      <div v-if="activeTab === 'addition'" class="attachment-area">
+        <input
+          ref="fileInput"
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
+          style="display: none"
+          @change="onFileSelected"
+        />
+        <el-button size="small" @click="fileInput?.click()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          选择图片
+        </el-button>
+        <span class="attachment-hint">支持截图粘贴（Ctrl+V）</span>
+
+        <div v-if="attachmentFiles.length" class="attachment-preview-list">
+          <div
+            v-for="(file, idx) in attachmentFiles"
+            :key="idx"
+            class="attachment-thumb"
+          >
+            <img :src="previewUrls[idx]" :alt="file.name" />
+            <button class="remove-btn" @click="removeAttachment(idx)">×</button>
+          </div>
+        </div>
       </div>
 
       <!-- 当前状态下已有处理说明 -->
@@ -87,7 +116,6 @@
             type="primary"
             :loading="submitting"
             @click="onSubmit"
-            :disabled="!canSubmit"
             class="send-btn"
           >
             {{ submitLabel }}
@@ -131,11 +159,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useTicketStore } from '@/stores/ticket'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import type { Article, TicketDetail } from '@/types'
+import type { Article, ArticleCreatePayload, TicketDetail } from '@/types'
 
 const props = defineProps<{
   ticket: TicketDetail
@@ -149,6 +177,9 @@ const activeTab = ref<'reply' | 'addition' | 'reminder'>('reply')
 const body = ref('')
 const appendReason = ref('')
 const submitting = ref(false)
+const fileInput = ref<HTMLInputElement | null>(null)
+const attachmentFiles = ref<File[]>([])
+const previewUrls = ref<string[]>([])
 
 const currentStateKey = computed(() => (props.ticket as any).state_key || '')
 const allowedAdditionStates = ['pending', 'open', 'on_hold']
@@ -215,13 +246,51 @@ const submitLabel = computed(() => {
   return '提交处理说明'
 })
 
-const canSubmit = computed(() => {
-  if (activeTab.value === 'reply' && hasSummary.value) return false
-  if (!body.value.trim()) return false
-  if (activeTab.value === 'addition' && !appendReason.value.trim()) return false
-  if (activeTab.value === 'reminder' && body.value.trim().length > 200) return false
-  return true
-})
+// 附件处理
+function onFileSelected(e: Event) {
+  const target = e.target as HTMLInputElement
+  const files = target.files
+  if (!files) return
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) {
+      ElMessage.warning(`仅支持图片文件：${file.name}`)
+      continue
+    }
+    addAttachment(file)
+  }
+  target.value = ''
+}
+
+function onPaste(e: ClipboardEvent) {
+  if (activeTab.value !== 'addition') return
+  const items = e.clipboardData?.items
+  if (!items) return
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) addAttachment(file)
+    }
+  }
+}
+
+function addAttachment(file: File) {
+  attachmentFiles.value.push(file)
+  previewUrls.value.push(URL.createObjectURL(file))
+}
+
+function removeAttachment(idx: number) {
+  URL.revokeObjectURL(previewUrls.value[idx])
+  attachmentFiles.value.splice(idx, 1)
+  previewUrls.value.splice(idx, 1)
+}
+
+function clearAttachments() {
+  previewUrls.value.forEach(url => URL.revokeObjectURL(url))
+  attachmentFiles.value = []
+  previewUrls.value = []
+}
+
+onUnmounted(clearAttachments)
 
 // 权限变化时自动切到可用的 tab
 watch([canReply, canAppend, canRemind], ([replyAllowed, appendAllowed, remindAllowed]) => {
@@ -240,17 +309,40 @@ watch([canReply, canAppend, canRemind], ([replyAllowed, appendAllowed, remindAll
 }, { immediate: true })
 
 async function onSubmit() {
-  if (!canSubmit.value) return
+  if (activeTab.value === 'reply' && hasSummary.value) {
+    ElMessage.warning('当前状态下已提交处理说明')
+    return
+  }
+  if (activeTab.value === 'addition' && !appendReason.value.trim()) {
+    ElMessage.warning('请填写追加原因')
+    return
+  }
+  if (activeTab.value === 'reminder' && body.value.trim().length > 200) {
+    ElMessage.warning('催办内容最多 200 字')
+    return
+  }
+  const hasBody = !!body.value.trim()
+  const hasAttachments = attachmentFiles.value.length > 0
+  if (!hasBody && !hasAttachments) {
+    ElMessage.warning(activeTab.value === 'addition' ? '请填写追加内容或上传截图' : '请填写内容')
+    return
+  }
+
   submitting.value = true
   try {
     const type = activeTab.value
-    const payload: any = { type, body: body.value }
-    if (activeTab.value === 'addition') {
-      payload.append_reason = appendReason.value.trim()
+    const payload: ArticleCreatePayload = {
+      type,
+      body: body.value,
+      append_reason: activeTab.value === 'addition' ? appendReason.value.trim() : undefined,
+    }
+    if (activeTab.value === 'addition' && attachmentFiles.value.length) {
+      payload.attachments = attachmentFiles.value
     }
     await ticketStore.addArticle(props.ticket.id, payload)
     body.value = ''
     appendReason.value = ''
+    clearAttachments()
     const msgMap: Record<string, string> = {
       reply: '处理说明已提交',
       addition: '追加已记录',
@@ -401,6 +493,65 @@ async function confirmHold() {
 }
 
 .send-btn { font-weight: 600; min-width: 100px; }
+
+.attachment-area {
+  padding: 12px 16px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.attachment-hint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+}
+
+.attachment-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.attachment-thumb {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-page);
+}
+
+.attachment-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-thumb .remove-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-thumb .remove-btn:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
 
 .hold-form .hold-hint {
   margin: 0;

@@ -770,17 +770,7 @@ async def report_stats(
     )).scalar() or 0
     sla_breach_rate = round(breached / new_count, 4) if new_count else 0.0
 
-    # 6. 一次解决率：未被退回过的工单 / 总工单
-    # 退回过的工单 = 在 state_logs 里有 to_state=returned 的 ticket_id
-    returned_ids = select(TicketStateLog.ticket_id).where(
-        TicketStateLog.to_state == "returned"
-    ).subquery()
-    returned_count = (await db.execute(
-        select(func.count()).select_from(Ticket).where(*base, Ticket.id.in_(select(returned_ids.c.ticket_id)))
-    )).scalar() or 0
-    first_contact_resolution_rate = round((new_count - returned_count) / new_count, 4) if new_count else 0.0
-
-    # 7. 故障分类分布
+    # 6. 故障分类分布
     cat_alias = TicketCategory.__table__.alias("cat")
     parent_alias = TicketCategory.__table__.alias("parent")
     cat_q = (
@@ -805,7 +795,6 @@ async def report_stats(
                 "closed_count": closed_count,
                 "avg_resolution_per_group": avg_resolution_per_group,
                 "sla_breach_rate": sla_breach_rate,
-                "first_contact_resolution_rate": first_contact_resolution_rate,
             },
             "by_category": by_category,
         }

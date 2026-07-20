@@ -1,6 +1,13 @@
 """Application configuration via environment variables."""
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+
+# 项目 backend/ 目录，用于本地开发默认路径
+_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_DEFAULT_UPLOAD_DIR = str(_BACKEND_DIR / "uploads")
 
 
 class Settings(BaseSettings):
@@ -42,6 +49,12 @@ class Settings(BaseSettings):
     # Pagination
     DEFAULT_PAGE_SIZE: int = 20
     MAX_PAGE_SIZE: int = 100
+
+    # Uploads / Attachments
+    # 本地开发默认写到 backend/uploads；Docker 中通过 .env 覆盖为 /app/uploads
+    UPLOAD_DIR: str = _DEFAULT_UPLOAD_DIR
+    PUBLIC_UPLOAD_URL: str = "/uploads"
+    UPLOAD_MAX_SIZE: int = 10 * 1024 * 1024  # 10 MB
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

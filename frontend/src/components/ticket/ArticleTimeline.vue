@@ -22,7 +22,21 @@
           </div>
           <RelativeTime :datetime="article.created_at" />
         </div>
-        <div class="article-body" v-html="renderBody(article)" />
+        <div class="article-body">
+          <div v-if="article.attachments?.length" class="attachment-list">
+            <a
+              v-for="att in article.attachments"
+              :key="att.id"
+              :href="att.url"
+              target="_blank"
+              class="attachment-thumb-link"
+              :title="att.original_filename"
+            >
+              <img :src="att.url" :alt="att.original_filename" />
+            </a>
+          </div>
+          <div v-html="renderBody(article)" />
+        </div>
       </div>
     </div>
   </div>
@@ -36,9 +50,9 @@ import type { Article } from '@/types'
 
 const props = defineProps<{ articles: Article[] }>()
 
-// 处理说明和追加内容已在流转时间线中展示；历史 return 记录也不再沟通记录中展示
+// 处理说明、追加内容、催办记录已在流转时间线中展示；历史 return 记录也不再沟通记录中展示
 const visibleArticles = computed(() =>
-  props.articles.filter(a => a.type !== 'addition' && a.type !== 'reply' && a.type !== 'return')
+  props.articles.filter(a => a.type !== 'addition' && a.type !== 'reply' && a.type !== 'return' && a.type !== 'reminder')
 )
 
 function senderLabel(type: string) {
@@ -123,5 +137,33 @@ function renderBody(article: Article): string {
   line-height: 1.7;
   color: var(--color-text-primary);
   word-break: break-word;
+}
+
+.attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.attachment-thumb-link {
+  display: block;
+  width: 96px;
+  height: 96px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--color-border-light);
+  background: var(--color-bg-page);
+}
+
+.attachment-thumb-link img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.attachment-thumb-link:hover img {
+  transform: scale(1.04);
 }
 </style>

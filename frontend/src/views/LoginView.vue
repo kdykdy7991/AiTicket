@@ -65,7 +65,7 @@ async function onLogin() {
   try {
     await authStore.login(form)
     ElMessage.success('登录成功')
-    const redirect = (route.query.redirect as string) || '/dashboard'
+    const redirect = (route.query.redirect as string) || '/tickets'
     router.push(redirect)
   } catch {
     ElMessage.error('用户名或密码错误')

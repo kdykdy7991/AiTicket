@@ -11,14 +11,15 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    redirect: '/dashboard',
+    redirect: '/tickets',
   },
-  {
-    path: '/dashboard',
-    name: 'Dashboard',
-    component: () => import('@/views/DashboardView.vue'),
-    meta: { title: '仪表盘' },
-  },
+  // 仪表盘暂时下线，后续明确指标后再加回来
+  // {
+  //   path: '/dashboard',
+  //   name: 'Dashboard',
+  //   component: () => import('@/views/DashboardView.vue'),
+  //   meta: { title: '仪表盘' },
+  // },
   {
     path: '/report',
     name: 'Report',
@@ -84,7 +85,12 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.requiresAdmin && !auth.isAdmin) {
-    return { name: 'Dashboard' }
+    return { name: 'TicketList' }
+  }
+
+  // 我的草稿 / 新建工单仅客服和管理员可访问
+  if ((to.path === '/tickets/new' || to.path === '/tickets/drafts') && !auth.isAgent) {
+    return { name: 'TicketList' }
   }
 
   return true

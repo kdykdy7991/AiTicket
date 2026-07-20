@@ -20,12 +20,8 @@
             <span>客户信息</span>
           </div>
           <div class="form-row">
-            <el-form-item label="用户类型" prop="customer_type" class="form-col">
-              <el-radio-group v-model="form.customer_type">
-                <el-radio-button value="personal">个人</el-radio-button>
-                <el-radio-button value="enterprise">政企</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
+            <!-- 临时关闭个人工单入口，默认政企 -->
+            <input type="hidden" v-model="form.customer_type" />
             <el-form-item label="来电号码" prop="customer_phone" class="form-col">
               <el-input v-model="form.customer_phone" placeholder="客户来电号码" maxlength="20" size="large" />
             </el-form-item>
@@ -154,7 +150,7 @@ const priorities = ref<TicketPriority[]>([])
 const categories = ref<TicketCategory[]>([])
 
 const form = reactive({
-  customer_type: 'personal' as 'personal' | 'enterprise',
+  customer_type: 'enterprise' as 'personal' | 'enterprise',
   customer_phone: '',
   contact_name: '',
   contact_phone: '',
@@ -227,8 +223,8 @@ onMounted(async () => {
     try {
       const draft = await ticketApi.get(Number(draftId))
       editingDraftId.value = draft.id
-      // 回填表单
-      form.customer_type = draft.customer_type || form.customer_type
+      // 回填表单（个人入口已关闭，强制政企）
+      form.customer_type = 'enterprise'
       form.customer_phone = draft.customer_phone || form.customer_phone
       form.contact_name = (draft as any).contact_name || draft.customer_name || ''
       form.contact_phone = draft.contact_phone || form.contact_phone
@@ -270,7 +266,7 @@ watch(() => route.query.draft_id, (newDraftId, oldDraftId) => {
   if (!newDraftId && oldDraftId) {
     // draft_id 被清除，重置表单为新建状态
     editingDraftId.value = null
-    form.customer_type = 'personal'
+    form.customer_type = 'enterprise'
     form.customer_phone = ''
     form.contact_name = ''
     form.contact_phone = ''

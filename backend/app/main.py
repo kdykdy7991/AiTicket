@@ -8,6 +8,7 @@ from contextvars import ContextVar
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
@@ -95,6 +96,9 @@ app.add_middleware(
 
 # Exception handlers
 app.add_exception_handler(AppException, app_exception_handler)
+
+# Static files for uploaded attachments
+app.mount(settings.PUBLIC_UPLOAD_URL, StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
 
 # ── Routers ───────────────────────────────────────────────

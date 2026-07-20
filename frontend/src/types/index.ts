@@ -167,6 +167,16 @@ export interface Ticket {
   is_draft: boolean
 }
 
+export interface ArticleAttachment {
+  id: number
+  filename: string
+  original_filename: string
+  content_type: string
+  size: number
+  url: string
+  created_at: string
+}
+
 export interface Article {
   id: number
   ticket_id: number
@@ -182,6 +192,7 @@ export interface Article {
   // —— P7 追加记录字段 ——
   is_addition: boolean
   append_reason: string | null
+  attachments: ArticleAttachment[]
 }
 
 export interface TicketDetail extends Ticket {
@@ -351,4 +362,5 @@ export interface ArticleCreatePayload {
   content_type?: 'text/plain' | 'text/html'
   article_type?: 'note' | 'email' | 'web'
   append_reason?: string
+  attachments?: File[]
 }

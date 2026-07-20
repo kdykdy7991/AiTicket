@@ -122,6 +122,31 @@ class Article(Base):
 
     ticket = relationship("Ticket", back_populates="articles")
     sender = relationship("User", lazy="selectin")
+    attachments = relationship(
+        "ArticleAttachment",
+        back_populates="article",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+
+class ArticleAttachment(Base):
+    __tablename__ = "article_attachments"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    article_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("articles.id", ondelete="CASCADE"), nullable=False
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=func.now()
+    )
+
+    article = relationship("Article", back_populates="attachments")
 
 
 class TicketStateLog(Base):

@@ -147,6 +147,7 @@ function adaptArticle(a: any): any {
     sender_type: a.sender_type || senderType,
     content_type: a.content_type || 'text/plain',
     state_key: a.state_key || undefined,
+    attachments: a.attachments || [],
     // 保留原始字段
   }
 }
@@ -356,7 +357,28 @@ export const draftApi = {
 
 export const articleApi = {
   async create(ticketId: number, data: ArticleCreatePayload): Promise<Article> {
-    const res: any = await api.post(`/tickets/${ticketId}/articles`, data)
+    let payload: FormData | Record<string, any>
+    let headers: Record<string, string> | undefined
+
+    if (data.attachments && data.attachments.length > 0) {
+      payload = new FormData()
+      payload.append('type', data.type)
+      payload.append('body', data.body)
+      if (data.append_reason) payload.append('append_reason', data.append_reason)
+      for (const file of data.attachments) {
+        payload.append('attachments', file, file.name)
+      }
+      // Axios 会自动为 FormData 设置正确的 Content-Type（含 boundary）
+      headers = undefined
+    } else {
+      payload = {
+        type: data.type,
+        body: data.body,
+        append_reason: data.append_reason,
+      }
+    }
+
+    const res: any = await api.post(`/tickets/${ticketId}/articles`, payload, { headers })
     return adaptArticle(res.data)
   },
 }
