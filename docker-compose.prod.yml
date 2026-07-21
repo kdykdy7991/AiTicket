@@ -9,12 +9,16 @@ services:
     build:
       context: ./backend
       dockerfile: db.Dockerfile
+    security_opt:
+      - seccomp:unconfined
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql/data:Z
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -72,7 +76,7 @@ services:
     networks:
       - skdy-net
     volumes:
-      - uploads:/app/uploads
+      - uploads:/app/uploads:Z
 
   web:
     build:
@@ -80,6 +84,7 @@ services:
       dockerfile: Dockerfile.prod
     ports:
       - "${WEB_PORT}:80"
+    user: root
     depends_on:
       - api
     logging:
@@ -99,17 +104,20 @@ services:
       - "127.0.0.1:3100:3100"
     volumes:
       - ./infra/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
-      - loki-data:/loki
+      - loki-data:/loki:Z
     restart: unless-stopped
     networks:
       - skdy-net
 
   fluentbit:
     image: fluent/fluent-bit:3.0
+    logging:
+      driver: "none"
     volumes:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - ./infra/fluentbit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./infra/fluentbit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - fluentbit-state:/fluent-bit/state:Z
     depends_on:
       - loki
     restart: unless-stopped
@@ -123,3 +131,4 @@ volumes:
   pgdata:
   loki-data:
   uploads:
+  fluentbit-state:

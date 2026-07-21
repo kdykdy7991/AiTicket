@@ -10,6 +10,9 @@ RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r re
 # 拷贝代码
 COPY . .
 
+# 确保 entrypoint 可执行（Windows/某些环境构建时权限会丢失）
+RUN chmod +x ./scripts/docker-entrypoint.sh
+
 EXPOSE 8000
 
 ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
