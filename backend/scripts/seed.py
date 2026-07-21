@@ -65,7 +65,7 @@ SKILL_GROUPS = [
     (6, '客服组'),
 ]
 
-# 默认密码：skdy123
+# 默认密码：admin123
 _DEFAULT_HASH = '$2b$12$Oxx10M2ohHR2zd3ekD5WLOll.icytUsKAjpzeoeTu3ZaYvpq0aRKW'
 
 USERS = [
