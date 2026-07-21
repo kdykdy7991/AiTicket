@@ -357,28 +357,19 @@ export const draftApi = {
 
 export const articleApi = {
   async create(ticketId: number, data: ArticleCreatePayload): Promise<Article> {
-    let payload: FormData | Record<string, any>
-    let headers: Record<string, string> | undefined
-
-    if (data.attachments && data.attachments.length > 0) {
-      payload = new FormData()
-      payload.append('type', data.type)
-      payload.append('body', data.body)
-      if (data.append_reason) payload.append('append_reason', data.append_reason)
+    // 后端统一使用 multipart/form-data 接收，始终用 FormData
+    const payload = new FormData()
+    payload.append('type', data.type)
+    payload.append('body', data.body)
+    if (data.append_reason) payload.append('append_reason', data.append_reason)
+    if (data.attachments) {
       for (const file of data.attachments) {
         payload.append('attachments', file, file.name)
       }
-      // Axios 会自动为 FormData 设置正确的 Content-Type（含 boundary）
-      headers = undefined
-    } else {
-      payload = {
-        type: data.type,
-        body: data.body,
-        append_reason: data.append_reason,
-      }
     }
 
-    const res: any = await api.post(`/tickets/${ticketId}/articles`, payload, { headers })
+    // Axios 会自动为 FormData 设置正确的 Content-Type（含 boundary）
+    const res: any = await api.post(`/tickets/${ticketId}/articles`, payload)
     return adaptArticle(res.data)
   },
 }
