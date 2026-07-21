@@ -4,21 +4,35 @@ set -euo pipefail
 # 生产环境部署脚本
 # 用法：
 #   chmod +x deploy.sh
-#   ./deploy.sh [tag]
 #
-# 例如：
-#   ./deploy.sh v20260721-01
+# 常规部署（会备份数据库）：
+#   ./deploy.sh [tag]
+#   例如：./deploy.sh v20260721-01
+#
+# 首次部署（全新环境，自动跑 migration + seed，不备份）：
+#   ./deploy.sh --init [tag]
+#   例如：./deploy.sh --init v20260721-01
 
 COMPOSE_FILE="docker-compose.prod.yml"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="${PROJECT_DIR}/backups"
-TAG="${1:-latest}"
+INIT_MODE=false
+TAG="latest"
+
+# 解析参数
+for arg in "$@"; do
+    if [ "$arg" = "--init" ]; then
+        INIT_MODE=true
+    else
+        TAG="$arg"
+    fi
+done
 
 cd "${PROJECT_DIR}"
 
 # 加载环境变量
 if [ ! -f .env ]; then
-    echo "错误：.env 文件不存在"
+    echo "错误：.env 文件不存在，请先 cp .env.example .env 并填值"
     exit 1
 fi
 
@@ -27,43 +41,76 @@ source .env
 set +a
 
 echo "======================================"
-echo "开始部署：skdy-api:${TAG}"
+if [ "$INIT_MODE" = true ]; then
+    echo "首次部署模式：skdy-api:${TAG}"
+else
+    echo "常规部署模式：skdy-api:${TAG}"
+fi
 echo "时间：$(date '+%Y-%m-%d %H:%M:%S')"
 echo "======================================"
 
-# 1. 创建备份目录
-mkdir -p "${BACKUP_DIR}"
+if [ "$INIT_MODE" = true ]; then
+    # 首次部署：先启动基础设施
+    echo "[1/4] 启动数据库和缓存 ..."
+    docker compose -f "${COMPOSE_FILE}" up -d db redis
 
-# 2. 备份数据库
-BACKUP_FILE="${BACKUP_DIR}/skdy_ticket_$(date +%Y%m%d_%H%M%S).sql"
-echo "[1/5] 备份数据库到 ${BACKUP_FILE} ..."
-docker exec skdy_prod-db-1 pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > "${BACKUP_FILE}"
-echo "数据库备份完成：${BACKUP_FILE}"
+    echo "等待数据库就绪 ..."
+    until docker compose -f "${COMPOSE_FILE}" exec -T db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > /dev/null 2>&1; do
+        sleep 1
+    done
+    echo "数据库已就绪"
 
-# 3. 构建/拉取镜像
-echo "[2/5] 构建镜像 skdy-api:${TAG} ..."
-# 使用 BUILD_TAG 作为构建参数，在 Dockerfile 里不需要的话可忽略
-DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build --no-cache api
+    # 2. 构建镜像
+    echo "[2/4] 构建镜像 skdy-api:${TAG} ..."
+    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build --no-cache api web
+    docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
 
-# 给镜像打标签（可选，方便回滚）
-docker tag skdy_prod-api "skdy-api:${TAG}" || true
+    # 3. 执行数据库迁移 + 种子数据
+    echo "[3/4] 初始化数据库 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
+    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/seed.py
 
-# 4. 执行数据库迁移
-echo "[3/5] 执行数据库迁移 ..."
-docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
+    # 4. 启动全部服务
+    echo "[4/4] 启动全部服务 ..."
+    docker compose -f "${COMPOSE_FILE}" up -d
+else
+    # 常规部署
 
-# 5. 启动/更新服务
-echo "[4/5] 启动服务 ..."
-docker compose -f "${COMPOSE_FILE}" up -d
+    # 1. 创建备份目录
+    mkdir -p "${BACKUP_DIR}"
 
-# 6. 健康检查
-echo "[5/5] 等待服务健康检查 ..."
-sleep 5
+    # 2. 备份数据库
+    BACKUP_FILE="${BACKUP_DIR}/skdy_ticket_$(date +%Y%m%d_%H%M%S).sql"
+    echo "[1/5] 备份数据库到 ${BACKUP_FILE} ..."
+    docker exec skdy_prod-db-1 pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > "${BACKUP_FILE}"
+    echo "数据库备份完成：${BACKUP_FILE}"
+
+    # 3. 构建镜像
+    echo "[2/5] 构建镜像 skdy-api:${TAG} ..."
+    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build --no-cache api web
+    docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
+
+    # 4. 执行数据库迁移
+    echo "[3/5] 执行数据库迁移 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
+
+    # 5. 启动/更新服务
+    echo "[4/5] 启动服务 ..."
+    docker compose -f "${COMPOSE_FILE}" up -d
+
+    # 6. 健康检查
+    echo "[5/5] 等待服务健康检查 ..."
+    sleep 5
+fi
+
+# 通用健康检查
+echo "======================================"
+echo "检查服务状态 ..."
+docker compose -f "${COMPOSE_FILE}" ps
 
 if docker compose -f "${COMPOSE_FILE}" ps api | grep -q "healthy"; then
     echo "======================================"
     echo "部署成功：skdy-api:${TAG}"
-    echo "数据库版本：$(docker compose -f ${COMPOSE_FILE} run --rm api alembic current 2>/dev/null | tail -1)"
     echo "======================================"
 else
     echo "======================================"
