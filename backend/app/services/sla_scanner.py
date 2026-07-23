@@ -29,6 +29,11 @@ async def scan_sla_breaches() -> dict:
     now = datetime.now(timezone.utc)
 
     async with async_session() as db:
+        # TODO(sla-policy): on_hold 暂不排除，超时仍会标记。
+        # 等 SLA 策略定稿后再决定：
+        #   - 暂停计时：进出 on_hold 时推 solution_deadline
+        #   - 扫描跳过：把 on_hold 加进 notin_ 列表
+        #   - 用 hold_until 控表：now < hold_until 时跳过
         # 解决超时：非终态、未解决、超过 deadline、且尚未标记
         sol_result = await db.execute(
             update(Ticket)
