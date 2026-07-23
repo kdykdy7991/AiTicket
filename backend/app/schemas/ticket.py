@@ -12,6 +12,7 @@ class TicketCreate(BaseModel):
     customer_type: str = Field(default="personal")
     customer_name: str | None = Field(default=None, max_length=100)
     customer_phone: str = Field(..., min_length=1, max_length=20)
+    customer_phone_type: str | None = Field(default=None, max_length=20)  # 来电号码类型: mobile / landline
     contact_phone: str | None = None
     customer_company: str | None = None
     customer_level: str | None = "normal"
@@ -59,6 +60,7 @@ class TicketBrief(BaseModel):
     customer_type: str
     customer_name: str | None = None
     customer_phone: str
+    customer_phone_type: str | None = None
     contact_phone: str | None = None
     skill_group_id: int | None = None
     skill_group_name: str | None = None

@@ -22,8 +22,22 @@
           <div class="form-row">
             <!-- 临时关闭个人工单入口，默认政企 -->
             <input type="hidden" v-model="form.customer_type" />
-            <el-form-item label="来电号码" prop="customer_phone" class="form-col">
-              <el-input v-model="form.customer_phone" placeholder="客户来电号码" maxlength="20" size="large" />
+            <el-form-item prop="customer_phone" class="form-col">
+              <template #label>
+                <span class="phone-label">
+                  <span>来电号码</span>
+                  <el-radio-group v-model="form.customer_phone_type" size="small" class="phone-type-radio" @change="onPhoneTypeChange">
+                    <el-radio-button value="mobile">手机号码</el-radio-button>
+                    <el-radio-button value="landline">固定电话</el-radio-button>
+                  </el-radio-group>
+                </span>
+              </template>
+              <el-input
+                v-model="form.customer_phone"
+                :placeholder="form.customer_phone_type === 'mobile' ? '11位手机号码' : '如 010-12345678 或 075512345678'"
+                :maxlength="form.customer_phone_type === 'mobile' ? 11 : 20"
+                size="large"
+              />
             </el-form-item>
           </div>
           <div class="form-row">
@@ -152,6 +166,7 @@ const categories = ref<TicketCategory[]>([])
 const form = reactive({
   customer_type: 'enterprise' as 'personal' | 'enterprise',
   customer_phone: '',
+  customer_phone_type: 'mobile' as 'mobile' | 'landline',
   contact_name: '',
   contact_phone: '',
   customer_company: '',
@@ -171,7 +186,22 @@ const rules: FormRules = {
   customer_type: [{ required: true, message: '请选择用户类型', trigger: 'change' }],
   customer_phone: [
     { required: true, message: '请输入来电号码', trigger: 'blur' },
-    { pattern: /^1[3-9]\d{9}$/, message: '请输入正确的来电号码', trigger: 'blur' },
+    {
+      validator: (_r, _v, cb) => {
+        if (form.customer_phone_type === 'mobile') {
+          if (!/^1[3-9]\d{9}$/.test(form.customer_phone)) {
+            return cb(new Error('请输入正确的手机号码'))
+          }
+        } else {
+          // 固定电话：区号（0xxx，可选 -）+ 7~8 位号码
+          if (!/^0\d{2,3}-?\d{7,8}$/.test(form.customer_phone)) {
+            return cb(new Error('请输入正确的固定电话，如 010-12345678'))
+          }
+        }
+        cb()
+      },
+      trigger: 'blur',
+    },
   ],
   contact_phone: [
     { required: true, message: '请输入联系号码', trigger: 'blur' },
@@ -205,6 +235,12 @@ function onCategoryL1Change() {
   form.category_l2_id = null
 }
 
+// 切换来电号码类型时清空原值并触发校验
+function onPhoneTypeChange() {
+  form.customer_phone = ''
+  formRef.value?.clearValidate('customer_phone')
+}
+
 onMounted(async () => {
   const [g, sg, p, cats] = await Promise.all([
     metaApi.getGroups(), metaApi.getSkillGroups(),
@@ -226,6 +262,10 @@ onMounted(async () => {
       // 回填表单（个人入口已关闭，强制政企）
       form.customer_type = 'enterprise'
       form.customer_phone = draft.customer_phone || form.customer_phone
+      // 根据草稿里的号码格式自动识别手机 / 固话
+      if (draft.customer_phone) {
+        form.customer_phone_type = /^1[3-9]\d{9}$/.test(draft.customer_phone) ? 'mobile' : 'landline'
+      }
       form.contact_name = (draft as any).contact_name || draft.customer_name || ''
       form.contact_phone = draft.contact_phone || form.contact_phone
       form.customer_company = (draft as any).customer_company || ''
@@ -267,6 +307,7 @@ watch(() => route.query.draft_id, (newDraftId, oldDraftId) => {
     // draft_id 被清除，重置表单为新建状态
     editingDraftId.value = null
     form.customer_type = 'enterprise'
+    form.customer_phone_type = 'mobile'
     form.customer_phone = ''
     form.contact_name = ''
     form.contact_phone = ''
@@ -316,6 +357,7 @@ function buildFormPayload(extra: Record<string, any> = {}): Record<string, any> 
     ...extra,
     customer_type: form.customer_type,
     customer_phone: form.customer_phone,
+    customer_phone_type: form.customer_phone_type,
     customer_company: form.customer_company || null,
     device_sn: form.device_sn || null,
     contact_name: form.contact_name || null,
@@ -341,6 +383,7 @@ async function doSubmit() {
       channel: form.channel,
       customer_type: form.customer_type,
       customer_phone: form.customer_phone,
+      customer_phone_type: form.customer_phone_type,
       customer_company: form.customer_company || null,
       device_sn: form.device_sn || null,
       contact_name: form.contact_name || null,
@@ -451,6 +494,17 @@ async function doSubmit() {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
+}
+
+.phone-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.phone-type-radio :deep(.el-radio-button__inner) {
+  padding: 4px 12px;
+  font-size: 12px;
 }
 
 .form-actions {

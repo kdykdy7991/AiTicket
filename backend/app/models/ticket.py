@@ -25,6 +25,7 @@ class Ticket(Base):
     customer_type: Mapped[str] = mapped_column(String(20), nullable=False, default="personal")
     customer_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     customer_phone: Mapped[str] = mapped_column(String(20), nullable=False)
+    customer_phone_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 来电号码类型: mobile / landline
     contact_phone: Mapped[str | None] = mapped_column(String(20))
     customer_company: Mapped[str | None] = mapped_column(String(200))
     customer_level: Mapped[str | None] = mapped_column(String(20), default="normal")

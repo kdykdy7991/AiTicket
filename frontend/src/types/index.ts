@@ -304,6 +304,7 @@ export interface TicketCreatePayload {
   // —— P7 新增 ——
   customer_type: CustomerType
   customer_phone: string
+  customer_phone_type?: 'mobile' | 'landline' | null
   device_sn?: string | null
   contact_name?: string | null
   contact_phone?: string | null

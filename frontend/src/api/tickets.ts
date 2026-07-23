@@ -225,6 +225,7 @@ function buildCreatePayload(data: any): Record<string, any> {
     customer_type: data.customer_type || 'personal',
     customer_name: data.contact_name || data.customer_name || null,
     customer_phone: data.customer_phone,
+    customer_phone_type: data.customer_phone_type || undefined,
     contact_phone: data.contact_phone || undefined,
     customer_company: data.customer_company || undefined,
     device_sn: data.device_sn || undefined,

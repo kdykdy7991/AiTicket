@@ -38,11 +38,20 @@ STATE_LABELS = {
 }
 
 
+# 哪些状态转换算"退回"动作，写完 state_log 后用来同步 has_returned
+# - (pending, returned): 客户/客服 退回给创建人
+# - (open, pending):     处理人退回给团队负责人（重新分派）
+RETURN_TRANSITIONS: set[tuple[str, str]] = {
+    ("pending", "returned"),
+    ("open", "pending"),
+}
+
+
 def _ticket_to_brief(t: Ticket) -> TicketBrief:
     return TicketBrief(
         id=t.id, number=t.number, state=t.state,
         priority=t.priority, channel=t.channel, customer_type=t.customer_type,
-        customer_name=t.customer_name, customer_phone=t.customer_phone, contact_phone=t.contact_phone,
+        customer_name=t.customer_name, customer_phone=t.customer_phone, customer_phone_type=t.customer_phone_type, contact_phone=t.contact_phone,
         skill_group_id=t.skill_group_id,
         skill_group_name=t.skill_group.name if t.skill_group else None,
         owner_id=t.owner_id,
@@ -584,6 +593,7 @@ async def update_draft(
     ticket.customer_type = body.customer_type
     ticket.customer_name = body.customer_name
     ticket.customer_phone = body.customer_phone
+    ticket.customer_phone_type = body.customer_phone_type
     ticket.contact_phone = body.contact_phone
     ticket.customer_company = body.customer_company
     ticket.customer_level = body.customer_level
@@ -654,7 +664,7 @@ async def create_ticket(
             priority=body.priority, channel=body.channel,
             state="pending",
             customer_type=body.customer_type, customer_name=body.customer_name,
-            customer_phone=body.customer_phone, contact_phone=body.contact_phone,
+            customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
             customer_company=body.customer_company,
             customer_level=body.customer_level, device_sn=body.device_sn,
             region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
@@ -713,7 +723,7 @@ async def create_ticket(
             priority=body.priority, channel=body.channel,
             state="pending",
             customer_type=body.customer_type, customer_name=body.customer_name,
-            customer_phone=body.customer_phone, contact_phone=body.contact_phone,
+            customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
             customer_company=body.customer_company,
             customer_level=body.customer_level, device_sn=body.device_sn,
             region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
@@ -804,6 +814,8 @@ async def update_ticket(
             operator_id=user.id, reason=body.reason, duration_minutes=duration,
         )
         db.add(log)
+        # has_returned 跟随"最新一次动作"：本次转换属于 RETURN_TRANSITIONS 才置 true
+        ticket.has_returned = (ticket.state, body.state) in RETURN_TRANSITIONS
 
         old_state = ticket.state
         ticket.state = body.state
@@ -816,32 +828,21 @@ async def update_ticket(
             elif old_state == "returned":
                 # 已退回工单重新提交：保持无处理人，等待再次分派
                 ticket.returned_to_user_id = None
-            elif old_state in ("on_hold", "resolved"):
-                # on_hold→open / resolved→open 都是退回
-                ticket.has_returned = True
-            # open←on_hold / open←resolved 退回：处理人保持不变
         elif body.state == "pending":
             # open→pending 退回 或 returned→pending 重新提交：待受理无处理人
             if old_state in ("open", "returned"):
                 ticket.owner_id = None
                 ticket.returned_to_user_id = None
-            if old_state == "open":
-                # open→pending 是退回
-                ticket.has_returned = True
         elif body.state == "on_hold":
-            if old_state == "resolved":
-                # resolved→on_hold 是退回
-                ticket.has_returned = True
             # on_hold←open（暂缓）/ on_hold←resolved（退回）：处理人保持不变
+            # TODO(sla-policy): SLA 策略未定，暂不在进/出 on_hold 时调整 solution_deadline
+            pass
         elif body.state == "resolved":
             ticket.solved_at = now
             ticket.resolved = True
             if ticket.solution_deadline and now > ticket.solution_deadline:
                 ticket.sla_solution_breached = True
-            # 重新处理完成，清除退回标记
-            ticket.has_returned = False
         elif body.state == "returned":
-            ticket.has_returned = True
             # 仅 pending→returned：分配给创建工单的客服人员
             if old_state == "pending":
                 ticket.returned_to_user_id = ticket.creator_id
@@ -851,6 +852,7 @@ async def update_ticket(
             ticket.closed_at = now
             if ticket.created_at:
                 ticket.closed_duration_minutes = int((now - ticket.created_at).total_seconds() / 60)
+        # 注：has_returned 已在写 state_log 处按 RETURN_TRANSITIONS 同步，此处不再覆盖
     if body.archive_notes is not None:
         ticket.archive_notes = body.archive_notes
     if body.is_callbacked is not None:
@@ -867,6 +869,8 @@ async def update_ticket(
         ticket.group_id = body.group_id
     if body.skill_group_id is not None:
         ticket.skill_group_id = body.skill_group_id
+    if body.dispatcher_id is not None:
+        ticket.dispatcher_id = body.dispatcher_id
 
     await db.flush()
 
@@ -904,15 +908,21 @@ async def batch_update_tickets(
             ticket.group_id = body.updates.group_id
         if body.updates.skill_group_id is not None:
             ticket.skill_group_id = body.updates.skill_group_id
+        if body.updates.dispatcher_id is not None:
+            ticket.dispatcher_id = body.updates.dispatcher_id
         if body.updates.state is not None and body.updates.state != ticket.state:
             try:
                 validate_transition(ticket.state, body.updates.state)
+                from_state = ticket.state
+                to_state = body.updates.state
                 log = TicketStateLog(
-                    ticket_id=ticket.id, from_state=ticket.state, to_state=body.updates.state,
+                    ticket_id=ticket.id, from_state=from_state, to_state=to_state,
                     operator_id=user.id, reason=body.updates.reason,
                 )
                 db.add(log)
-                ticket.state = body.updates.state
+                ticket.state = to_state
+                # has_returned 跟随"最新一次动作"同步
+                ticket.has_returned = (from_state, to_state) in RETURN_TRANSITIONS
             except StateTransitionError:
                 continue  # skip invalid transitions
         updated += 1
