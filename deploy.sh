@@ -6,18 +6,33 @@ set -euo pipefail
 #   chmod +x deploy.sh
 #
 # 常规部署（会备份数据库）：
-#   ./deploy.sh [tag]
-#   例如：./deploy.sh v20260721-01
+#   ./deploy.sh              # tag 自动生成 vYYYYMMDD-NN（N 同日自增）
+#   ./deploy.sh v20260721-01 # 显式指定 tag
 #
 # 首次部署（全新环境，自动跑 migration + seed，不备份）：
-#   ./deploy.sh --init [tag]
-#   例如：./deploy.sh --init v20260721-01
+#   ./deploy.sh --init
+#   ./deploy.sh --init v20260721-01
 
 COMPOSE_FILE="docker-compose.prod.yml"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="${PROJECT_DIR}/backups"
 INIT_MODE=false
-TAG="latest"
+TAG=""
+
+# 生成默认 tag：vYYYYMMDD-NN，NN 同日自增
+# 失败（docker 未起 / 无历史镜像）时退化为 vYYYYMMDD-01
+gen_default_tag() {
+    local prefix="v$(date '+%Y%m%d')"
+    local last_seq=0
+    local t
+    while IFS= read -r t; do
+        if [[ "$t" =~ ^${prefix}-([0-9]+)$ ]]; then
+            local n=$((10#${BASH_REMATCH[1]}))
+            (( n > last_seq )) && last_seq=$n
+        fi
+    done < <(docker images --format '{{.Tag}}' "skdy-api" 2>/dev/null || true)
+    printf '%s-%02d' "$prefix" "$((last_seq + 1))"
+}
 
 # 解析参数
 for arg in "$@"; do
@@ -27,6 +42,11 @@ for arg in "$@"; do
         TAG="$arg"
     fi
 done
+
+# 未传 tag 则自动生成
+if [ -z "$TAG" ]; then
+    TAG="$(gen_default_tag)"
+fi
 
 cd "${PROJECT_DIR}"
 
@@ -64,6 +84,7 @@ if [ "$INIT_MODE" = true ]; then
     echo "[2/4] 构建镜像 skdy-api:${TAG} ..."
     DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build --no-cache api web
     docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
+    docker tag skdy_prod-api "skdy-api:latest" 2>/dev/null || true
 
     # 3. 执行数据库迁移 + 种子数据
     echo "[3/4] 初始化数据库 ..."
@@ -89,6 +110,7 @@ else
     echo "[2/5] 构建镜像 skdy-api:${TAG} ..."
     DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build --no-cache api web
     docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
+    docker tag skdy_prod-api "skdy-api:latest" 2>/dev/null || true
 
     # 4. 执行数据库迁移
     echo "[3/5] 执行数据库迁移 ..."
