@@ -43,3 +43,16 @@ frontend/example/
 
 # 上传的附件文件（本地开发和 Docker 均通过 volume/目录挂载，不入库）
 backend/uploads/
+
+# 本地大文件 / 镜像 / 压缩包（不入库）
+*.tar
+*.tar.gz
+*.tgz
+*.tar.bz2
+*.tar.xz
+*.zip
+*.7z
+*.rar
+*.iso
+*.dmg
+*.img
