@@ -56,11 +56,11 @@
         v-model="dateRange"
         type="daterange"
         range-separator="至"
-        start-placeholder="开始日期"
-        end-placeholder="结束日期"
+        start-placeholder="开始"
+        end-placeholder="结束"
         value-format="YYYY-MM-DD"
         placeholder="创建时间"
-        class="filter-select"
+        class="filter-date"
         @change="onDateChange"
       />
     </div>
@@ -127,6 +127,9 @@ onMounted(async () => {
 
 .filter-select {
   width: 140px;
+}
+.filter-date {
+  width: 240px;
 }
 .filter-select :deep(.el-input__wrapper) {
   background: var(--color-bg-subtle);
