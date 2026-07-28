@@ -24,6 +24,7 @@
           <el-option label="本周" value="weekly" />
           <el-option label="本月" value="monthly" />
           <el-option label="本季" value="quarterly" />
+          <el-option label="自定义" value="custom" />
         </el-select>
       </div>
     </div>
@@ -192,7 +193,8 @@ const loading = ref(false)
 const report = ref<any>(null)
 const trendDays = ref<any[]>([])
 
-const period = ref<'daily' | 'weekly' | 'monthly' | 'quarterly'>('weekly')
+type Period = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'custom'
+const period = ref<Period>('weekly')
 const dateRange = ref<[string, string] | null>(null)
 const activeSubTab = ref<string>('')
 
@@ -323,13 +325,72 @@ function formatNumber(n: number): string {
   return n.toLocaleString('zh-CN')
 }
 
+/** 把 Date 转成 YYYY-MM-DD（本地日历） */
+function fmtDate(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** 当前客户端"今天" */
+function todayISO(): string {
+  return fmtDate(new Date())
+}
+
+/**
+ * 按周期算出日期范围——和后端 daily/weekly/monthly/quarterly 默认逻辑对齐
+ * weekly = 本周一 ~ 本周日；monthly = 1 号 ~ 今天；quarterly = 季度首月 1 号 ~ 今天
+ */
+function rangeForPeriod(p: Exclude<Period, 'custom'>): [string, string] {
+  const now = new Date()
+  if (p === 'daily') {
+    const t = todayISO()
+    return [t, t]
+  }
+  if (p === 'weekly') {
+    const dow = now.getDay() === 0 ? 7 : now.getDay() // 1..7 (周一..周日)
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow + 1)
+    const sunday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow + 7)
+    return [fmtDate(monday), fmtDate(sunday)]
+  }
+  if (p === 'monthly') {
+    const first = new Date(now.getFullYear(), now.getMonth(), 1)
+    return [fmtDate(first), todayISO()]
+  }
+  // quarterly
+  const qStartMonth = Math.floor(now.getMonth() / 3) * 3
+  const first = new Date(now.getFullYear(), qStartMonth, 1)
+  return [fmtDate(first), todayISO()]
+}
+
+/** 给一个日期范围，反推属于哪个预设周期；都不匹配则 'custom' */
+function matchPeriod(start: string, end: string): Period {
+  for (const p of ['daily', 'weekly', 'monthly', 'quarterly'] as const) {
+    const [s, e] = rangeForPeriod(p)
+    if (s === start && e === end) return p
+  }
+  return 'custom'
+}
+
 function onPeriodChange() {
+  if (period.value === 'custom') return
+  const range = rangeForPeriod(period.value)
+  dateRange.value = range
+  // 让后端用 period 推算默认范围
   loadAll()
 }
 
 function onDateChange(val: [string, string] | null) {
-  if (val) loadAll({ date_from: val[0], date_to: val[1] })
-  else loadAll()
+  if (!val) {
+    // 清空日期时回退到本周
+    period.value = 'weekly'
+    dateRange.value = rangeForPeriod('weekly')
+    loadAll()
+    return
+  }
+  period.value = matchPeriod(val[0], val[1])
+  loadAll({ date_from: val[0], date_to: val[1] })
 }
 
 async function loadAll(extra: Record<string, any> = {}) {
@@ -342,7 +403,8 @@ async function loadAll(extra: Record<string, any> = {}) {
     ])
     report.value = rep
     trendDays.value = trend.days ?? []
-    if (dateRange.value === null) {
+    // 周期触发的查询（未传 date_from/date_to）→ 把后端实际算出的范围回写到 dateRange
+    if (!extra.date_from && rep.date_from && rep.date_to) {
       dateRange.value = [rep.date_from, rep.date_to]
     }
     if (!activeSubTab.value && rep.by_category?.length) {
