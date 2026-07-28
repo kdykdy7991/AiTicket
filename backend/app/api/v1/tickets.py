@@ -327,6 +327,8 @@ async def list_tickets(
     is_callbacked: bool | None = None,
     is_overdue: bool | None = None,
     keyword: str | None = None,
+    date_from: str | None = Query(None, description="创建时间起始 (YYYY-MM-DD)"),
+    date_to: str | None = Query(None, description="创建时间结束 (YYYY-MM-DD)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -390,6 +392,22 @@ async def list_tickets(
             | Ticket.region_name.ilike(f"%{keyword}%")
         )
 
+    # 创建时间区间（inclusive 端点）：date_from 00:00:00 ~ date_to 23:59:59.999999
+    if date_from or date_to:
+        from datetime import datetime, time
+        if date_from:
+            try:
+                d = datetime.strptime(date_from, "%Y-%m-%d")
+                query = query.where(Ticket.created_at >= datetime.combine(d, time.min))
+            except ValueError:
+                raise HTTPException(422, detail="date_from 格式错误，应为 YYYY-MM-DD")
+        if date_to:
+            try:
+                d = datetime.strptime(date_to, "%Y-%m-%d")
+                query = query.where(Ticket.created_at <= datetime.combine(d, time.max))
+            except ValueError:
+                raise HTTPException(422, detail="date_to 格式错误，应为 YYYY-MM-DD")
+
     # Count
     count_q = select(func.count()).select_from(query.subquery())
     total = (await db.execute(count_q)).scalar() or 0
@@ -433,6 +451,8 @@ async def export_tickets(
     is_callbacked: bool | None = None,
     is_overdue: bool | None = None,
     keyword: str | None = None,
+    date_from: str | None = Query(None, description="创建时间起始 (YYYY-MM-DD)"),
+    date_to: str | None = Query(None, description="创建时间结束 (YYYY-MM-DD)"),
     columns: str | None = Query(None, description="逗号分隔的列组：base,customer,category,workflow"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -497,6 +517,22 @@ async def export_tickets(
             | Ticket.description.ilike(f"%{keyword}%")
             | Ticket.region_name.ilike(f"%{keyword}%")
         )
+
+    # 创建时间区间（inclusive 端点）：date_from 00:00:00 ~ date_to 23:59:59.999999
+    if date_from or date_to:
+        from datetime import datetime, time
+        if date_from:
+            try:
+                d = datetime.strptime(date_from, "%Y-%m-%d")
+                query = query.where(Ticket.created_at >= datetime.combine(d, time.min))
+            except ValueError:
+                raise HTTPException(422, detail="date_from 格式错误，应为 YYYY-MM-DD")
+        if date_to:
+            try:
+                d = datetime.strptime(date_to, "%Y-%m-%d")
+                query = query.where(Ticket.created_at <= datetime.combine(d, time.max))
+            except ValueError:
+                raise HTTPException(422, detail="date_to 格式错误，应为 YYYY-MM-DD")
 
     query = query.order_by(Ticket.created_at.desc())
     result = await db.execute(query)

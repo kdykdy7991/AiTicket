@@ -28,6 +28,17 @@
       >
         <el-option v-for="a in agents" :key="a.id" :label="`${a.firstname}${a.lastname}`" :value="a.id" />
       </el-select>
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        range-separator="至"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        value-format="YYYY-MM-DD"
+        placeholder="创建时间"
+        class="filter-select"
+        @change="onDateChange"
+      />
       <el-select
         v-model="local.is_callbacked"
         placeholder="是否回访"
@@ -65,13 +76,27 @@ const props = defineProps<{ modelValue: TicketFilters }>()
 const emit = defineEmits<{ 'update:modelValue': [value: TicketFilters] }>()
 
 const local = reactive<TicketFilters>({})
+const dateRange = ref<[string, string] | null>(null)
 const priorities = ref<TicketPriority[]>([])
 const groups = ref<Group[]>([])
 const agents = ref<User[]>([])
 
+/** 日期区间变化：拆成 date_from / date_to 写回 local */
+function onDateChange(val: [string, string] | null) {
+  local.date_from = val?.[0] || null
+  local.date_to = val?.[1] || null
+  emit('update:modelValue', local)
+}
+
 // 外部 modelValue 变化时同步到 local（如点快捷标签重置筛选）
 watch(() => props.modelValue, (v) => {
   Object.assign(local, v)
+  // 同步日期范围
+  if (local.date_from && local.date_to) {
+    dateRange.value = [local.date_from, local.date_to]
+  } else {
+    dateRange.value = null
+  }
 }, { immediate: true, deep: true })
 
 onMounted(async () => {

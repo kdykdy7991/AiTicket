@@ -225,6 +225,8 @@ function buildListParams(filters?: TicketFilters, page = 1, pageSize = 20) {
   if (f.is_duplicate !== undefined) params.is_duplicate = f.is_duplicate
   if (f.is_callbacked !== undefined) params.is_callbacked = f.is_callbacked
   if ((f as any).is_overdue) params.is_overdue = true
+  if (f.date_from) params.date_from = f.date_from
+  if (f.date_to) params.date_to = f.date_to
   return params
 }
 
