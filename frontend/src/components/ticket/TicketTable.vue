@@ -109,14 +109,17 @@ function isTerminal(row: Ticket): boolean {
 /**
  * "处理人"列按状态选人：
  * - pending：dispatcher（对接人正在负责分派）
+ * - returned：owner（state machine 已把 owner_id 设成 creator_id，
+ *   即"退回后由创建人处理"，不显示是谁退回的）
  * - archived：archived_by_* 谁归档的
  * - cancelled：cancelled_by_* 谁撤销的
- * - 其他：owner（state machine 已把 owner_id 设到正确的人）
+ * - open / on_hold / resolved：owner（handler）
  */
 function resolveHandler(row: Ticket): any {
   const r = row as any
   const sk = r.state_key
   if (sk === 'pending') return r.dispatcher
+  if (sk === 'returned') return r.owner
   if (sk === 'archived' && r.archived_by_id) {
     return { id: r.archived_by_id, firstname: r.archived_by_name || '未知', lastname: '' }
   }
