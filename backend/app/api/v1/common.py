@@ -1,7 +1,7 @@
 """Users, Groups, SkillGroups, Categories, Regions, SLA, Stats routers."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -770,7 +770,7 @@ async def report_stats(
     )).scalar() or 0
     sla_breach_rate = round(breached / new_count, 4) if new_count else 0.0
 
-    # 6. 故障分类分布
+    # 6. 故障分类分布（一级分类）
     cat_alias = TicketCategory.__table__.alias("cat")
     parent_alias = TicketCategory.__table__.alias("parent")
     cat_q = (
@@ -784,6 +784,176 @@ async def report_stats(
     cat_rows = (await db.execute(cat_q)).all()
     by_category = [{"name": r[0], "count": r[1]} for r in cat_rows]
 
+    # 7. 待回访工单：已处理、需要回访、尚未回访
+    pending_callback = (await db.execute(
+        select(func.count()).select_from(Ticket).where(
+            *base,
+            Ticket.state == "resolved",
+            Ticket.callback_required == True,
+            Ticket.is_callbacked == False,
+        )
+    )).scalar() or 0
+
+    # 8. 回访满意度分布
+    sat_rows = (await db.execute(
+        select(Ticket.satisfaction, func.count(Ticket.id))
+        .where(*base, Ticket.is_callbacked == True, Ticket.satisfaction.is_not(None))
+        .group_by(Ticket.satisfaction)
+    )).all()
+    satisfaction_map = {r[0]: r[1] for r in sat_rows}
+    satisfaction_breakdown = {
+        "satisfied": satisfaction_map.get("satisfied", 0),
+        "average": satisfaction_map.get("average", 0),
+        "dissatisfied": satisfaction_map.get("dissatisfied", 0),
+    }
+
+    # 9. 二级分类分布（按一级分类名分组），用于点击一级分类弹出二级环形图
+    sub_q = (
+        select(parent_alias.c.name.label("parent_name"), cat_alias.c.name, func.count(Ticket.id))
+        .select_from(Ticket)
+        .join(cat_alias, cat_alias.c.id == Ticket.category_id)
+        .join(parent_alias, parent_alias.c.id == cat_alias.c.parent_id)
+        .where(*base)
+        .group_by(parent_alias.c.name, cat_alias.c.name)
+        .order_by(parent_alias.c.name, func.count(Ticket.id).desc())
+    )
+    sub_rows = (await db.execute(sub_q)).all()
+    by_subcategory: dict[str, list[dict]] = {}
+    for parent_name, child_name, count in sub_rows:
+        by_subcategory.setdefault(parent_name, []).append({"name": child_name, "count": count})
+
+    # 10. 上一周期对比（用于 KPI 卡显示 "较上周 ±X%"）
+    span_days = (end.date() - start.date()).days + 1
+    prev_end_date = start.date() - timedelta(days=1)
+    prev_start_date = prev_end_date - timedelta(days=span_days - 1)
+    prev_start = datetime.combine(prev_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    prev_end = datetime.combine(prev_end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+    prev_base = [Ticket.created_at >= prev_start, Ticket.created_at <= prev_end]
+    if skill_group_id:
+        prev_base.append(Ticket.skill_group_id == skill_group_id)
+
+    prev_new = (await db.execute(
+        select(func.count()).select_from(Ticket).where(*prev_base)
+    )).scalar() or 0
+    prev_in_progress = (await db.execute(
+        select(func.count()).select_from(Ticket).where(*prev_base, Ticket.state == "open")
+    )).scalar() or 0
+    prev_closed = (await db.execute(
+        select(func.count()).select_from(Ticket).where(
+            *prev_base, Ticket.closed_at.is_not(None),
+            Ticket.closed_at >= prev_start, Ticket.closed_at <= prev_end,
+        )
+    )).scalar() or 0
+    prev_pending_callback = (await db.execute(
+        select(func.count()).select_from(Ticket).where(
+            *prev_base, Ticket.state == "resolved",
+            Ticket.callback_required == True, Ticket.is_callbacked == False,
+        )
+    )).scalar() or 0
+    prev_breached = (await db.execute(
+        select(func.count()).select_from(Ticket).where(*prev_base, Ticket.sla_solution_breached == True)
+    )).scalar() or 0
+    prev_sla_rate = round(prev_breached / prev_new, 4) if prev_new else 0.0
+
+    prev_sat_rows = (await db.execute(
+        select(Ticket.satisfaction, func.count(Ticket.id))
+        .where(*prev_base, Ticket.is_callbacked == True, Ticket.satisfaction.is_not(None))
+        .group_by(Ticket.satisfaction)
+    )).all()
+    prev_sat_map = {r[0]: r[1] for r in prev_sat_rows}
+    prev_sat_total = sum(prev_sat_map.values())
+    prev_sat_satisfied = prev_sat_map.get("satisfied", 0)
+    prev_satisfaction_rate = round(prev_sat_satisfied / prev_sat_total, 4) if prev_sat_total else 0.0
+
+    prev_metrics = {
+        "new_count": prev_new,
+        "in_progress_count": prev_in_progress,
+        "closed_count": prev_closed,
+        "pending_callback_count": prev_pending_callback,
+        "sla_breach_rate": prev_sla_rate,
+        "satisfaction_rate": prev_satisfaction_rate,
+    }
+
+    # 11. 每日 SLA 超时率（SLA 卡右侧迷你趋势）
+    sla_daily_rows = (await db.execute(
+        select(
+            func.date(Ticket.created_at).label("d"),
+            func.count(Ticket.id).label("total"),
+            func.sum(case((Ticket.sla_solution_breached == True, 1), else_=0)).label("breached"),
+        )
+        .where(*base)
+        .group_by("d").order_by("d")
+    )).all()
+    sla_daily_map = {str(r[0]): round((r[2] or 0) / r[1], 4) if r[1] else 0.0 for r in sla_daily_rows}
+
+    # 12. 每日回访满意度（满意度卡右侧迷你趋势：当日回访的满意度均值=satisfied/total）
+    sat_daily_rows = (await db.execute(
+        select(
+            func.date(Ticket.solved_at).label("d"),
+            func.count(Ticket.id).label("total"),
+            func.sum(case((Ticket.satisfaction == "satisfied", 1), else_=0)).label("satisfied"),
+        )
+        .where(*base, Ticket.is_callbacked == True, Ticket.satisfaction.is_not(None))
+        .group_by("d").order_by("d")
+    )).all()
+    sat_daily_map = {str(r[0]): round(r[2] / r[1], 4) if (r[1] and r[1] > 0) else 0.0 for r in sat_daily_rows}
+
+    # 13. 一级分类每日趋势（分类表右侧迷你折线）
+    cat_trend_rows = (await db.execute(
+        select(
+            func.date(Ticket.created_at).label("d"),
+            parent_alias.c.name,
+            func.count(Ticket.id),
+        )
+        .select_from(Ticket)
+        .join(cat_alias, cat_alias.c.id == Ticket.category_id)
+        .join(parent_alias, parent_alias.c.id == cat_alias.c.parent_id)
+        .where(*base)
+        .group_by("d", parent_alias.c.name)
+        .order_by("d")
+    )).all()
+    category_trend: dict[str, dict[str, int]] = {}
+    for d, name, count in cat_trend_rows:
+        category_trend.setdefault(name, {})[str(d)] = count
+
+    # 14. 把日序列补齐成 0（前端按日期范围渲染）
+    def fill_daily(mapping: dict[str, float]) -> list[dict]:
+        out = []
+        cur = start.date()
+        end_d = end.date()
+        while cur <= end_d:
+            key = cur.isoformat()
+            out.append({"date": key, "value": mapping.get(key, 0.0)})
+            cur += timedelta(days=1)
+        return out
+
+    sla_daily = fill_daily(sla_daily_map)
+    satisfaction_daily = fill_daily(sat_daily_map)
+
+    # 一级分类趋势也补齐
+    cat_total = sum(c["count"] for c in by_category) or 1
+    by_category_with_pct = [
+        {
+            "name": c["name"],
+            "count": c["count"],
+            "percentage": round(c["count"] / cat_total * 100, 1),
+            "trend": fill_daily({k: float(v) for k, v in category_trend.get(c["name"], {}).items()}),
+        }
+        for c in by_category
+    ]
+    by_category_with_pct.sort(key=lambda x: x["count"], reverse=True)
+
+    # 满意度总览率（满足 / 总）
+    satisfaction_total = (
+        satisfaction_breakdown["satisfied"]
+        + satisfaction_breakdown["average"]
+        + satisfaction_breakdown["dissatisfied"]
+    )
+    satisfaction_rate = (
+        round(satisfaction_breakdown["satisfied"] / satisfaction_total, 4)
+        if satisfaction_total else 0.0
+    )
+
     return {
         "data": {
             "period": period,
@@ -793,10 +963,17 @@ async def report_stats(
                 "new_count": new_count,
                 "in_progress_count": in_progress,
                 "closed_count": closed_count,
+                "pending_callback_count": pending_callback,
+                "satisfaction_breakdown": satisfaction_breakdown,
+                "satisfaction_rate": satisfaction_rate,
                 "avg_resolution_per_group": avg_resolution_per_group,
                 "sla_breach_rate": sla_breach_rate,
             },
-            "by_category": by_category,
+            "prev_metrics": prev_metrics,
+            "sla_daily": sla_daily,
+            "satisfaction_daily": satisfaction_daily,
+            "by_category": by_category_with_pct,
+            "by_subcategory": by_subcategory,
         }
     }
 
@@ -840,13 +1017,31 @@ async def trend_stats(
     new_map = {str(r[0]): r[1] for r in new_rows}
     closed_map = {str(r[0]): r[1] for r in closed_rows}
 
-    # 补全每一天（即使没数据也填 0）
+    # 按天分组：当日超时工单数（sla_solution_breached == True 且 created_at 落在当天）
+    overdue_rows = (await db.execute(
+        select(func.date(Ticket.created_at).label("d"), func.count(Ticket.id))
+        .where(*base, Ticket.sla_solution_breached == True)
+        .group_by("d").order_by("d")
+    )).all()
+    overdue_map = {str(r[0]): r[1] for r in overdue_rows}
+
+    # 补全每一天（即使没数据也填 0）；total = 累计未关闭工单数
     days = []
     cur = start.date()
     end_d = end.date()
+    running_total = 0
     while cur <= end_d:
         key = cur.isoformat()
-        days.append({"date": key, "new": new_map.get(key, 0), "closed": closed_map.get(key, 0)})
+        d_new = new_map.get(key, 0)
+        d_closed = closed_map.get(key, 0)
+        running_total += d_new - d_closed
+        days.append({
+            "date": key,
+            "new": d_new,
+            "closed": d_closed,
+            "overdue": overdue_map.get(key, 0),
+            "total": max(running_total, 0),
+        })
         cur += timedelta(days=1)
 
     return {"data": {"date_from": date_from, "date_to": date_to, "days": days}}
