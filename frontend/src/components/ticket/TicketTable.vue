@@ -18,7 +18,6 @@
     <el-table-column label="标签" min-width="200">
       <template #default="{ row }">
         <div class="title-cell">
-          <CustomerTypeChip v-if="row.customer_type" :type="row.customer_type" class="title-chip" />
           <span v-if="row.is_duplicate" class="dup-badge" title="重投工单">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="17,1 21,5 17,9"/>
@@ -33,7 +32,7 @@
             </svg>
           </span>
           <span v-if="row.urged_at" class="urge-badge" title="已催办">催办</span>
-          <span v-if="row.has_addition" class="addition-badge" title="有追加信息">追加</span>
+          <span v-if="row.has_addition" class="addition-badge" title="有补充信息">补充</span>
           <span v-if="row.has_returned" class="returned-badge" title="曾退回">退回</span>
         </div>
       </template>
@@ -48,9 +47,18 @@
         <PriorityIcon :priority="row.priority" :show-label="true" />
       </template>
     </el-table-column>
-    <el-table-column label="负责人" width="130">
+    <el-table-column label="处理人" width="130">
       <template #default="{ row }">
-        <UserAvatar :user="row.owner" :size="24" :show-name="true" />
+        <!--
+          按状态显示"当前节点的处理人员"：
+          - pending：还没分派，对接人就是当前处理人（负责分派）
+          - 其他状态：直接显示 owner（handler / creator / 最后处理人）
+        -->
+        <UserAvatar
+          :user="row.state_key === 'pending' ? row.dispatcher : row.owner"
+          :size="24"
+          :show-name="true"
+        />
       </template>
     </el-table-column>
     <el-table-column label="SLA" width="110" align="center">
@@ -73,7 +81,6 @@ import StateTag from '@/components/common/StateTag.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import RelativeTime from '@/components/common/RelativeTime.vue'
-import CustomerTypeChip from '@/components/common/CustomerTypeChip.vue'
 import type { Ticket } from '@/types'
 
 const props = withDefaults(defineProps<{
