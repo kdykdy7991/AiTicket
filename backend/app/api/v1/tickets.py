@@ -67,6 +67,27 @@ def _snapshot_people(ticket: Ticket, body=None) -> dict:
     }
 
 
+def _enforce_business_constraints(ticket: Ticket, target_state: str) -> str:
+    """业务约束：已处理工单不允许直接退回到 on_hold（暂停位）。
+
+    退回 resolved 工单的目标若为 on_hold，自动改写为 open。
+    原因：on_hold 是暂停位，没人主动 unpause 就一直卡着；客服本意是
+    "打回让处理人重做"，open 才是直接去处。
+
+    改写对权限无影响（resolved→open 和 resolved→on_hold 的权限规则一致，
+    都是 creator/agent 可操作）。
+    """
+    if ticket.state == "resolved" and target_state == "on_hold":
+        import logging
+        ticket_id = getattr(ticket, "id", None)
+        logging.getLogger(__name__).warning(
+            f"[resolved→on_hold rewrite] ticket_id={ticket_id} "
+            f"requested=on_hold → effective=open"
+        )
+        return "open"
+    return target_state
+
+
 def _ticket_to_brief(t: Ticket) -> TicketBrief:
     return TicketBrief(
         id=t.id, number=t.number, state=t.state,
@@ -805,6 +826,11 @@ async def update_ticket(
 
     # State transition
     if body.state is not None and body.state != ticket.state:
+        # 业务约束：resolved → on_hold 自动改写为 resolved → open
+        # （前端按钮走的是 resolveReturnTarget 算出的目标，此处是兜底，
+        #  防非前端路径误发"把已处理工单退回暂缓"）
+        body = body.model_copy(update={"state": _enforce_business_constraints(ticket, body.state)})
+
         validate_transition(ticket.state, body.state)
 
         # 权限校验：不同操作限定不同角色
@@ -944,10 +970,11 @@ async def batch_update_tickets(
         if body.updates.dispatcher_id is not None:
             ticket.dispatcher_id = body.updates.dispatcher_id
         if body.updates.state is not None and body.updates.state != ticket.state:
+            # 业务约束：resolved → on_hold 改写为 resolved → open（与 update_ticket 一致）
+            to_state = _enforce_business_constraints(ticket, body.updates.state)
             try:
-                validate_transition(ticket.state, body.updates.state)
+                validate_transition(ticket.state, to_state)
                 from_state = ticket.state
-                to_state = body.updates.state
                 log = TicketStateLog(
                     ticket_id=ticket.id, from_state=from_state, to_state=to_state,
                     operator_id=user.id, reason=body.updates.reason,

@@ -43,7 +43,7 @@
                 v-model="supplement"
                 type="textarea"
                 :rows="3"
-                placeholder="补充说明（可选），将作为追加记录保存"
+                placeholder="补充说明（可选），将作为补充记录保存"
                 maxlength="2000"
                 show-word-limit
               />
@@ -477,20 +477,27 @@ function openReturnDialog() {
 }
 
 // 根据当前状态确定退回目标状态
+// 约束：resolved → on_hold 不允许（on_hold 是暂停位，回退后无人 unpause
+// 就会卡住）。如果上一步是 on_hold，跳过它，退回到进入 on_hold 之前的状态。
+// 后端 _enforce_business_constraints 也会兜底做相同改写，防非前端路径绕过。
 function resolveReturnTarget(): string {
   const state = currentStateKey.value
   if (state === 'pending') return 'returned'
   if (state === 'open') return 'pending'
   if (state === 'on_hold') return 'open'
   if (state === 'resolved') {
-    // 从流转时间线找进入 resolved 之前的状态
-    const logs = (ticket.value as any)?.state_logs || []
+    const logs: any[] = (ticket.value as any)?.state_logs || []
+    // 倒序找最近一次进入 resolved 的 log
     const resolvedLog = [...logs].reverse().find((l: any) => l.to_state_key === 'resolved')
-    if (resolvedLog?.from_state_key) {
-      return resolvedLog.from_state_key
+    let target = resolvedLog?.from_state_key
+    // 如果上一步是 on_hold，跳过它，找"进入 on_hold 之前"的状态
+    if (target === 'on_hold' && resolvedLog) {
+      const onHoldLog = [...logs].reverse().find(
+        (l: any) => l.to_state_key === 'on_hold' && l.created_at < resolvedLog.created_at
+      )
+      target = onHoldLog?.from_state_key
     }
-    // 默认回退到处理中
-    return 'open'
+    return target || 'open'
   }
   return state
 }
