@@ -690,7 +690,7 @@ async def dashboard_stats(
 
 @stats_router.get("/stats/report")
 async def report_stats(
-    period: str = Query("daily", regex="^(daily|weekly|monthly|quarterly)$"),
+    period: str = Query("daily", pattern="^(daily|weekly|monthly|quarterly)$"),
     date_from: str | None = None,
     date_to: str | None = None,
     skill_group_id: int | None = None,
