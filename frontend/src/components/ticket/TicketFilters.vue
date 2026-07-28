@@ -52,6 +52,7 @@
           </svg>
         </template>
       </el-input>
+      <div class="filter-spacer" />
       <el-date-picker
         v-model="dateRange"
         type="daterange"
@@ -129,7 +130,11 @@ onMounted(async () => {
   width: 140px;
 }
 .filter-date {
-  width: 240px;
+  width: 200px;
+}
+.filter-spacer {
+  flex: 1;
+  min-width: 0;
 }
 .filter-select :deep(.el-input__wrapper) {
   background: var(--color-bg-subtle);
@@ -141,7 +146,7 @@ onMounted(async () => {
 }
 
 .filter-search {
-  width: 180px;
+  width: 140px;
 }
 .filter-search :deep(.el-input__wrapper) {
   background: var(--color-bg-subtle);
