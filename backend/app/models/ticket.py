@@ -161,9 +161,17 @@ class TicketStateLog(Base):
     reason: Mapped[str | None] = mapped_column(Text)
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
+    # 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人。
+    # 旧数据回填时是 best-effort（tickets 当前值），新建的 state_log 由 _snapshot_people() 正确填充。
+    creator_id_snapshot: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    dispatcher_id_snapshot: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    owner_id_snapshot: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
 
     ticket = relationship("Ticket", back_populates="state_logs")
     operator = relationship("User", lazy="selectin")
+    creator_snapshot = relationship("User", foreign_keys=[creator_id_snapshot], lazy="selectin")
+    dispatcher_snapshot = relationship("User", foreign_keys=[dispatcher_id_snapshot], lazy="selectin")
+    owner_snapshot = relationship("User", foreign_keys=[owner_id_snapshot], lazy="selectin")
 
 
 class Reminder(Base):
