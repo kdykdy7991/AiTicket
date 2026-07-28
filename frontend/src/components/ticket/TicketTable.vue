@@ -52,10 +52,12 @@
         <!--
           按状态显示"当前节点的处理人员"：
           - pending：还没分派，对接人就是当前处理人（负责分派）
-          - 其他状态：直接显示 owner（handler / creator / 最后处理人）
+          - archived：谁执行了 archived 动作（archived_by_*）
+          - cancelled：谁执行了 cancelled 动作（cancelled_by_*）
+          - 其他：直接显示 owner（handler / creator / 最后处理人）
         -->
         <UserAvatar
-          :user="row.state_key === 'pending' ? row.dispatcher : row.owner"
+          :user="resolveHandler(row)"
           :size="24"
           :show-name="true"
         />
@@ -104,6 +106,25 @@ function isTerminal(row: Ticket): boolean {
   return key === 'archived' || key === 'cancelled'
 }
 
+/**
+ * "处理人"列按状态选人：
+ * - pending：dispatcher（对接人正在负责分派）
+ * - archived：archived_by_* 谁归档的
+ * - cancelled：cancelled_by_* 谁撤销的
+ * - 其他：owner（state machine 已把 owner_id 设到正确的人）
+ */
+function resolveHandler(row: Ticket): any {
+  const r = row as any
+  const sk = r.state_key
+  if (sk === 'pending') return r.dispatcher
+  if (sk === 'archived' && r.archived_by_id) {
+    return { id: r.archived_by_id, firstname: r.archived_by_name || '未知', lastname: '' }
+  }
+  if (sk === 'cancelled' && r.cancelled_by_id) {
+    return { id: r.cancelled_by_id, firstname: r.cancelled_by_name || '未知', lastname: '' }
+  }
+  return r.owner
+}
 function slaState(row: Ticket): 'danger' | 'warning' | 'normal' {
   // 终态工单不标红（已闭环，超时仅作历史记录）
   if (isTerminal(row)) return 'normal'

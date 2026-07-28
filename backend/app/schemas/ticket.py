@@ -85,6 +85,12 @@ class TicketBrief(BaseModel):
     urged_by_name: str | None = None
     has_addition: bool = False
     has_returned: bool = False
+    # 终态操作人：哪个用户执行了 resolved→archived 或 *→cancelled 流转
+    # 从 state_logs 查询得到，不落库到 tickets 表（避免与 state_log 漂移）
+    archived_by_id: int | None = None
+    archived_by_name: str | None = None
+    cancelled_by_id: int | None = None
+    cancelled_by_name: str | None = None
     created_at: datetime
     updated_at: datetime
 

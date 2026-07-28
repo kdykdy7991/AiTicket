@@ -88,7 +88,9 @@ def _enforce_business_constraints(ticket: Ticket, target_state: str) -> str:
     return target_state
 
 
-def _ticket_to_brief(t: Ticket) -> TicketBrief:
+def _ticket_to_brief(t: Ticket, terminal_ops: dict | None = None) -> TicketBrief:
+    archived_by = (terminal_ops or {}).get((t.id, "archived"))
+    cancelled_by = (terminal_ops or {}).get((t.id, "cancelled"))
     return TicketBrief(
         id=t.id, number=t.number, state=t.state,
         priority=t.priority, channel=t.channel, customer_type=t.customer_type,
@@ -115,12 +117,16 @@ def _ticket_to_brief(t: Ticket) -> TicketBrief:
         urged_by_name=t.urged_by.name if t.urged_by else None,
         has_addition=t.has_addition,
         has_returned=t.has_returned,
+        archived_by_id=archived_by[0] if archived_by else None,
+        archived_by_name=archived_by[1] if archived_by else None,
+        cancelled_by_id=cancelled_by[0] if cancelled_by else None,
+        cancelled_by_name=cancelled_by[1] if cancelled_by else None,
         created_at=t.created_at, updated_at=t.updated_at,
     )
 
 
-def _ticket_to_detail(t: Ticket) -> TicketDetail:
-    brief = _ticket_to_brief(t)
+def _ticket_to_detail(t: Ticket, terminal_ops: dict | None = None) -> TicketDetail:
+    brief = _ticket_to_brief(t, terminal_ops)
     return TicketDetail(
         **brief.model_dump(),
         description=t.description,
@@ -192,6 +198,45 @@ async def _is_dispatcher_anywhere(db: AsyncSession, user_id: int) -> bool:
         )
     )
     return (result.scalar() or 0) > 0
+
+
+async def _get_terminal_operators(
+    db: AsyncSession, ticket_ids: list[int]
+) -> dict[tuple[int, str], tuple[int, str]]:
+    """批量取一组工单"执行 archived / cancelled 流转的人"。
+
+    从 state_logs 取最近一次 to_state IN ('archived','cancelled') 的 operator。
+    一次性 IN 查询，避免每张工单单独查（不引入 N+1）。
+    不落库到 tickets 表——state_log 才是真实来源，避免漂移。
+
+    返回 {(ticket_id, to_state): (operator_id, operator_name)}
+    """
+    if not ticket_ids:
+        return {}
+    rows = await db.execute(
+        select(
+            TicketStateLog.ticket_id,
+            TicketStateLog.to_state,
+            TicketStateLog.operator_id,
+            User.name,
+        )
+        .join(User, User.id == TicketStateLog.operator_id)
+        .where(
+            TicketStateLog.ticket_id.in_(ticket_ids),
+            TicketStateLog.to_state.in_(["archived", "cancelled"]),
+        )
+        .order_by(
+            TicketStateLog.ticket_id,
+            TicketStateLog.to_state,
+            TicketStateLog.created_at.desc(),
+        )
+    )
+    result: dict[tuple[int, str], tuple[int, str]] = {}
+    for tid, to_state, op_id, op_name in rows.all():
+        key = (tid, to_state)
+        if key not in result:  # ORDER BY desc 后第一行就是最近的
+            result[key] = (op_id, op_name)
+    return result
 
 
 async def check_transition_permission(db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None):
@@ -363,8 +408,10 @@ async def list_tickets(
     result = await db.execute(query)
     tickets = result.scalars().all()
 
+    terminal_ops = await _get_terminal_operators(db, [t.id for t in tickets])
+
     return {
-        "data": [_ticket_to_brief(t).model_dump() for t in tickets],
+        "data": [_ticket_to_brief(t, terminal_ops).model_dump() for t in tickets],
         "pagination": {
             "page": page, "page_size": page_size,
             "total": total, "total_pages": (total + page_size - 1) // page_size,
@@ -687,7 +734,8 @@ async def get_ticket(
     ticket = result.scalar_one_or_none()
     if not ticket:
         raise NotFoundError("工单", ticket_id)
-    return _ticket_to_detail(ticket)
+    terminal_ops = await _get_terminal_operators(db, [ticket_id])
+    return _ticket_to_detail(ticket, terminal_ops)
 
 
 @router.post("/tickets", response_model=TicketCreateResponse, status_code=status.HTTP_201_CREATED)

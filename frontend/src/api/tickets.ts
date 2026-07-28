@@ -202,6 +202,11 @@ function adaptTicket(t: any): any {
     // 催办
     urged_at: t.urged_at || null,
     urged_by: t.urged_by_id ? { id: t.urged_by_id, firstname: t.urged_by_name || '未知', lastname: '' } : null,
+    // 终态操作人：执行了 archived / cancelled 流转的人
+    archived_by_id: t.archived_by_id ?? null,
+    archived_by_name: t.archived_by_name ?? null,
+    cancelled_by_id: t.cancelled_by_id ?? null,
+    cancelled_by_name: t.cancelled_by_name ?? null,
   }
 }
 

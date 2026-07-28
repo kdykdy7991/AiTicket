@@ -173,6 +173,11 @@ export interface Ticket {
   // 退回历史
   has_returned: boolean
   is_draft: boolean
+  // 终态操作人：执行了 resolved→archived 或 *→cancelled 流转的人
+  archived_by_id?: number | null
+  archived_by_name?: string | null
+  cancelled_by_id?: number | null
+  cancelled_by_name?: string | null
 }
 
 export interface ArticleAttachment {
