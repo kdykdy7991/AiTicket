@@ -141,10 +141,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
-import { useAuthStore } from '@/stores/auth'
 import { metaApi } from '@/api/overviews'
 import { ticketApi, STATE_ID_TO_KEY, PRIORITY_ID_TO_KEY } from '@/api/tickets'
 import TicketFilters from '@/components/ticket/TicketFilters.vue'
@@ -154,49 +153,30 @@ import type { TicketFilters as Filters, Ticket, TicketState, TicketPriority, Gro
 
 const router = useRouter()
 const ticketStore = useTicketStore()
-const authStore = useAuthStore()
 const currentPage = ref(1)
 
-// 快捷分类标签
+// 快捷分类标签：全部 + 7 个状态（id 与后端 STATE_ID_TO_KEY 1..7 对应）
 const activeTab = ref('all')
 const quickTabs = computed(() => [
   { key: 'all', label: '全部' },
-  { key: 'mine', label: '我的待办' },
-  { key: 'pending', label: '待受理' },
-  { key: 'archived', label: '已归档' },
-  { key: 'on_hold', label: '暂缓处理' },
-  { key: 'escalated', label: '升级/重投' },
-  { key: 'overdue', label: '已超时' },
-])
+  { key: 'pending', label: '待受理', stateId: 1 },
+  { key: 'open', label: '处理中', stateId: 2 },
+  { key: 'resolved', label: '已处理', stateId: 3 },
+  { key: 'on_hold', label: '暂缓处理', stateId: 4 },
+  { key: 'archived', label: '已归档', stateId: 5 },
+  { key: 'returned', label: '已退回', stateId: 6 },
+  { key: 'cancelled', label: '已撤销', stateId: 7 },
+] as Array<{ key: string; label: string; stateId?: number; count?: number }>)
 
 function onQuickTab(key: string) {
   activeTab.value = key
   currentPage.value = 1
-  // 根据标签设置筛选条件
+  const tab = quickTabs.value.find(t => t.key === key)
   const filters: any = {}
-  const me = authStore.user as any
-  switch (key) {
-    case 'all':
-      break
-    case 'mine':
-      filters.owner_id = me?.id
-      break
-    case 'pending':
-      filters.state_id = 1  // 待受理
-      break
-    case 'archived':
-      filters.state_id = 5  // 已归档
-      break
-    case 'on_hold':
-      filters.state_id = 4  // 暂缓处理
-      break
-    case 'escalated':
-      filters.is_duplicate = true
-      break
-    case 'overdue':
-      filters.is_overdue = true
-      break
+  if (tab?.stateId) {
+    filters.state_id = tab.stateId
   }
+  // "全部" 不设 state_id；setFilters 替换语义，跟原行为一致
   ticketStore.setFilters(filters)
   ticketStore.fetchTickets(1)
 }

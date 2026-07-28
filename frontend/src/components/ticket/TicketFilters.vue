@@ -2,21 +2,6 @@
   <div class="filters-bar">
     <div class="filter-items">
       <el-select
-        v-model="local.state_id"
-        placeholder="状态"
-        clearable
-        @change="emit('update:modelValue', local)"
-        class="filter-select"
-      >
-        <!--
-          7 个状态硬编码，跟后端 STATE_ID_TO_KEY (1..7) 对应：
-          1=pending 待受理 / 2=open 处理中 / 3=resolved 已处理 /
-          4=on_hold 暂缓处理 / 5=archived 已归档 / 6=returned 已退回 /
-          7=cancelled 已撤销
-        -->
-        <el-option v-for="s in STATE_FILTER_OPTIONS" :key="s.id" :label="s.name" :value="s.id" />
-      </el-select>
-      <el-select
         v-model="local.priority_id"
         placeholder="优先级"
         clearable
@@ -83,17 +68,6 @@ const local = reactive<TicketFilters>({})
 const priorities = ref<TicketPriority[]>([])
 const groups = ref<Group[]>([])
 const agents = ref<User[]>([])
-
-/** 工单状态过滤选项（硬编码 7 个，id 与后端 STATE_ID_TO_KEY 对应） */
-const STATE_FILTER_OPTIONS: { id: number; name: string }[] = [
-  { id: 1, name: '待受理' },
-  { id: 2, name: '处理中' },
-  { id: 3, name: '已处理' },
-  { id: 4, name: '暂缓处理' },
-  { id: 5, name: '已归档' },
-  { id: 6, name: '已退回' },
-  { id: 7, name: '已撤销' },
-]
 
 // 外部 modelValue 变化时同步到 local（如点快捷标签重置筛选）
 watch(() => props.modelValue, (v) => {
