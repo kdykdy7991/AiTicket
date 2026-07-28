@@ -61,9 +61,15 @@
               <div class="archive-block-label">归档信息</div>
               <div v-if="ticket?.archive_notes" class="archive-block-body">{{ ticket.archive_notes }}</div>
               <div class="archive-block-meta">
-                <span>是否回访：{{ ticket?.is_callbacked ? '已回访' : '未回访' }}</span>
-                <span v-if="ticket?.is_callbacked && ticket?.satisfaction">
-                  满意度：{{ satisfactionLabel(ticket.satisfaction) }}
+                <span v-if="ticket?.is_callbacked" class="badge badge-callback">✓ 已回访</span>
+                <span v-else class="badge badge-no-callback">未回访</span>
+                <span
+                  v-if="ticket?.is_callbacked && ticket?.satisfaction"
+                  class="badge"
+                  :class="`badge-sat-${ticket.satisfaction}`"
+                >
+                  <span class="badge-emoji">{{ satisfactionEmoji(ticket.satisfaction) }}</span>
+                  {{ satisfactionLabel(ticket.satisfaction) }}
                 </span>
               </div>
             </div>
@@ -201,6 +207,16 @@ function satisfactionLabel(v: string): string {
     dissatisfied: '不满意',
   }
   return map[v] || v
+}
+
+/** 后端 enum → emoji（归档信息徽标用） */
+function satisfactionEmoji(v: string): string {
+  const map: Record<string, string> = {
+    satisfied: '⭐',
+    average: '😐',
+    dissatisfied: '⚠️',
+  }
+  return map[v] || ''
 }
 
 // 某状态下挂载的处理说明：优先按 state_log id 匹配，旧数据降级为按状态 key + 时间范围匹配
@@ -511,9 +527,47 @@ function repliesForState(log: TicketStateLog): Article[] {
 }
 
 .archive-block-meta {
-  margin-top: 6px;
-  font-size: 11.5px;
-  color: var(--color-text-tertiary);
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+
+/* 归档信息徽标（回访 / 满意度） */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.badge-callback {
+  background: #ECFDF5;
+  color: #047857;
+}
+.badge-no-callback {
+  background: #F3F4F6;
+  color: #6B7280;
+}
+.badge-sat-satisfied {
+  background: #FEF3C7;
+  color: #92400E;
+}
+.badge-sat-average {
+  background: #F3F4F6;
+  color: #374151;
+}
+.badge-sat-dissatisfied {
+  background: #FEE2E2;
+  color: #B91C1C;
+}
+.badge-emoji {
+  font-size: 13px;
+  line-height: 1;
 }
 
 .attachment-list {
