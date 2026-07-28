@@ -28,17 +28,6 @@
       >
         <el-option v-for="a in agents" :key="a.id" :label="`${a.firstname}${a.lastname}`" :value="a.id" />
       </el-select>
-      <el-date-picker
-        v-model="dateRange"
-        type="daterange"
-        range-separator="至"
-        start-placeholder="开始日期"
-        end-placeholder="结束日期"
-        value-format="YYYY-MM-DD"
-        placeholder="创建时间"
-        class="filter-select"
-        @change="onDateChange"
-      />
       <el-select
         v-model="local.is_callbacked"
         placeholder="是否回访"
@@ -63,6 +52,17 @@
           </svg>
         </template>
       </el-input>
+      <el-date-picker
+        v-model="dateRange"
+        type="daterange"
+        range-separator="至"
+        start-placeholder="开始日期"
+        end-placeholder="结束日期"
+        value-format="YYYY-MM-DD"
+        placeholder="创建时间"
+        class="filter-select"
+        @change="onDateChange"
+      />
     </div>
   </div>
 </template>
