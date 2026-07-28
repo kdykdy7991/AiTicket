@@ -18,7 +18,7 @@
           @click="activeTab = 'addition'"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          追加
+          补充
         </button>
         <button
           v-if="canRemind"
@@ -85,10 +85,10 @@
 
       <!-- 追加模式：必须填追加原因 -->
       <div v-if="activeTab === 'addition'" class="addition-reason">
-        <label class="reason-label">追加原因 <span class="required">*</span></label>
+        <label class="reason-label">补充原因 <span class="required">*</span></label>
         <el-input
           v-model="appendReason"
-          placeholder="请说明此次追加的原因"
+          placeholder="请说明此次补充的原因"
           size="small"
           maxlength="200"
           show-word-limit
@@ -98,7 +98,7 @@
       <div class="reply-actions">
         <span v-if="activeTab === 'addition'" class="addition-hint">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          追加记录会保留在工单时间线，标注为补充内容
+          补充记录会保留在工单时间线，标注为补充内容
         </span>
         <span v-if="activeTab === 'reminder'" class="addition-hint reminder-hint">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -126,7 +126,7 @@
 
     <div v-if="!(canReply || canAppend || canRemind)" class="disabled-hint no-perm">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      您当前无权在该工单提交处理说明、追加或催办。
+      您当前无权在该工单提交处理说明、补充或催办。
     </div>
 
     <!-- 暂缓处理弹窗 -->
@@ -229,7 +229,7 @@ const inputDisabled = computed(() =>
 
 const placeholder = computed(() => {
   if (activeTab.value === 'addition') {
-    return '输入追加内容（如：补充截图说明、补充排查信息）...'
+    return '输入补充内容（如：补充截图说明、补充排查信息）...'
   }
   if (activeTab.value === 'reminder') {
     return '请输入催办内容，提交后将通知当前处理人并在时间线记录...'
@@ -241,7 +241,7 @@ const placeholder = computed(() => {
 })
 
 const submitLabel = computed(() => {
-  if (activeTab.value === 'addition') return '追加记录'
+  if (activeTab.value === 'addition') return '补充记录'
   if (activeTab.value === 'reminder') return '发起催办'
   return '提交处理说明'
 })
@@ -314,7 +314,7 @@ async function onSubmit() {
     return
   }
   if (activeTab.value === 'addition' && !appendReason.value.trim()) {
-    ElMessage.warning('请填写追加原因')
+    ElMessage.warning('请填写补充原因')
     return
   }
   if (activeTab.value === 'reminder' && body.value.trim().length > 200) {
@@ -324,7 +324,7 @@ async function onSubmit() {
   const hasBody = !!body.value.trim()
   const hasAttachments = attachmentFiles.value.length > 0
   if (!hasBody && !hasAttachments) {
-    ElMessage.warning(activeTab.value === 'addition' ? '请填写追加内容或上传截图' : '请填写内容')
+    ElMessage.warning(activeTab.value === 'addition' ? '请填写补充内容或上传截图' : '请填写内容')
     return
   }
 
@@ -345,7 +345,7 @@ async function onSubmit() {
     clearAttachments()
     const msgMap: Record<string, string> = {
       reply: '处理说明已提交',
-      addition: '追加已记录',
+      addition: '补充已记录',
       reminder: '催办已发起',
     }
     ElMessage.success(msgMap[activeTab.value])
