@@ -160,7 +160,7 @@ async def create_article(
     if ticket.state in TERMINAL_STATES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="工单已结束，无法提交处理说明、追加或催办"
+            detail="工单已结束，无法提交处理说明、补充或催办"
         )
 
     # internal_note type has been removed
@@ -190,12 +190,12 @@ async def create_article(
         if user.role not in ADDITION_ALLOWED_ROLES:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                detail="仅客服人员和管理员可追加"
+                detail="仅客服人员和管理员可补充"
             )
         if ticket.state not in ADDITION_ALLOWED_STATES:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="仅在已处理之前的状态可追加"
+                detail="仅在已处理之前的状态可补充"
             )
 
     # 催办：仅客服团队 + 非终态前三种状态 + 整个生命周期只能催办一次
@@ -218,7 +218,7 @@ async def create_article(
 
     # Validate type-specific rules
     if type == "addition" and not append_reason:
-        raise HTTPException(422, detail="追加类型必须填写追加原因")
+        raise HTTPException(422, detail="补充类型必须填写补充原因")
 
     if type == "reminder":
         content = body.strip() if body else ""
@@ -242,9 +242,13 @@ async def create_article(
         duration = int((now - last.created_at).total_seconds() / 60) if last else None
 
         # 先创建状态日志并 flush，拿到 log.id 作为处理说明的 state_key
+        # 人员快照：reply 时刻工单上的创建者/对接人/处理人
         reply_log = TicketStateLog(
             ticket_id=ticket.id, from_state=old_state, to_state="resolved",
             operator_id=user.id, reason=None, duration_minutes=duration,
+            creator_id_snapshot=ticket.creator_id,
+            dispatcher_id_snapshot=ticket.dispatcher_id,
+            owner_id_snapshot=ticket.owner_id,
         )
         db.add(reply_log)
         await db.flush()

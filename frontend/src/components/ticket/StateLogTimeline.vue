@@ -30,17 +30,17 @@
             <div class="timeline-header">
               <span class="state-name">
                 <StateTag :state="node.log.to_state" :compact="true" />
-                <span v-if="node.log.is_return" class="return-badge">退回</span>
+                <span v-if="node.log.is_return && node.log.to_state_key !== 'returned'" class="return-badge">退回</span>
               </span>
               <span v-if="!node.log.left_at" class="duration current">当前</span>
             </div>
             <div class="timeline-meta">
               <DateTimeLabel :iso="node.log.entered_at" />
-              <span v-if="node.log.changed_by && relatedPeople(node.log.to_state_key).length === 0">操作人：{{ node.log.changed_by.firstname }}{{ node.log.changed_by.lastname }}</span>
-              <span v-for="p in relatedPeople(node.log.to_state_key)" :key="p.label" class="related">
+              <span v-if="node.log.changed_by && relatedPeople(node.log, node.log.to_state_key).length === 0">操作人：{{ node.log.changed_by.firstname }}{{ node.log.changed_by.lastname }}</span>
+              <span v-for="p in relatedPeople(node.log, node.log.to_state_key)" :key="p.label" class="related">
                 {{ p.label }}：{{ p.name }}
               </span>
-              <span v-if="node.log.reason" class="reason">原因：{{ node.log.reason }}</span>
+              <span v-if="node.log.reason" class="reason">{{ node.log.is_return ? '退回原因' : '原因' }}：{{ node.log.reason }}</span>
             </div>
             <!-- 该状态下的处理说明 -->
             <div
@@ -69,14 +69,14 @@
           <!-- 追加节点 -->
           <template v-else-if="node.kind === 'addition'">
             <div class="timeline-header">
-              <span class="addition-name">追加信息</span>
+              <span class="addition-name">补充信息</span>
             </div>
             <div class="timeline-meta">
               <DateTimeLabel :iso="node.article.created_at" />
               <span v-if="senderName(node.article)">操作人：{{ senderName(node.article) }}</span>
             </div>
             <div v-if="node.article.body" class="addition-body">{{ node.article.body }}</div>
-            <div v-if="node.article.append_reason" class="addition-reason">追加原因：{{ node.article.append_reason }}</div>
+            <div v-if="node.article.append_reason" class="addition-reason">补充原因：{{ node.article.append_reason }}</div>
             <div v-if="node.article.attachments?.length" class="attachment-list">
               <a
                 v-for="att in node.article.attachments"
@@ -152,21 +152,34 @@ const nodes = computed<TimelineNode[]>(() => {
   })
 })
 
-// 按状态节点返回应显示的相关人员（用工单当前的人员，非历史快照）
+// 按状态节点返回应显示的相关人员。
+// 优先读 log 上的 _snapshot 字段（写入 state_log 那一刻工单上的人），
+// 快照为空时回退到 ticket 当前值（兼容老数据 / 回填不完整的工单）。
 // 待受理：创建者 + 部门对接人；处理中：部门对接人 + 处理人
-function relatedPeople(stateKey: string | undefined): { label: string; name: string }[] {
+function relatedPeople(log: TicketStateLog, stateKey: string | undefined): { label: string; name: string }[] {
   const t = props.ticket as any
   if (!t || !stateKey) return []
-  const creator = t.creator?.firstname || t.creator_name
-  const dispatcher = t.dispatcher?.firstname || t.dispatcher_name
-  const owner = t.owner?.firstname || t.owner_name
+  const snapCreatorId    = log.creator_id_snapshot    ?? null
+  const snapDispatcherId = log.dispatcher_id_snapshot ?? null
+  const snapOwnerId      = log.owner_id_snapshot      ?? null
+  const snapCreatorName    = log.creator_name_snapshot
+  const snapDispatcherName = log.dispatcher_name_snapshot
+  const snapOwnerName      = log.owner_name_snapshot
+
+  const creatorId    = snapCreatorId    ?? t.creator_id
+  const dispatcherId = snapDispatcherId ?? t.dispatcher_id
+  const ownerId      = snapOwnerId      ?? t.owner_id
+  const creatorName    = snapCreatorName    || (t.creator?.firstname    || t.creator_name    || '')
+  const dispatcherName = snapDispatcherName || (t.dispatcher?.firstname || t.dispatcher_name || '')
+  const ownerName      = snapOwnerName      || (t.owner?.firstname      || t.owner_name      || '')
+
   const people: { label: string; name: string }[] = []
   if (stateKey === 'pending') {
-    if (creator) people.push({ label: '创建者', name: creator })
-    if (dispatcher) people.push({ label: '部门对接人', name: dispatcher })
+    if (creatorId)    people.push({ label: '创建者',     name: creatorName    || `用户#${creatorId}` })
+    if (dispatcherId) people.push({ label: '部门对接人', name: dispatcherName || `用户#${dispatcherId}` })
   } else if (stateKey === 'open') {
-    if (dispatcher) people.push({ label: '部门对接人', name: dispatcher })
-    if (owner) people.push({ label: '处理人', name: owner })
+    if (dispatcherId) people.push({ label: '部门对接人', name: dispatcherName || `用户#${dispatcherId}` })
+    if (ownerId)      people.push({ label: '处理人',     name: ownerName      || `用户#${ownerId}` })
   }
   return people
 }

@@ -47,6 +47,26 @@ RETURN_TRANSITIONS: set[tuple[str, str]] = {
 }
 
 
+def _snapshot_people(ticket: Ticket, body=None) -> dict:
+    """写入 state_log 时的人员快照：进入新状态那一刻工单上的创建者/对接人/处理人。
+
+    body 字段优先（代表正在应用的新值），未提供则回退到 ticket 当前值。
+    - creator_id 永不变，直接取 ticket
+    - dispatcher / owner：resubmit / 重新指派等场景下 body 会带新值
+    """
+    return {
+        "creator_id_snapshot": ticket.creator_id,
+        "dispatcher_id_snapshot": (
+            body.dispatcher_id if body is not None and body.dispatcher_id is not None
+            else ticket.dispatcher_id
+        ),
+        "owner_id_snapshot": (
+            body.owner_id if body is not None and body.owner_id is not None
+            else ticket.owner_id
+        ),
+    }
+
+
 def _ticket_to_brief(t: Ticket) -> TicketBrief:
     return TicketBrief(
         id=t.id, number=t.number, state=t.state,
@@ -545,6 +565,7 @@ async def submit_draft(
     db.add(TicketStateLog(
         ticket_id=ticket.id, from_state=None, to_state="pending",
         operator_id=user.id,
+        **_snapshot_people(ticket, body),
     ))
     await db.commit()
 
@@ -745,6 +766,7 @@ async def create_ticket(
         db.add(TicketStateLog(
             ticket_id=ticket.id, from_state=None, to_state="pending",
             operator_id=user.id,
+            **_snapshot_people(ticket, body),
         ))
 
     await db.refresh(ticket)
@@ -792,35 +814,10 @@ async def update_ticket(
         if requires_reason(ticket.state, body.state) and not body.reason:
             raise HTTPException(400, detail=f"从「{STATE_LABELS.get(ticket.state, ticket.state)}」变更为「{STATE_LABELS.get(body.state, body.state)}」需要填写原因")
 
-        # 暂缓：存 hold_until
-        if body.state == "on_hold" and body.hold_until:
-            from datetime import datetime as dt
-            ticket.hold_until = dt.fromisoformat(body.hold_until).replace(tzinfo=timezone.utc)
-
-        # Calculate duration in old state
-        last_log = await db.execute(
-            select(TicketStateLog)
-            .where(TicketStateLog.ticket_id == ticket_id)
-            .order_by(TicketStateLog.created_at.desc()).limit(1)
-        )
-        last = last_log.scalar_one_or_none()
-        duration = None
-        if last:
-            duration = int((now - last.created_at).total_seconds() / 60)
-
-        # Record state log
-        log = TicketStateLog(
-            ticket_id=ticket.id, from_state=ticket.state, to_state=body.state,
-            operator_id=user.id, reason=body.reason, duration_minutes=duration,
-        )
-        db.add(log)
-        # has_returned 跟随"最新一次动作"：本次转换属于 RETURN_TRANSITIONS 才置 true
-        ticket.has_returned = (ticket.state, body.state) in RETURN_TRANSITIONS
-
         old_state = ticket.state
-        ticket.state = body.state
 
-        # Side effects
+        # 先把"新状态"的人员字段调整到 ticket 上（owner/dsp 等），再写 state_log 取快照
+        # 注意：state-based 副作用和 body 字段都在这里应用，body 中显式提供的字段优先
         if body.state == "open":
             if old_state == "pending":
                 # 分派处理人：pending→open 时由对接人指定 owner_id
@@ -852,6 +849,40 @@ async def update_ticket(
             ticket.closed_at = now
             if ticket.created_at:
                 ticket.closed_duration_minutes = int((now - ticket.created_at).total_seconds() / 60)
+
+        # 应用 body 中显式提供的人员/部门字段（覆盖上面的副作用）
+        if body.owner_id is not None:
+            ticket.owner_id = body.owner_id
+        if body.dispatcher_id is not None:
+            ticket.dispatcher_id = body.dispatcher_id
+
+        # 暂缓：存 hold_until
+        if body.state == "on_hold" and body.hold_until:
+            from datetime import datetime as dt
+            ticket.hold_until = dt.fromisoformat(body.hold_until).replace(tzinfo=timezone.utc)
+
+        # has_returned 跟随"最新一次动作"：本次转换属于 RETURN_TRANSITIONS 才置 true
+        ticket.has_returned = (old_state, body.state) in RETURN_TRANSITIONS
+        ticket.state = body.state
+
+        # Calculate duration in old state
+        last_log = await db.execute(
+            select(TicketStateLog)
+            .where(TicketStateLog.ticket_id == ticket_id)
+            .order_by(TicketStateLog.created_at.desc()).limit(1)
+        )
+        last = last_log.scalar_one_or_none()
+        duration = None
+        if last:
+            duration = int((now - last.created_at).total_seconds() / 60)
+
+        # Record state log（快照此时 ticket 已是"新状态"下的人员值）
+        log = TicketStateLog(
+            ticket_id=ticket.id, from_state=old_state, to_state=body.state,
+            operator_id=user.id, reason=body.reason, duration_minutes=duration,
+            **_snapshot_people(ticket, body),
+        )
+        db.add(log)
         # 注：has_returned 已在写 state_log 处按 RETURN_TRANSITIONS 同步，此处不再覆盖
     if body.archive_notes is not None:
         ticket.archive_notes = body.archive_notes
@@ -900,14 +931,16 @@ async def batch_update_tickets(
     tickets = result.scalars().all()
     updated = 0
     for ticket in tickets:
+        # 先应用非 state 字段（owner/dsp/group/skill_group/priority），这样 state_log
+        # 写快照时 ticket 已携带新值
         if body.updates.priority is not None:
             ticket.priority = body.updates.priority
-        if body.updates.owner_id is not None:
-            ticket.owner_id = body.updates.owner_id
         if body.updates.group_id is not None:
             ticket.group_id = body.updates.group_id
         if body.updates.skill_group_id is not None:
             ticket.skill_group_id = body.updates.skill_group_id
+        if body.updates.owner_id is not None:
+            ticket.owner_id = body.updates.owner_id
         if body.updates.dispatcher_id is not None:
             ticket.dispatcher_id = body.updates.dispatcher_id
         if body.updates.state is not None and body.updates.state != ticket.state:
@@ -918,6 +951,7 @@ async def batch_update_tickets(
                 log = TicketStateLog(
                     ticket_id=ticket.id, from_state=from_state, to_state=to_state,
                     operator_id=user.id, reason=body.updates.reason,
+                    **_snapshot_people(ticket, body.updates),
                 )
                 db.add(log)
                 ticket.state = to_state
@@ -943,15 +977,42 @@ async def get_state_logs(
         .order_by(TicketStateLog.created_at.asc())
     )
     logs = result.scalars().all()
+    if not logs:
+        return {"data": []}
+
+    # 一次拉出所有相关 user，避免 N+1
+    user_ids: set[int] = set()
+    for log in logs:
+        if log.operator_id:
+            user_ids.add(log.operator_id)
+        if log.creator_id_snapshot:
+            user_ids.add(log.creator_id_snapshot)
+        if log.dispatcher_id_snapshot:
+            user_ids.add(log.dispatcher_id_snapshot)
+        if log.owner_id_snapshot:
+            user_ids.add(log.owner_id_snapshot)
+
+    user_map: dict[int, str] = {}
+    if user_ids:
+        ures = await db.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
+        user_map = {row[0]: row[1] for row in ures.all()}
+
+    def _name(uid):
+        return user_map.get(uid) if uid else None
+
     data = []
     for log in logs:
-        op_name = None
-        if log.operator_id:
-            u = await db.execute(select(User.name).where(User.id == log.operator_id))
-            op_name = u.scalar_one_or_none()
         data.append({
             "id": log.id, "from_state": log.from_state, "to_state": log.to_state,
-            "operator_id": log.operator_id, "operator_name": op_name,
+            "operator_id": log.operator_id,
+            "operator_name": _name(log.operator_id),
+            # 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人
+            "creator_id_snapshot": log.creator_id_snapshot,
+            "creator_name_snapshot": _name(log.creator_id_snapshot),
+            "dispatcher_id_snapshot": log.dispatcher_id_snapshot,
+            "dispatcher_name_snapshot": _name(log.dispatcher_id_snapshot),
+            "owner_id_snapshot": log.owner_id_snapshot,
+            "owner_name_snapshot": _name(log.owner_id_snapshot),
             "reason": log.reason, "duration_minutes": log.duration_minutes,
             "created_at": log.created_at.isoformat() if log.created_at else None,
         })

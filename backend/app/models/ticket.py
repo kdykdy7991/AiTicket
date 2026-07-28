@@ -168,7 +168,7 @@ class TicketStateLog(Base):
     owner_id_snapshot: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
 
     ticket = relationship("Ticket", back_populates="state_logs")
-    operator = relationship("User", lazy="selectin")
+    operator = relationship("User", foreign_keys=[operator_id], lazy="selectin")
     creator_snapshot = relationship("User", foreign_keys=[creator_id_snapshot], lazy="selectin")
     dispatcher_snapshot = relationship("User", foreign_keys=[dispatcher_id_snapshot], lazy="selectin")
     owner_snapshot = relationship("User", foreign_keys=[owner_id_snapshot], lazy="selectin")

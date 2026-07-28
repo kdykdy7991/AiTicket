@@ -97,6 +97,13 @@ function adaptStateLogs(logs: any[]): any[] {
       duration_seconds: durationSeconds,
       reason: log.reason,
       is_return: isReturnTransition(fromKey, toKey),
+      // 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人
+      creator_id_snapshot: log.creator_id_snapshot ?? null,
+      creator_name_snapshot: log.creator_name_snapshot ?? null,
+      dispatcher_id_snapshot: log.dispatcher_id_snapshot ?? null,
+      dispatcher_name_snapshot: log.dispatcher_name_snapshot ?? null,
+      owner_id_snapshot: log.owner_id_snapshot ?? null,
+      owner_name_snapshot: log.owner_name_snapshot ?? null,
     }
   })
   return out
