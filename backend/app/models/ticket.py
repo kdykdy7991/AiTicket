@@ -88,6 +88,10 @@ class Ticket(Base):
     # 退回历史标记
     has_returned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # 回访满意度：仅当 is_callbacked=true 时填写
+    # 值：'satisfied' / 'average' / 'dissatisfied'，未回访时为 null
+    satisfaction: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())

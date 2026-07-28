@@ -62,6 +62,9 @@
               <div v-if="ticket?.archive_notes" class="archive-block-body">{{ ticket.archive_notes }}</div>
               <div class="archive-block-meta">
                 <span>是否回访：{{ ticket?.is_callbacked ? '已回访' : '未回访' }}</span>
+                <span v-if="ticket?.is_callbacked && ticket?.satisfaction">
+                  满意度：{{ satisfactionLabel(ticket.satisfaction) }}
+                </span>
               </div>
             </div>
           </template>
@@ -188,6 +191,16 @@ function senderName(article: Article): string {
   const u = article.origin_by as any
   if (!u) return ''
   return u.firstname || u.name || ''
+}
+
+/** 后端 enum → 中文标签 */
+function satisfactionLabel(v: string): string {
+  const map: Record<string, string> = {
+    satisfied: '满意',
+    average: '一般',
+    dissatisfied: '不满意',
+  }
+  return map[v] || v
 }
 
 // 某状态下挂载的处理说明：优先按 state_log id 匹配，旧数据降级为按状态 key + 时间范围匹配

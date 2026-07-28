@@ -154,6 +154,7 @@ def _ticket_to_detail(t: Ticket, terminal_ops: dict | None = None) -> TicketDeta
         callback_required=t.callback_required,
         callback_details=t.callback_details,
         archive_notes=t.archive_notes,
+        satisfaction=t.satisfaction,
     )
 
 
@@ -962,6 +963,17 @@ async def update_ticket(
         ticket.archive_notes = body.archive_notes
     if body.is_callbacked is not None:
         ticket.is_callbacked = body.is_callbacked
+        # 未回访时清空满意度；避免历史脏数据
+        if body.is_callbacked is False:
+            ticket.satisfaction = None
+    if body.satisfaction is not None:
+        # 校验：satisfaction 仅在 is_callbacked=true 时有意义
+        allowed = {"satisfied", "average", "dissatisfied"}
+        if body.satisfaction not in allowed:
+            raise HTTPException(422, detail=f"satisfaction 取值必须是 {sorted(allowed)} 之一")
+        if ticket.is_callbacked is False:
+            raise HTTPException(422, detail="未回访工单不能设置满意度")
+        ticket.satisfaction = body.satisfaction
     if body.priority is not None:
         ticket.priority = body.priority
         # Recalculate SLA deadline (creation → resolved)

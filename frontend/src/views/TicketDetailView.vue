@@ -105,10 +105,18 @@
                 <el-radio :label="true">已回访</el-radio>
                 <el-radio :label="false">未回访</el-radio>
               </el-radio-group>
+              <!-- 已回访时显示满意度：满意/一般/不满意，必填 -->
+              <el-radio-group v-if="isCallbacked" v-model="satisfaction" class="satisfaction-group">
+                <span class="satisfaction-label">满意度：</span>
+                <el-radio :label="'satisfied'">满意</el-radio>
+                <el-radio :label="'average'">一般</el-radio>
+                <el-radio :label="'dissatisfied'">不满意</el-radio>
+              </el-radio-group>
               <div class="archive-actions">
                 <el-button
                   type="success"
                   :loading="archiving"
+                  :disabled="isCallbacked && !satisfaction"
                   @click="submitArchive"
                 >
                   归档
@@ -351,15 +359,18 @@ const archiving = ref(false)
 // ── 已处理工单归档面板 ──────────────────────────────────────
 const archiveNotes = ref('')
 const isCallbacked = ref(false)
+const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | ''>('')
 
 watch(canArchiveFromResolved, (visible) => {
   if (!visible) {
     archiveNotes.value = ''
     isCallbacked.value = false
+    satisfaction.value = ''
   } else {
     const t = ticket.value as any
     archiveNotes.value = t?.archive_notes || ''
     isCallbacked.value = t?.is_callbacked ?? false
+    satisfaction.value = t?.satisfaction || ''
   }
 }, { immediate: true })
 
@@ -371,7 +382,8 @@ async function submitArchive() {
       state: 'archived',
       archive_notes: archiveNotes.value.trim(),
       is_callbacked: isCallbacked.value,
-    })
+      satisfaction: isCallbacked.value ? satisfaction.value : undefined,
+    } as any)
     ElMessage.success('工单已归档')
     ticketStore.refreshCurrentInList()
     await loadTicket()
@@ -784,6 +796,17 @@ async function confirmCancel() {
 .archive-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.satisfaction-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.satisfaction-label {
+  color: var(--color-text-tertiary);
+  font-size: 12.5px;
+  margin-right: 6px;
 }
 
 .header-action-btn {
