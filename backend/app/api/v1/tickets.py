@@ -53,17 +53,15 @@ def _snapshot_people(ticket: Ticket, body=None) -> dict:
     body 字段优先（代表正在应用的新值），未提供则回退到 ticket 当前值。
     - creator_id 永不变，直接取 ticket
     - dispatcher / owner：resubmit / 重新指派等场景下 body 会带新值
+    - body 可能是 TicketCreate（无 owner_id 字段）或 TicketUpdate，用 getattr 兜底，
+      避免直接属性访问抛 AttributeError
     """
+    dispatcher_id = getattr(body, "dispatcher_id", None) if body is not None else None
+    owner_id = getattr(body, "owner_id", None) if body is not None else None
     return {
         "creator_id_snapshot": ticket.creator_id,
-        "dispatcher_id_snapshot": (
-            body.dispatcher_id if body is not None and body.dispatcher_id is not None
-            else ticket.dispatcher_id
-        ),
-        "owner_id_snapshot": (
-            body.owner_id if body is not None and body.owner_id is not None
-            else ticket.owner_id
-        ),
+        "dispatcher_id_snapshot": dispatcher_id if dispatcher_id is not None else ticket.dispatcher_id,
+        "owner_id_snapshot": owner_id if owner_id is not None else ticket.owner_id,
     }
 
 
@@ -670,7 +668,7 @@ async def submit_draft(
     db.add(TicketStateLog(
         ticket_id=ticket.id, from_state=None, to_state="pending",
         operator_id=user.id,
-        **_snapshot_people(ticket, body),
+        **_snapshot_people(ticket, None),
     ))
     await db.commit()
 
