@@ -82,7 +82,7 @@ if [ "$INIT_MODE" = true ]; then
 
     # 2. 构建镜像
     echo "[2/4] 构建镜像 skdy-api:${TAG} ..."
-    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build --no-cache api web
+    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web
     docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
     docker tag skdy_prod-api "skdy-api:latest" 2>/dev/null || true
 
@@ -108,7 +108,7 @@ else
 
     # 3. 构建镜像
     echo "[2/5] 构建镜像 skdy-api:${TAG} ..."
-    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build --no-cache api web
+    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web
     docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
     docker tag skdy_prod-api "skdy-api:latest" 2>/dev/null || true
 
