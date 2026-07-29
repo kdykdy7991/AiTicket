@@ -4,8 +4,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # 先装依赖（利用层缓存；走国内镜像源，避免构建时访问 PyPI 超时）
-COPY requirements.txt .
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+# requirements-lock.txt 由 uv pip freeze 根据当前开发环境生成，保证生产与本地版本一致
+COPY requirements-lock.txt .
+RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-lock.txt
 
 # 拷贝代码
 COPY . .
