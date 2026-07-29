@@ -46,6 +46,7 @@ async def test_create_draft(client):
         json={"customer_phone": "13900000000", "is_draft": True},
     )
     assert resp.status_code == 201, resp.text
+    assert resp.json()["data"]["is_draft"] is True  # _ticket_to_brief 曾漏传 is_draft
 
     async with AsyncSession(engine) as s:
         t = (

@@ -108,6 +108,7 @@ def _ticket_to_brief(t: Ticket, terminal_ops: dict | None = None) -> TicketBrief
         region_name=t.region_name,
         is_duplicate=t.is_duplicate,
         is_callbacked=t.is_callbacked,
+        is_draft=t.is_draft,
         sla_solution_breached=t.sla_solution_breached,
         solution_deadline=t.solution_deadline,
         urged_at=t.urged_at,
