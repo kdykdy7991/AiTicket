@@ -260,6 +260,12 @@ function pctDelta(curr: number, prev: number, goodWhenUp = true): { value: numbe
   }
 }
 
+/** 把 pctDelta 的字段重命名为 KPI 卡片模板使用的 deltaXxx，避免覆盖 kpi.value */
+function kpiDelta(curr: number, prev: number, goodWhenUp = true) {
+  const { value, arrow, cls } = pctDelta(curr, prev, goodWhenUp)
+  return { deltaPct: value, deltaArrow: arrow, deltaCls: cls }
+}
+
 const slaDelta = computed(() => {
   // 昨日对比：取 sla_daily 倒数第二天的值（vs 最后一天）
   const arr = slaDaily.value
@@ -287,22 +293,22 @@ const kpiList = computed(() => {
     {
       key: 'total', label: '工单总量', value: m.new_count,
       icon: TOTAL_ICON, iconBg: '#EEF2FF', iconColor: '#635BFF',
-      ...pctDelta(m.new_count, p.new_count ?? 0, true),
+      ...kpiDelta(m.new_count, p.new_count ?? 0, true),
     },
     {
       key: 'open', label: '处理中工单', value: m.in_progress_count,
       icon: OPEN_ICON, iconBg: '#D1FAE5', iconColor: '#10B981',
-      ...pctDelta(m.in_progress_count, p.in_progress_count ?? 0, false),
+      ...kpiDelta(m.in_progress_count, p.in_progress_count ?? 0, false),
     },
     {
       key: 'callback', label: '待回访工单', value: m.pending_callback_count,
       icon: CALLBACK_ICON, iconBg: '#FEF3C7', iconColor: '#F59E0B',
-      ...pctDelta(m.pending_callback_count, p.pending_callback_count ?? 0, false),
+      ...kpiDelta(m.pending_callback_count, p.pending_callback_count ?? 0, false),
     },
     {
       key: 'closed', label: '已闭环工单', value: m.closed_count,
       icon: DONE_ICON, iconBg: '#F3E8FF', iconColor: '#8B5CF6',
-      ...pctDelta(m.closed_count, p.closed_count ?? 0, true),
+      ...kpiDelta(m.closed_count, p.closed_count ?? 0, true),
     },
   ]
 })
