@@ -122,7 +122,11 @@ else
 
     # 6. 健康检查
     echo "[5/5] 等待服务健康检查 ..."
-    sleep 5
+    # 循环等待 api 健康检查通过（最多 ~60s），避免单次 sleep 不足导致误报
+    for _ in $(seq 1 12); do
+      docker compose -f "${COMPOSE_FILE}" ps api | grep -q "healthy" && break
+      sleep 5
+    done
 fi
 
 # 通用健康检查
