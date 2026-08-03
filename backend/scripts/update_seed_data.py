@@ -17,7 +17,7 @@ engine = create_async_engine(DATABASE_URL, future=True)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # 默认密码：skdy123
-_DEFAULT_HASH = '$2b$12$Oxx10M2ohHR2zd3ekD5WLOll.icytUsKAjpzeoeTu3ZaYvpq0aRKW'
+_DEFAULT_HASH = '$2b$12$PlEUsC1JRHiZVoUdSUj4y.H/kzyqXWQ4jwfOkMMM3o2sb8.Bcnl/O'
 
 # 对接部门（只确保存在，不删除已有部门）
 SKILL_GROUPS = [

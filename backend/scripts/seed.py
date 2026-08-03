@@ -67,42 +67,43 @@ SKILL_GROUPS = [
     (8, '星空智联行销部'),
 ]
 
-# 默认密码：admin123
-_DEFAULT_HASH = '$2b$12$Oxx10M2ohHR2zd3ekD5WLOll.icytUsKAjpzeoeTu3ZaYvpq0aRKW'
+# 默认密码：admin 为 admin123，其余为 skdy123
+_ADMIN_HASH = '$2b$12$Oxx10M2ohHR2zd3ekD5WLOll.icytUsKAjpzeoeTu3ZaYvpq0aRKW'
+_SKDY_HASH = '$2b$12$PlEUsC1JRHiZVoUdSUj4y.H/kzyqXWQ4jwfOkMMM3o2sb8.Bcnl/O'
 
 USERS = [
-    (1, 'admin', '系统管理员', 'admin', 1, False, _DEFAULT_HASH),
+    (1, 'admin', '系统管理员', 'admin', 1, False, _ADMIN_HASH),
     # 对接人
-    (10, 'zhongmengxi', '钟梦茜', 'handler', 1, False, _DEFAULT_HASH),
-    (11, 'xiezhipeng', '谢志鹏', 'handler', 1, False, _DEFAULT_HASH),
-    (12, 'zhangzhaojuan', '张朝娟', 'handler', 1, False, _DEFAULT_HASH),
-    (13, 'lianlu', '练露', 'handler', 1, False, _DEFAULT_HASH),
-    (14, 'zhanghua', '张华', 'handler', 1, False, _DEFAULT_HASH),
-    (15, 'qiuwenwei', '丘文伟', 'handler', 1, False, _DEFAULT_HASH),
+    (10, 'zhongmengxi', '钟梦茜', 'handler', 1, False, _SKDY_HASH),
+    (11, 'xiezhipeng', '谢志鹏', 'handler', 1, False, _SKDY_HASH),
+    (12, 'zhangzhaojuan', '张朝娟', 'handler', 1, False, _SKDY_HASH),
+    (13, 'lianlu', '练露', 'handler', 1, False, _SKDY_HASH),
+    (14, 'zhanghua', '张华', 'handler', 1, False, _SKDY_HASH),
+    (15, 'qiuwenwei', '丘文伟', 'handler', 1, False, _SKDY_HASH),
     # 处理人
-    (17, 'jinxin', '金鑫', 'handler', 1, False, _DEFAULT_HASH),
-    (18, 'dingxian', '丁晛', 'handler', 1, False, _DEFAULT_HASH),
-    (19, 'zhangjingxi', '张景熙', 'handler', 1, False, _DEFAULT_HASH),
-    (20, 'xuting', '徐挺', 'handler', 1, False, _DEFAULT_HASH),
-    (21, 'wangyan', '王颜', 'handler', 1, False, _DEFAULT_HASH),
-    (22, 'jiangchaoyi', '蒋超毅', 'handler', 1, False, _DEFAULT_HASH),
-    (23, 'jinjun', '金军', 'handler', 1, False, _DEFAULT_HASH),
-    (24, 'jiangweiye', '姜伟业', 'handler', 1, False, _DEFAULT_HASH),
-    (25, 'chenwenbing', '陈文兵', 'handler', 1, False, _DEFAULT_HASH),
+    (17, 'jinxin', '金鑫', 'handler', 1, False, _SKDY_HASH),
+    (18, 'dingxian', '丁晛', 'handler', 1, False, _SKDY_HASH),
+    (19, 'zhangjingxi', '张景熙', 'handler', 1, False, _SKDY_HASH),
+    (20, 'xuting', '徐挺', 'handler', 1, False, _SKDY_HASH),
+    (21, 'wangyan', '王颜', 'handler', 1, False, _SKDY_HASH),
+    (22, 'jiangchaoyi', '蒋超毅', 'handler', 1, False, _SKDY_HASH),
+    (23, 'jinjun', '金军', 'handler', 1, False, _SKDY_HASH),
+    (24, 'jiangweiye', '姜伟业', 'handler', 1, False, _SKDY_HASH),
+    (25, 'chenwenbing', '陈文兵', 'handler', 1, False, _SKDY_HASH),
     # 对接人（V0.7 新增）
-    (26, 'wangyaozong', '王耀宗', 'handler', 1, False, _DEFAULT_HASH),
-    (31, 'wangjunhua', '汪军华', 'handler', 1, False, _DEFAULT_HASH),
-    (35, 'yangbing', '杨冰', 'handler', 1, False, _DEFAULT_HASH),
-    (37, 'caoxin', '曹欣', 'handler', 1, False, _DEFAULT_HASH),
+    (26, 'wangyaozong', '王耀宗', 'handler', 1, False, _SKDY_HASH),
+    (31, 'wangjunhua', '汪军华', 'handler', 1, False, _SKDY_HASH),
+    (35, 'yangbing', '杨冰', 'handler', 1, False, _SKDY_HASH),
+    (37, 'caoxin', '曹欣', 'handler', 1, False, _SKDY_HASH),
     # 处理人（V0.7 新增）
-    (27, 'zhengkaixin', '郑恺心', 'handler', 1, False, _DEFAULT_HASH),
-    (28, 'chengwei', '程伟', 'handler', 1, False, _DEFAULT_HASH),
-    (29, 'dongming', '董明', 'handler', 1, False, _DEFAULT_HASH),
-    (30, 'qiaoyongliang', '乔永亮', 'handler', 1, False, _DEFAULT_HASH),
-    (32, 'zhangguanghan', '张广瀚', 'handler', 1, False, _DEFAULT_HASH),
-    (33, 'wuxiaohan', '吴小涵', 'handler', 1, False, _DEFAULT_HASH),
-    (34, 'qiaoxingda', '乔兴达', 'handler', 1, False, _DEFAULT_HASH),
-    (36, 'louhaoli', '楼豪丽', 'handler', 1, False, _DEFAULT_HASH),
+    (27, 'zhengkaixin', '郑恺心', 'handler', 1, False, _SKDY_HASH),
+    (28, 'chengwei', '程伟', 'handler', 1, False, _SKDY_HASH),
+    (29, 'dongming', '董明', 'handler', 1, False, _SKDY_HASH),
+    (30, 'qiaoyongliang', '乔永亮', 'handler', 1, False, _SKDY_HASH),
+    (32, 'zhangguanghan', '张广瀚', 'handler', 1, False, _SKDY_HASH),
+    (33, 'wuxiaohan', '吴小涵', 'handler', 1, False, _SKDY_HASH),
+    (34, 'qiaoxingda', '乔兴达', 'handler', 1, False, _SKDY_HASH),
+    (36, 'louhaoli', '楼豪丽', 'handler', 1, False, _SKDY_HASH),
 ]
 
 # (user_id, skill_group_id, is_dispatcher)
