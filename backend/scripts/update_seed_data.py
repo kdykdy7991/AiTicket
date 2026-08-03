@@ -27,6 +27,8 @@ SKILL_GROUPS = [
     (4, '网运部'),
     (5, '售后'),
     (6, '客服组'),
+    (7, '星座营销中心'),
+    (8, '星空智联行销部'),
 ]
 
 # 处理人（不覆盖已存在的用户）
@@ -40,6 +42,20 @@ HANDLERS = [
     (23, 'jinjun', '金军', 'handler', 1, False, _DEFAULT_HASH),
     (24, 'jiangweiye', '姜伟业', 'handler', 1, False, _DEFAULT_HASH),
     (25, 'chenwenbing', '陈文兵', 'handler', 1, False, _DEFAULT_HASH),
+    # V0.7 新增对接人
+    (26, 'wangyaozong', '王耀宗', 'handler', 1, False, _DEFAULT_HASH),
+    (31, 'wangjunhua', '汪军华', 'handler', 1, False, _DEFAULT_HASH),
+    (35, 'yangbing', '杨冰', 'handler', 1, False, _DEFAULT_HASH),
+    (37, 'caoxin', '曹欣', 'handler', 1, False, _DEFAULT_HASH),
+    # V0.7 新增处理人
+    (27, 'zhengkaixin', '郑恺心', 'handler', 1, False, _DEFAULT_HASH),
+    (28, 'chengwei', '程伟', 'handler', 1, False, _DEFAULT_HASH),
+    (29, 'dongming', '董明', 'handler', 1, False, _DEFAULT_HASH),
+    (30, 'qiaoyongliang', '乔永亮', 'handler', 1, False, _DEFAULT_HASH),
+    (32, 'zhangguanghan', '张广瀚', 'handler', 1, False, _DEFAULT_HASH),
+    (33, 'wuxiaohan', '吴小涵', 'handler', 1, False, _DEFAULT_HASH),
+    (34, 'qiaoxingda', '乔兴达', 'handler', 1, False, _DEFAULT_HASH),
+    (36, 'louhaoli', '楼豪丽', 'handler', 1, False, _DEFAULT_HASH),
 ]
 
 # (user_id, skill_group_id, is_dispatcher)
@@ -47,12 +63,21 @@ HANDLER_SKILL_GROUPS = [
     (17, 1, False),  # 金鑫 -> 品牌公关传播
     (18, 1, False),  # 丁晛 -> 品牌公关传播
     (19, 1, False),  # 张景熙 -> 品牌公关传播
+    (27, 1, False),  # 郑恺心 -> 品牌公关传播
     (20, 2, False),  # 徐挺 -> 市场生态部
     (21, 2, False),  # 王颜 -> 市场生态部
     (22, 3, False),  # 蒋超毅 -> 产品中心
+    (28, 3, False),  # 程伟 -> 产品中心
+    (29, 3, False),  # 董明 -> 产品中心
     (23, 4, False),  # 金军 -> 网运部
     (24, 5, False),  # 姜伟业 -> 售后
     (25, 5, False),  # 陈文兵 -> 售后
+    (26, 6, True),   # 王耀宗 -> 客服组（对接人）
+    (31, 7, True),   # 汪军华 -> 星座营销中心（对接人）
+    (37, 8, True),   # 曹欣 -> 星空智联行销部（对接人）
+    (32, 7, False),  # 张广瀚 -> 星座营销中心
+    (33, 7, False),  # 吴小涵 -> 星座营销中心
+    (34, 7, False),  # 乔兴达 -> 星座营销中心
 ]
 
 
