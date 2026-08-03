@@ -89,7 +89,7 @@ class Ticket(Base):
     has_returned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # 回访满意度：仅当 is_callbacked=true 时填写
-    # 值：'satisfied' / 'average' / 'dissatisfied'，未回访时为 null
+    # 值：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，未回访时为 null
     satisfaction: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     # 时间戳

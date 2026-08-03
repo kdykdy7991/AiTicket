@@ -805,6 +805,7 @@ async def report_stats(
         "satisfied": satisfaction_map.get("satisfied", 0),
         "average": satisfaction_map.get("average", 0),
         "dissatisfied": satisfaction_map.get("dissatisfied", 0),
+        "unrated": satisfaction_map.get("unrated", 0),
     }
 
     # 9. 二级分类分布（按一级分类名分组），用于点击一级分类弹出二级环形图
@@ -948,6 +949,7 @@ async def report_stats(
         satisfaction_breakdown["satisfied"]
         + satisfaction_breakdown["average"]
         + satisfaction_breakdown["dissatisfied"]
+        + satisfaction_breakdown["unrated"]
     )
     satisfaction_rate = (
         round(satisfaction_breakdown["satisfied"] / satisfaction_total, 4)

@@ -205,6 +205,7 @@ function satisfactionLabel(v: string): string {
     satisfied: '满意',
     average: '一般',
     dissatisfied: '不满意',
+    unrated: '未评价',
   }
   return map[v] || v
 }
@@ -215,6 +216,7 @@ function satisfactionEmoji(v: string): string {
     satisfied: '⭐',
     average: '😐',
     dissatisfied: '⚠️',
+    unrated: '—',
   }
   return map[v] || ''
 }
@@ -564,6 +566,10 @@ function repliesForState(log: TicketStateLog): Article[] {
 .badge-sat-dissatisfied {
   background: #FEE2E2;
   color: #B91C1C;
+}
+.badge-sat-unrated {
+  background: #F3F4F6;
+  color: #6B7280;
 }
 .badge-emoji {
   font-size: 13px;

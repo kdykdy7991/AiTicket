@@ -235,7 +235,7 @@ const bySubcategory = computed<Record<string, { name: string; count: number }[]>
 )
 const slaDaily = computed<{ date: string; value: number }[]>(() => report.value?.sla_daily ?? [])
 const satDaily = computed<{ date: string; value: number }[]>(() => report.value?.satisfaction_daily ?? [])
-const satisfaction = computed(() => metrics.value?.satisfaction_breakdown ?? { satisfied: 0, average: 0, dissatisfied: 0 })
+const satisfaction = computed(() => metrics.value?.satisfaction_breakdown ?? { satisfied: 0, average: 0, dissatisfied: 0, unrated: 0 })
 
 const satisfactionRatePct = computed(() =>
   ((metrics.value?.satisfaction_rate ?? 0) * 100).toFixed(1)

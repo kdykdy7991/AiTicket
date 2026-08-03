@@ -1003,7 +1003,7 @@ async def update_ticket(
             ticket.satisfaction = None
     if body.satisfaction is not None:
         # 校验：satisfaction 仅在 is_callbacked=true 时有意义
-        allowed = {"satisfied", "average", "dissatisfied"}
+        allowed = {"satisfied", "average", "dissatisfied", "unrated"}
         if body.satisfaction not in allowed:
             raise HTTPException(422, detail=f"satisfaction 取值必须是 {sorted(allowed)} 之一")
         if ticket.is_callbacked is False:

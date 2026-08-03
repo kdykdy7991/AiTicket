@@ -111,6 +111,7 @@
                 <el-radio :label="'satisfied'">满意</el-radio>
                 <el-radio :label="'average'">一般</el-radio>
                 <el-radio :label="'dissatisfied'">不满意</el-radio>
+                <el-radio :label="'unrated'">未评价</el-radio>
               </el-radio-group>
               <div class="archive-actions">
                 <el-button
@@ -359,7 +360,7 @@ const archiving = ref(false)
 // ── 已处理工单归档面板 ──────────────────────────────────────
 const archiveNotes = ref('')
 const isCallbacked = ref(false)
-const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | ''>('')
+const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | 'unrated' | ''>('')
 
 watch(canArchiveFromResolved, (visible) => {
   if (!visible) {

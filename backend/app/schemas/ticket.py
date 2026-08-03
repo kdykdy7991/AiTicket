@@ -40,7 +40,7 @@ class TicketUpdate(BaseModel):
     callback_details: str | None = None  # 回访详情
     archive_notes: str | None = None  # 归档备注
     is_callbacked: bool | None = None  # 是否已回访
-    satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied'，仅当 is_callbacked=true 时填写
+    satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，仅当 is_callbacked=true 时填写
 
 
 class TicketBatchUpdate(BaseModel):
@@ -126,7 +126,7 @@ class TicketDetail(TicketBrief):
     callback_required: bool = True
     callback_details: str | None = None
     archive_notes: str | None = None
-    satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied'
+    satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'
     is_callbacked: bool = False
 
     model_config = {"from_attributes": True}
