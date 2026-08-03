@@ -559,7 +559,7 @@ async def export_tickets(
         col_defs += [
             ("工单编号", lambda t: t.number),
             ("创建时间", lambda t: t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else ""),
-            ("结案时间", lambda t: t.closed_at.strftime("%Y-%m-%d %H:%M") if t.closed_at else ""),
+            ("结束时间", lambda t: t.closed_at.strftime("%Y-%m-%d %H:%M") if t.closed_at else ""),
             ("关闭时长(分)", lambda t: t.closed_duration_minutes or ""),
             ("当前状态", lambda t: state_labels.get(t.state, t.state)),
             ("工单来源", lambda t: channel_labels.get(t.channel, t.channel)),
