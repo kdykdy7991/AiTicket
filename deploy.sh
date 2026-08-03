@@ -116,12 +116,16 @@ else
     echo "[3/5] 执行数据库迁移 ..."
     docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
 
+    # 同步种子数据（分类、对接人/处理人等，幂等，可重复执行）
+    echo "[4/5] 同步种子数据 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/update_seed_data.py
+
     # 5. 启动/更新服务
-    echo "[4/5] 启动服务 ..."
+    echo "[5/6] 启动服务 ..."
     docker compose -f "${COMPOSE_FILE}" up -d
 
     # 6. 健康检查
-    echo "[5/5] 等待服务健康检查 ..."
+    echo "[6/6] 等待服务健康检查 ..."
     # 循环等待 api 健康检查通过（最多 ~60s），避免单次 sleep 不足导致误报
     for _ in $(seq 1 12); do
       docker compose -f "${COMPOSE_FILE}" ps api | grep -q "healthy" && break
