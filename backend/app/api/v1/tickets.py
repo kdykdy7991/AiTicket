@@ -457,6 +457,7 @@ async def export_tickets(
     user: User = Depends(get_current_user),
 ):
     """导出工单为 CSV（真实数据，按当前筛选条件）。"""
+    from datetime import datetime, time
     from app.models.group import Group, SkillGroup
     from app.models.category import TicketCategory
     from app.models.user import User as UserModel
@@ -519,7 +520,6 @@ async def export_tickets(
 
     # 创建时间区间（inclusive 端点）：date_from 00:00:00 ~ date_to 23:59:59.999999
     if date_from or date_to:
-        from datetime import datetime, time
         if date_from:
             try:
                 d = datetime.strptime(date_from, "%Y-%m-%d")
