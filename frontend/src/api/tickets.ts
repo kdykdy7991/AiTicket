@@ -328,10 +328,10 @@ export const ticketApi = {
     if (params.columns?.length) {
       const colGroups = new Set<string>()
       for (const key of params.columns) {
-        if (['number', 'state', 'priority', 'channel', 'created_at', 'closed_at', 'close_duration'].includes(key)) colGroups.add('base')
-        if (['customer_name', 'customer_phone', 'device_sn', 'customer_type'].includes(key)) colGroups.add('customer')
-        if (['category_l1', 'symptom', 'is_duplicate', 'priority'].includes(key)) colGroups.add('category')
-        if (['first_owner', 'skill_group', 'sla_breached', 'resolution', 'resolved'].includes(key)) colGroups.add('workflow')
+        if (['number', 'created_at', 'closed_at', 'close_duration', 'state', 'channel'].includes(key)) colGroups.add('base')
+        if (['customer_name', 'customer_company', 'customer_phone', 'contact_phone', 'device_sn', 'region_name'].includes(key)) colGroups.add('customer')
+        if (['category_l1', 'category_l2', 'symptom', 'priority'].includes(key)) colGroups.add('category')
+        if (['creator_name', 'dispatcher_name', 'owner_name', 'resolution', 'is_callbacked', 'callback_time', 'satisfaction', 'archive_notes', 'sla_breached'].includes(key)) colGroups.add('workflow')
       }
       queryParams.columns = [...colGroups].join(',')
     }

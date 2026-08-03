@@ -551,6 +551,7 @@ async def export_tickets(
     }
     customer_type_labels = {"personal": "个人", "enterprise": "政企"}
     channel_labels = {"phone": "电话", "wechat": "微信服务号", "web": "Web", "app": "App"}
+    satisfaction_labels = {"satisfied": "满意", "average": "一般", "dissatisfied": "不满意", "unrated": "未评价"}
 
     # 列定义：(表头, 取值函数)
     col_defs: list[tuple[str, any]] = []
@@ -566,26 +567,30 @@ async def export_tickets(
     if "customer" in col_groups:
         col_defs += [
             ("用户姓名", lambda t: t.customer_name),
-            ("联系手机号", lambda t: t.customer_phone),
+            ("单位名称", lambda t: t.customer_company or ""),
+            ("来电号码", lambda t: t.customer_phone),
+            ("联系号码", lambda t: t.contact_phone or ""),
             ("设备编号/SN", lambda t: t.device_sn or ""),
-            ("用户类型", lambda t: customer_type_labels.get(t.customer_type, t.customer_type)),
+            ("所属区域", lambda t: t.region_name or ""),
         ]
     if "category" in col_groups:
         col_defs += [
-            ("一级分类", lambda t: t.category.name if t.category else ""),
-            ("故障现象描述", lambda t: t.symptom or ""),
-            ("是否重复工单", lambda t: "是" if t.is_duplicate else "否"),
+            ("一级分类", lambda t: t.category.parent.name if t.category and t.category.parent else ""),
+            ("二级分类", lambda t: t.category.name if t.category else ""),
+            ("问题详情", lambda t: t.symptom or ""),
             ("优先级", lambda t: priority_labels.get(t.priority, t.priority)),
         ]
     if "workflow" in col_groups:
         col_defs += [
-            ("首次受理坐席", lambda t: t.first_owner_id or ""),
-            ("对接部门", lambda t: t.skill_group.name if t.skill_group else ""),
-            ("SLA是否达标", lambda t: "超时" if t.sla_solution_breached else "达标"),
-            ("处理备注", lambda t: t.resolution or ""),
-            ("是否解决", lambda t: "是" if t.resolved else "否"),
-            ("归档备注", lambda t: t.archive_notes or ""),
+            ("工单创建人", lambda t: t.creator.name if t.creator else ""),
+            ("实际对接人", lambda t: t.dispatcher.name if t.dispatcher else ""),
+            ("实际处理人", lambda t: t.owner.name if t.owner else ""),
+            ("解决方案内容", lambda t: t.resolution or ""),
             ("是否回访", lambda t: "是" if t.is_callbacked else "否"),
+            ("回访时间", lambda t: ""),  # 暂无独立回访时间字段
+            ("客户满意度", lambda t: satisfaction_labels.get(t.satisfaction, "") if t.satisfaction else ""),
+            ("归档说明", lambda t: t.archive_notes or ""),
+            ("SLA是否达标", lambda t: "超时" if t.sla_solution_breached else "达标"),
         ]
 
     # 生成 CSV（UTF-8 BOM，Excel 友好）
