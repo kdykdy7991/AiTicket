@@ -31,6 +31,54 @@ SKILL_GROUPS = [
     (8, '星空智联行销部'),
 ]
 
+# 分类（只确保存在，不删除已有分类；用 id 做 upsert，可覆盖旧分类名）
+CATEGORIES = [
+    # 一级分类 (id, parent_id, name, level, sort_order)
+    (1, None, '咨询类', 1, 1),
+    (2, None, '业务类', 1, 2),
+    (3, None, '故障类', 1, 3),
+    (4, None, '投诉类', 1, 4),
+    (5, None, '其他', 1, 5),
+    (6, None, '错号', 1, 6),
+    (7, None, '广告推销', 1, 7),
+    # 二级分类：咨询类
+    (101, 1, '品牌咨询', 2, 1),
+    (102, 1, '渠道/代理规则咨询', 2, 2),
+    (103, 1, '资费套餐（定义和类型）', 2, 3),
+    (104, 1, '产品&参数咨询', 2, 4),
+    (105, 1, '操作使用咨询', 2, 5),
+    (106, 1, '其他', 2, 6),
+    # 二级分类：业务类
+    (201, 2, '渠道/代理合同&合作洽谈', 2, 1),
+    (202, 2, '业务办理', 2, 2),
+    (203, 2, '发票办理', 2, 3),
+    (204, 2, '账单&缴费异议', 2, 4),
+    (205, 2, '资费异议', 2, 5),
+    (206, 2, '其他', 2, 6),
+    # 二级分类：故障类
+    (301, 3, '终端硬件故障', 2, 1),
+    (302, 3, 'SIM卡故障', 2, 2),
+    (303, 3, '外设&配套故障', 2, 3),
+    (304, 3, '数据传输故障', 2, 4),
+    (305, 3, '网络&星座链路故障', 2, 5),
+    (306, 3, '平台故障', 2, 6),
+    (307, 3, '其他', 2, 7),
+    # 二级分类：投诉类
+    (401, 4, '服务态度投诉', 2, 1),
+    (402, 4, '服务时效投诉', 2, 2),
+    (403, 4, '服务质量', 2, 3),
+    (404, 4, '综合意见&建议投诉', 2, 4),
+    (405, 4, '群体性&应急投诉', 2, 5),
+    (406, 4, '履约投诉', 2, 6),
+    (407, 4, '其他', 2, 7),
+    # 二级分类：其他
+    (501, 5, '其他', 2, 1),
+    (502, 5, '北斗终端', 2, 2),
+    (503, 5, '车载', 2, 3),
+    (504, 5, '海外业务', 2, 4),
+    (505, 5, '卫星业务', 2, 5),
+]
+
 # 处理人（不覆盖已存在的用户）
 HANDLERS = [
     (17, 'jinxin', '金鑫', 'handler', 1, False, _DEFAULT_HASH),
@@ -96,6 +144,25 @@ async def main() -> None:
                 for sg in SKILL_GROUPS
             ],
         )
+
+        print("Upserting categories...")
+        await db.execute(
+            text("""
+                INSERT INTO ticket_categories (id, parent_id, name, level, sort_order, is_active, created_at, updated_at)
+                VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active, :created_at, :updated_at)
+                ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, parent_id = EXCLUDED.parent_id, level = EXCLUDED.level, sort_order = EXCLUDED.sort_order
+            """),
+            [
+                {
+                    "id": c[0], "parent_id": c[1], "name": c[2],
+                    "level": c[3], "sort_order": c[4],
+                    "is_active": True, "created_at": now, "updated_at": now,
+                }
+                for c in CATEGORIES
+            ],
+        )
+        # 重置 ticket_categories 序列，避免后续插入冲突
+        await db.execute(text("SELECT setval('ticket_categories_id_seq', COALESCE((SELECT MAX(id) FROM ticket_categories), 1))"))
 
         print("Inserting handler users...")
         # 先查已存在的 username / name，避免唯一约束冲突
