@@ -26,13 +26,6 @@
         </el-button>
       </el-form-item>
     </el-form>
-
-    <div class="login-footer">
-      <div class="demo-hint">
-        <span class="hint-label">演示账号</span>
-        <code>admin</code> / <code>admin123</code>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -133,31 +126,4 @@ async function onLogin() {
   letter-spacing: 0.02em;
 }
 
-.login-footer {
-  margin-top: 24px;
-  text-align: center;
-}
-
-.demo-hint {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-}
-.hint-label {
-  background: var(--color-bg-subtle);
-  padding: 2px 8px;
-  border-radius: var(--radius-full);
-  font-weight: 500;
-  font-size: 11px;
-}
-.demo-hint code {
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  background: var(--color-bg-subtle);
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-</style>
+  </style>
