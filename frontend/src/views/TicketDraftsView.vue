@@ -26,7 +26,6 @@
           >
             <div class="draft-main" @click="onEdit(draft.id)">
               <div class="draft-left">
-                <CustomerTypeChip v-if="draft.customer_type" :type="draft.customer_type" />
                 <span class="draft-customer">{{ draft.customer_name }}</span>
                 <span v-if="(draft as any).category_l1_name" class="draft-category">{{ (draft as any).category_l1_name }}{{ (draft as any).category_l2_name ? '/' + (draft as any).category_l2_name : '' }}</span>
               </div>
@@ -49,7 +48,6 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import CustomerTypeChip from '@/components/common/CustomerTypeChip.vue'
 import RelativeTime from '@/components/common/RelativeTime.vue'
 
 const router = useRouter()
