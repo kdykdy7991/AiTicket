@@ -120,6 +120,10 @@ else
     echo "[4/5] 同步种子数据 ..."
     docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/update_seed_data.py
 
+    # 历史归档工单数据修正（已归档+未回访 → 无需回访，幂等，可重复执行）
+    echo "[4b/5] 修正历史归档回访标记 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/sync_archived_callback.py
+
     # 5. 启动/更新服务
     echo "[5/6] 启动服务 ..."
     docker compose -f "${COMPOSE_FILE}" up -d
