@@ -384,7 +384,7 @@ async function submitArchive() {
     await ticketStore.updateTicket(t.id, {
       state: 'archived',
       archive_notes: archiveNotes.value.trim(),
-      callback_required: !callBacked,  // 无需回访 → callback_required=false
+      callback_required: callBacked,  // 已回访→true(需要回访已落实)；无需回访→false
       is_callbacked: callBacked,
       satisfaction: callBacked ? satisfaction.value : undefined,
     } as any)
