@@ -14,6 +14,9 @@ api.interceptors.request.use(config => {
   return config
 })
 
+// 被顶下线时的 401 提示去重：避免同一时间多个请求各弹一条
+let lastAuthNotice = 0
+
 api.interceptors.response.use(
   response => response.data,
   error => {
@@ -25,11 +28,18 @@ api.interceptors.response.use(
       console.error('[404]', error.config?.method?.toUpperCase(), error.config?.baseURL + error.config?.url)
     }
     if (error.response?.status === 401) {
-      // Token 过期或无效，清空本地存储并跳转登录
+      // Token 过期、被顶下线或无效：清空本地存储并跳转登录
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
       if (window.location.pathname !== '/login') {
+        // 有具体原因（如"已在其他设备登录"）时提示，避免静默踢出
+        const detail = error.response?.data?.detail
+        const now = Date.now()
+        if (detail && now - lastAuthNotice > 3000) {
+          lastAuthNotice = now
+          ElMessage.warning(detail)
+        }
         window.location.href = '/login'
       }
     } else {

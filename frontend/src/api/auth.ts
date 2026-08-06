@@ -62,4 +62,11 @@ export const authApi = {
   async logout(): Promise<void> {
     try { await api.post('/auth/logout') } catch { /* 忽略 */ }
   },
+
+  async changePassword(oldPassword: string, newPassword: string): Promise<void> {
+    await api.post('/auth/change-password', {
+      old_password: oldPassword,
+      new_password: newPassword,
+    })
+  },
 }

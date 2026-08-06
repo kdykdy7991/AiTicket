@@ -273,6 +273,7 @@ export interface TicketFilters {
   state_id?: number | null
   priority_id?: number | null
   group_id?: number | null
+  creator_id?: number | null
   owner_id?: number | null
   customer_type?: CustomerType | null
   category_l1_id?: number | null

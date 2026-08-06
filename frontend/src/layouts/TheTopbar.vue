@@ -19,6 +19,9 @@
             <el-dropdown-item disabled>
               <span style="color: var(--color-text-tertiary); font-size: 12px;">{{ authStore.user?.email }}</span>
             </el-dropdown-item>
+            <el-dropdown-item command="changePassword">
+              修改密码
+            </el-dropdown-item>
             <el-dropdown-item divided command="logout">
               退出登录
             </el-dropdown-item>
@@ -26,20 +29,27 @@
         </template>
       </el-dropdown>
     </div>
+    <ChangePasswordDialog v-model="changePasswordVisible" />
   </header>
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+
+const changePasswordVisible = ref(false)
 
 function onCommand(cmd: string) {
   if (cmd === 'logout') {
     authStore.logout()
     router.push({ name: 'Login' })
+  } else if (cmd === 'changePassword') {
+    changePasswordVisible.value = true
   }
 }
 </script>

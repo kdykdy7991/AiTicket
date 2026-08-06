@@ -145,6 +145,25 @@ export const metaApi = {
       })) as any
   },
 
+  // 工单创建人：仅客服组(agent)成员 + 管理员。
+  // 处理人(handler)在对接部门，不参与建单，不应出现在创建人筛选里。
+  async getCreators(): Promise<User[]> {
+    const [a, ad] = await Promise.all([
+      api.get('/users', { params: { role: 'agent' } }),
+      api.get('/users', { params: { role: 'admin' } }),
+    ])
+    return [...(a.data as any[]), ...(ad.data as any[])]
+      .filter((u: any) => u.is_active)
+      .map(u => ({
+        id: u.id,
+        email: u.username,
+        firstname: u.name,
+        lastname: '',
+        role: { id: 0, name: u.role, permissions: [] },
+        active: u.is_active,
+      })) as any
+  },
+
   async getCategories(): Promise<TicketCategory[]> {
     const res: ListResp<any> = await api.get('/categories')
     return flattenCategories(res.data)

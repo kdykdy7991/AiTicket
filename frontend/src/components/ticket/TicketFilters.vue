@@ -11,22 +11,13 @@
         <el-option v-for="p in priorities" :key="p.id" :label="p.name" :value="p.id" />
       </el-select>
       <el-select
-        v-model="local.group_id"
-        placeholder="客服组"
+        v-model="local.creator_id"
+        placeholder="创建人"
         clearable
         @change="emit('update:modelValue', local)"
         class="filter-select"
       >
-        <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
-      </el-select>
-      <el-select
-        v-model="local.owner_id"
-        placeholder="负责人"
-        clearable
-        @change="emit('update:modelValue', local)"
-        class="filter-select"
-      >
-        <el-option v-for="a in agents" :key="a.id" :label="`${a.firstname}${a.lastname}`" :value="a.id" />
+        <el-option v-for="c in creators" :key="c.id" :label="c.firstname" :value="c.id" />
       </el-select>
       <el-select
         v-model="local.is_callbacked"
@@ -71,7 +62,7 @@
 <script setup lang="ts">
 import { reactive, onMounted, ref, watch } from 'vue'
 import { metaApi } from '@/api/overviews'
-import type { TicketFilters, TicketPriority, Group, User } from '@/types'
+import type { TicketFilters, TicketPriority, User } from '@/types'
 
 const props = defineProps<{ modelValue: TicketFilters }>()
 const emit = defineEmits<{ 'update:modelValue': [value: TicketFilters] }>()
@@ -79,8 +70,7 @@ const emit = defineEmits<{ 'update:modelValue': [value: TicketFilters] }>()
 const local = reactive<TicketFilters>({})
 const dateRange = ref<[string, string] | null>(null)
 const priorities = ref<TicketPriority[]>([])
-const groups = ref<Group[]>([])
-const agents = ref<User[]>([])
+const creators = ref<User[]>([])
 
 /** 日期区间变化：拆成 date_from / date_to 写回 local */
 function onDateChange(val: [string, string] | null) {
@@ -101,12 +91,11 @@ watch(() => props.modelValue, (v) => {
 }, { immediate: true, deep: true })
 
 onMounted(async () => {
-  const [p, g, a] = await Promise.all([
-    metaApi.getPriorities(), metaApi.getGroups(), metaApi.getAgents(),
+  const [p, c] = await Promise.all([
+    metaApi.getPriorities(), metaApi.getCreators(),
   ])
   priorities.value = p
-  groups.value = g
-  agents.value = a
+  creators.value = c
 })
 </script>
 

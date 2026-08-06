@@ -217,6 +217,7 @@ function buildListParams(filters?: TicketFilters, page = 1, pageSize = 20) {
   if (f.state_id) params.state = STATE_ID_TO_KEY[f.state_id]
   if (f.priority_id) params.priority = PRIORITY_ID_TO_KEY[f.priority_id]
   if (f.owner_id) params.owner_id = f.owner_id
+  if (f.creator_id) params.creator_id = f.creator_id
   if (f.group_id) params.group_id = f.group_id
   if (f.skill_group_id) params.skill_group_id = f.skill_group_id
   if (f.category_id) params.category_id = f.category_id

@@ -319,6 +319,7 @@ async def list_tickets(
     priority: str | None = None,
     skill_group_id: int | None = None,
     owner_id: int | None = None,
+    creator_id: int | None = None,
     group_id: int | None = None,
     category_id: int | None = None,
     customer_type: str | None = None,
@@ -363,6 +364,8 @@ async def list_tickets(
         query = query.where(Ticket.skill_group_id == skill_group_id)
     if owner_id:
         query = query.where(Ticket.owner_id == owner_id)
+    if creator_id:
+        query = query.where(Ticket.creator_id == creator_id)
     if group_id:
         query = query.where(Ticket.group_id == group_id)
     if category_id:
@@ -443,6 +446,7 @@ async def export_tickets(
     priority: str | None = None,
     skill_group_id: int | None = None,
     owner_id: int | None = None,
+    creator_id: int | None = None,
     group_id: int | None = None,
     category_id: int | None = None,
     customer_type: str | None = None,
@@ -491,6 +495,8 @@ async def export_tickets(
         query = query.where(Ticket.skill_group_id == skill_group_id)
     if owner_id:
         query = query.where(Ticket.owner_id == owner_id)
+    if creator_id:
+        query = query.where(Ticket.creator_id == creator_id)
     if group_id:
         query = query.where(Ticket.group_id == group_id)
     if category_id:

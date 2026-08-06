@@ -27,6 +27,14 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已禁用")
 
+    # 会话版本校验：每次登录版本 +1，旧会话的 access token（版本落后）立即失效，
+    # 实现"一个账号同时只能一人在线"（后登录者顶掉前者）
+    if payload.get("ver", 0) != user.token_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="该账号已在其他设备登录，请重新登录",
+        )
+
     return user
 
 
