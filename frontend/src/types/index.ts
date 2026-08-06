@@ -165,6 +165,7 @@ export interface Ticket {
   resolution: string | null
   archive_notes: string | null
   is_callbacked: boolean
+  callback_required?: boolean  // 是否需要回访（false=无需回访）；仅详情接口返回
   // 催办
   urged_at: string | null
   urged_by: User | null
@@ -367,6 +368,7 @@ export interface TicketUpdatePayload {
   callback_details?: string | null
   archive_notes?: string | null
   is_callbacked?: boolean | null
+  callback_required?: boolean | null
   resolved?: boolean
   resolution?: string
 }

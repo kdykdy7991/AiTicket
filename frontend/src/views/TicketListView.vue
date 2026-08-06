@@ -172,11 +172,13 @@ function onQuickTab(key: string) {
   activeTab.value = key
   currentPage.value = 1
   const tab = quickTabs.value.find(t => t.key === key)
-  const filters: any = {}
+  // 保留现有筛选条件（日期、优先级、搜索等），只叠加或移除 state_id
+  const filters = { ...ticketStore.filters }
   if (tab?.stateId) {
     filters.state_id = tab.stateId
+  } else {
+    delete filters.state_id
   }
-  // "全部" 不设 state_id；setFilters 替换语义，跟原行为一致
   ticketStore.setFilters(filters)
   ticketStore.fetchTickets(1)
 }

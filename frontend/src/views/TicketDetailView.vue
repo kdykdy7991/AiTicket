@@ -101,12 +101,12 @@
                 maxlength="2000"
                 show-word-limit
               />
-              <el-radio-group v-model="isCallbacked">
-                <el-radio :label="true">已回访</el-radio>
-                <el-radio :label="false">未回访</el-radio>
+              <el-radio-group v-model="callbackChoice">
+                <el-radio label="call_backed">已回访</el-radio>
+                <el-radio label="no_need">无需回访</el-radio>
               </el-radio-group>
               <!-- 已回访时显示满意度：满意/一般/不满意，必填 -->
-              <el-radio-group v-if="isCallbacked" v-model="satisfaction" class="satisfaction-group">
+              <el-radio-group v-if="callbackChoice === 'call_backed'" v-model="satisfaction" class="satisfaction-group">
                 <span class="satisfaction-label">满意度：</span>
                 <el-radio :label="'satisfied'">满意</el-radio>
                 <el-radio :label="'average'">一般</el-radio>
@@ -117,7 +117,7 @@
                 <el-button
                   type="success"
                   :loading="archiving"
-                  :disabled="isCallbacked && !satisfaction"
+                  :disabled="callbackChoice === 'call_backed' && !satisfaction"
                   @click="submitArchive"
                 >
                   归档
@@ -359,31 +359,34 @@ const archiving = ref(false)
 
 // ── 已处理工单归档面板 ──────────────────────────────────────
 const archiveNotes = ref('')
-const isCallbacked = ref(false)
+// 回访选择：'call_backed'=已回访（is_callbacked=true），'no_need'=无需回访（callback_required=false）
+const callbackChoice = ref<'call_backed' | 'no_need'>('no_need')
 const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | 'unrated' | ''>('')
 
 watch(canArchiveFromResolved, (visible) => {
   if (!visible) {
     archiveNotes.value = ''
-    isCallbacked.value = false
+    callbackChoice.value = 'no_need'
     satisfaction.value = ''
   } else {
     const t = ticket.value as any
     archiveNotes.value = t?.archive_notes || ''
-    isCallbacked.value = t?.is_callbacked ?? false
+    callbackChoice.value = t?.is_callbacked ? 'call_backed' : 'no_need'
     satisfaction.value = t?.satisfaction || ''
   }
 }, { immediate: true })
 
 async function submitArchive() {
   const t = ticket.value as any
+  const callBacked = callbackChoice.value === 'call_backed'
   archiving.value = true
   try {
     await ticketStore.updateTicket(t.id, {
       state: 'archived',
       archive_notes: archiveNotes.value.trim(),
-      is_callbacked: isCallbacked.value,
-      satisfaction: isCallbacked.value ? satisfaction.value : undefined,
+      callback_required: !callBacked,  // 无需回访 → callback_required=false
+      is_callbacked: callBacked,
+      satisfaction: callBacked ? satisfaction.value : undefined,
     } as any)
     ElMessage.success('工单已归档')
     ticketStore.refreshCurrentInList()

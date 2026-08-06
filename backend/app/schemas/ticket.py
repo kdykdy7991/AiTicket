@@ -40,6 +40,7 @@ class TicketUpdate(BaseModel):
     callback_details: str | None = None  # 回访详情
     archive_notes: str | None = None  # 归档备注
     is_callbacked: bool | None = None  # 是否已回访
+    callback_required: bool | None = None  # 是否需要回访（false=无需回访）
     satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，仅当 is_callbacked=true 时填写
 
 

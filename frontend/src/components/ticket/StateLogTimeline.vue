@@ -62,6 +62,7 @@
               <div v-if="ticket?.archive_notes" class="archive-block-body">{{ ticket.archive_notes }}</div>
               <div class="archive-block-meta">
                 <span v-if="ticket?.is_callbacked" class="badge badge-callback">✓ 已回访</span>
+                <span v-else-if="ticket?.callback_required === false" class="badge badge-no-callback">无需回访</span>
                 <span v-else class="badge badge-no-callback">未回访</span>
                 <span
                   v-if="ticket?.is_callbacked && ticket?.satisfaction"

@@ -1012,6 +1012,12 @@ async def update_ticket(
         # 未回访时清空满意度；避免历史脏数据
         if body.is_callbacked is False:
             ticket.satisfaction = None
+    if body.callback_required is not None:
+        ticket.callback_required = body.callback_required
+        if body.callback_required is False:
+            # 无需回访：强制已回访标记为否并清空满意度
+            ticket.is_callbacked = False
+            ticket.satisfaction = None
     if body.satisfaction is not None:
         # 校验：satisfaction 仅在 is_callbacked=true 时有意义
         allowed = {"satisfied", "average", "dissatisfied", "unrated"}

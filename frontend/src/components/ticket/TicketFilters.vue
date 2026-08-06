@@ -19,16 +19,6 @@
       >
         <el-option v-for="c in creators" :key="c.id" :label="c.firstname" :value="c.id" />
       </el-select>
-      <el-select
-        v-model="local.is_callbacked"
-        placeholder="是否回访"
-        clearable
-        @change="emit('update:modelValue', local)"
-        class="filter-select"
-      >
-        <el-option label="已回访" :value="true" />
-        <el-option label="未回访" :value="false" />
-      </el-select>
       <el-input
         v-model="local.keyword"
         placeholder="搜索工单号/客户/电话/SN/问题..."
@@ -81,6 +71,8 @@ function onDateChange(val: [string, string] | null) {
 
 // 外部 modelValue 变化时同步到 local（如点快捷标签重置筛选）
 watch(() => props.modelValue, (v) => {
+  // 先清空 local 再重新赋值，确保外部删除的字段不会残留
+  Object.keys(local).forEach(key => delete (local as any)[key])
   Object.assign(local, v)
   // 同步日期范围
   if (local.date_from && local.date_to) {
