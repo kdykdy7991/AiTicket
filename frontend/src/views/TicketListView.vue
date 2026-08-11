@@ -296,7 +296,7 @@ async function onExport() {
 /* 多选已移除，无相关样式 */
 
 .list-card { border: 1px solid var(--color-border-light); }
-.list-card :deep(.el-card__body) { padding: 0; }
+.list-card :deep(.el-card__body) { padding: 0 16px; }
 
 /* 快捷分类标签 */
 .quick-tabs {
