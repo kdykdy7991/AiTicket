@@ -78,7 +78,9 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import type { TableInstance } from 'element-plus'
 import StateTag from '@/components/common/StateTag.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
@@ -190,6 +192,13 @@ function onRowClick(row: Ticket) {
 function onSelectionChange(rows: Ticket[]) {
   emit('selection-change', rows)
 }
+
+const tableRef = ref<TableInstance>()
+
+/** 暴露给父组件，批量取消时同步清掉 el-table 内部的勾选状态 */
+defineExpose({
+  clearSelection: () => tableRef.value?.clearSelection(),
+})
 </script>
 
 <style scoped>

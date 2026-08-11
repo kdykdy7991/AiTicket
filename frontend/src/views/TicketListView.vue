@@ -77,6 +77,7 @@
 
     <el-card shadow="never" v-loading="ticketStore.loading" class="list-card">
       <TicketTable
+        ref="ticketTableRef"
         :tickets="ticketStore.tickets"
         :selectable="true"
         @selection-change="onSelectionChange"
@@ -190,6 +191,8 @@ function onQuickTab(key: string) {
 }
 
 const selectedTickets = ref<Ticket[]>([])
+// 持有 TicketTable 实例的引用，调用其暴露的 clearSelection 同步清掉 el-table 内部勾选
+const ticketTableRef = ref<{ clearSelection: () => void } | null>(null)
 const states = ref<TicketState[]>([])
 const priorities = ref<TicketPriority[]>([])
 const groups = ref<Group[]>([])
@@ -279,6 +282,7 @@ function onSelectionChange(rows: Ticket[]) {
 
 function clearSelection() {
   selectedTickets.value = []
+  ticketTableRef.value?.clearSelection()
   batchField.value = ''
   batchValue.value = ''
 }
