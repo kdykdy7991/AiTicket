@@ -296,7 +296,13 @@ async function onExport() {
 /* 多选已移除，无相关样式 */
 
 .list-card { border: 1px solid var(--color-border-light); }
-.list-card :deep(.el-card__body) { padding: 0 16px; }
+.list-card :deep(.el-card__body) { padding: 0; }
+/* 行背景（灰色行/表头灰底）顶满卡片边：表格本身贴卡片边
+   视觉留白改由数据行单元格左右 padding 提供，避免挤压时间列 */
+.list-card :deep(.el-table__body-wrapper .el-table__cell) {
+  padding-left: 16px;
+  padding-right: 16px;
+}
 
 /* 快捷分类标签 */
 .quick-tabs {
