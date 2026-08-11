@@ -155,7 +155,7 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 const currentPage = ref(1)
 
-// 快捷分类标签：全部 + 7 个状态（id 与后端 STATE_ID_TO_KEY 1..7 对应）
+// 快捷分类标签：全部 + 7 个状态（id 与后端 STATE_ID_TO_KEY 1..7 对应）+ 已超时
 const activeTab = ref('all')
 const quickTabs = computed(() => [
   { key: 'all', label: '全部' },
@@ -166,18 +166,24 @@ const quickTabs = computed(() => [
   { key: 'archived', label: '已归档', stateId: 5 },
   { key: 'returned', label: '已退回', stateId: 6 },
   { key: 'cancelled', label: '已撤销', stateId: 7 },
-] as Array<{ key: string; label: string; stateId?: number; count?: number }>)
+  { key: 'overdue', label: '已超时', isOverdue: true },
+] as Array<{ key: string; label: string; stateId?: number; isOverdue?: boolean; count?: number }>)
 
 function onQuickTab(key: string) {
   activeTab.value = key
   currentPage.value = 1
   const tab = quickTabs.value.find(t => t.key === key)
-  // 保留现有筛选条件（日期、优先级、搜索等），只叠加或移除 state_id
-  const filters = { ...ticketStore.filters }
+  // 保留现有筛选条件（日期、优先级、搜索等），只叠加或移除 state_id / is_overdue
+  const filters: Filters = { ...ticketStore.filters }
   if (tab?.stateId) {
     filters.state_id = tab.stateId
   } else {
     delete filters.state_id
+  }
+  if (tab?.isOverdue) {
+    filters.is_overdue = true
+  } else {
+    delete filters.is_overdue
   }
   ticketStore.setFilters(filters)
   ticketStore.fetchTickets(1)

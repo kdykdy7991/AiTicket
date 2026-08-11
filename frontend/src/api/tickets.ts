@@ -221,11 +221,12 @@ function buildListParams(filters?: TicketFilters, page = 1, pageSize = 20) {
   if (f.group_id) params.group_id = f.group_id
   if (f.skill_group_id) params.skill_group_id = f.skill_group_id
   if (f.category_id) params.category_id = f.category_id
+  if (f.category_l2_id) params.category_id = f.category_l2_id
   if (f.customer_type) params.customer_type = f.customer_type
   if (f.keyword) params.keyword = f.keyword
   if (f.is_duplicate !== undefined) params.is_duplicate = f.is_duplicate
   if (f.is_callbacked !== undefined) params.is_callbacked = f.is_callbacked
-  if ((f as any).is_overdue) params.is_overdue = true
+  if (f.is_overdue) params.is_overdue = true
   if (f.date_from) params.date_from = f.date_from
   if (f.date_to) params.date_to = f.date_to
   return params

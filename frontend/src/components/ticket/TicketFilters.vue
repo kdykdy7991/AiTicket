@@ -2,6 +2,21 @@
   <div class="filters-bar">
     <div class="filter-items">
       <el-select
+        v-model="local.category_l2_id"
+        placeholder="二级分类"
+        clearable
+        filterable
+        @change="emit('update:modelValue', local)"
+        class="filter-select"
+      >
+        <el-option
+          v-for="c in l2Categories"
+          :key="c.id"
+          :label="`${c.parent_name ? c.parent_name + ' / ' : ''}${c.name}`"
+          :value="c.id"
+        />
+      </el-select>
+      <el-select
         v-model="local.priority_id"
         placeholder="优先级"
         clearable
@@ -50,9 +65,15 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, onMounted, ref, watch } from 'vue'
+import { reactive, computed, onMounted, ref, watch } from 'vue'
 import { metaApi } from '@/api/overviews'
-import type { TicketFilters, TicketPriority, User } from '@/types'
+import type { TicketFilters, TicketPriority, User, TicketCategory } from '@/types'
+
+interface L2CategoryOption {
+  id: number
+  name: string
+  parent_name: string
+}
 
 const props = defineProps<{ modelValue: TicketFilters }>()
 const emit = defineEmits<{ 'update:modelValue': [value: TicketFilters] }>()
@@ -61,6 +82,30 @@ const local = reactive<TicketFilters>({})
 const dateRange = ref<[string, string] | null>(null)
 const priorities = ref<TicketPriority[]>([])
 const creators = ref<User[]>([])
+const categories = ref<TicketCategory[]>([])
+
+/** 二级分类下拉项：所有 L2（标注"一级 / 二级"）+ 没有 L2 子项的孤立 L1（仅显示一级名） */
+const l2Categories = computed<L2CategoryOption[]>(() => {
+  const active = categories.value.filter(c => c.active)
+  const nameById = new Map<number, string>(active.map(c => [c.id, c.name]))
+  const l1List = active.filter(c => c.parent_id == null)
+  const l2List = active.filter(c => c.parent_id != null)
+  // 已被 L2 引用的 L1 不再单独列出，避免和子项重复
+  const l1WithChildren = new Set(l2List.map(c => c.parent_id!))
+  const orphanL1 = l1List
+    .filter(c => !l1WithChildren.has(c.id))
+    .map(c => ({ id: c.id, name: c.name, parent_name: '' }))
+  const l2 = l2List.map(c => ({
+    id: c.id,
+    name: c.name,
+    parent_name: nameById.get(c.parent_id!) || '',
+  }))
+  return [...orphanL1, ...l2].sort((a, b) => {
+    const ka = a.parent_name + a.name
+    const kb = b.parent_name + b.name
+    return ka.localeCompare(kb, 'zh-Hans-CN')
+  })
+})
 
 /** 日期区间变化：拆成 date_from / date_to 写回 local */
 function onDateChange(val: [string, string] | null) {
@@ -83,11 +128,12 @@ watch(() => props.modelValue, (v) => {
 }, { immediate: true, deep: true })
 
 onMounted(async () => {
-  const [p, c] = await Promise.all([
-    metaApi.getPriorities(), metaApi.getCreators(),
+  const [p, c, cats] = await Promise.all([
+    metaApi.getPriorities(), metaApi.getCreators(), metaApi.getCategories(),
   ])
   priorities.value = p
   creators.value = c
+  categories.value = cats
 })
 </script>
 

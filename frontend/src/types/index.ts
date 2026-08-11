@@ -285,6 +285,7 @@ export interface TicketFilters {
   date_from?: string | null
   date_to?: string | null
   escalated?: boolean | null
+  is_overdue?: boolean | null
   keyword?: string
 }
 
