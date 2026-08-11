@@ -39,39 +39,11 @@
 
     <TicketFilters :model-value="ticketStore.filters" @update:model-value="onFilterChange" />
 
-    <!-- 批量操作工具栏 -->
+    <!-- 选中提示（多选仅服务于导出） -->
     <transition name="batch-bar">
       <div v-if="selectedTickets.length > 0" class="batch-bar">
-        <div class="batch-info">
-          <span class="batch-count">已选 {{ selectedTickets.length }} 条</span>
-          <el-button text size="small" @click="clearSelection">取消选择</el-button>
-        </div>
-        <div class="batch-actions">
-          <el-select v-model="batchField" placeholder="选择要批量修改的字段" size="small" style="width: 160px" @change="onBatchFieldChange">
-            <el-option label="批量改状态" value="state_id" />
-            <el-option label="批量改优先级" value="priority_id" />
-            <el-option label="批量改负责人" value="owner_id" />
-            <el-option label="批量改客服组" value="group_id" />
-          </el-select>
-          <el-select v-if="batchField" v-model="batchValue" placeholder="选择新值" size="small" style="width: 160px" clearable>
-            <template v-if="batchField === 'state_id'">
-              <el-option v-for="s in states" :key="s.id" :label="s.name" :value="s.id" />
-            </template>
-            <template v-else-if="batchField === 'priority_id'">
-              <el-option v-for="p in priorities" :key="p.id" :label="p.name" :value="p.id" />
-            </template>
-            <template v-else-if="batchField === 'owner_id'">
-              <el-option v-for="a in agents" :key="a.id" :label="`${a.firstname}${a.lastname}`" :value="a.id" />
-              <el-option label="取消分配" :value="null" />
-            </template>
-            <template v-else-if="batchField === 'group_id'">
-              <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
-            </template>
-          </el-select>
-          <el-button type="primary" size="small" :disabled="!batchField || batchValue === ''" :loading="batchUpdating" @click="onBatchApply">
-            应用
-          </el-button>
-        </div>
+        <span class="batch-count">已选 {{ selectedTickets.length }} 条</span>
+        <el-button text size="small" @click="clearSelection">取消选择</el-button>
       </div>
     </transition>
 
@@ -145,12 +117,11 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
-import { metaApi } from '@/api/overviews'
-import { ticketApi, STATE_ID_TO_KEY, PRIORITY_ID_TO_KEY } from '@/api/tickets'
+import { ticketApi } from '@/api/tickets'
 import TicketFilters from '@/components/ticket/TicketFilters.vue'
 import TicketTable from '@/components/ticket/TicketTable.vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import type { TicketFilters as Filters, Ticket, TicketState, TicketPriority, Group, User, ExportColumn, BatchUpdatePayload } from '@/types'
+import { ElMessage } from 'element-plus'
+import type { TicketFilters as Filters, Ticket, ExportColumn } from '@/types'
 
 const router = useRouter()
 const ticketStore = useTicketStore()
@@ -193,15 +164,6 @@ function onQuickTab(key: string) {
 const selectedTickets = ref<Ticket[]>([])
 // 持有 TicketTable 实例的引用，调用其暴露的 clearSelection 同步清掉 el-table 内部勾选
 const ticketTableRef = ref<{ clearSelection: () => void } | null>(null)
-const states = ref<TicketState[]>([])
-const priorities = ref<TicketPriority[]>([])
-const groups = ref<Group[]>([])
-const agents = ref<User[]>([])
-
-// 批量操作
-const batchField = ref<keyof BatchUpdatePayload | ''>('')
-const batchValue = ref<number | null | ''>('')
-const batchUpdating = ref(false)
 
 // 导出
 const exportDialogVisible = ref(false)
@@ -258,10 +220,6 @@ const columnGroups: Array<{ key: 'base' | 'customer' | 'category' | 'workflow'; 
 
 onMounted(async () => {
   await ticketStore.fetchTickets()
-  const [s, p, g, a] = await Promise.all([
-    metaApi.getStates(), metaApi.getPriorities(), metaApi.getGroups(), metaApi.getAgents(),
-  ])
-  states.value = s; priorities.value = p; groups.value = g; agents.value = a
   // 默认勾选所有列
   selectedColumns.value = columnGroups.flatMap(g => g.columns.map(c => c.key))
 })
@@ -283,50 +241,6 @@ function onSelectionChange(rows: Ticket[]) {
 function clearSelection() {
   selectedTickets.value = []
   ticketTableRef.value?.clearSelection()
-  batchField.value = ''
-  batchValue.value = ''
-}
-
-function onBatchFieldChange() {
-  batchValue.value = ''
-}
-
-async function onBatchApply() {
-  if (!batchField.value) return
-  try {
-    await ElMessageBox.confirm(
-      `确定要批量修改 ${selectedTickets.value.length} 条工单吗？`,
-      '确认批量操作',
-      { type: 'warning' }
-    )
-  } catch { return }
-
-  batchUpdating.value = true
-  try {
-    // 批量字段映射到后端 TicketUpdate（字符串/数字）并包进 updates
-    const rawValue = batchValue.value === '' ? null : batchValue.value
-    const updates: Record<string, any> = {}
-    if (batchField.value === 'state_id') {
-      updates.state = STATE_ID_TO_KEY[rawValue as number]
-    } else if (batchField.value === 'priority_id') {
-      updates.priority = PRIORITY_ID_TO_KEY[rawValue as number]
-    } else if (batchField.value === 'owner_id') {
-      updates.owner_id = rawValue
-    } else if (batchField.value === 'group_id') {
-      updates.group_id = rawValue
-    }
-    const res = await ticketApi.batchUpdate({
-      ticket_ids: selectedTickets.value.map(t => t.id),
-      updates,
-    } as any)
-    ElMessage.success(`已更新 ${res.updated} 条工单`)
-    clearSelection()
-    await ticketStore.fetchTickets(currentPage.value)
-  } catch {
-    ElMessage.error('批量更新失败')
-  } finally {
-    batchUpdating.value = false
-  }
 }
 
 function isGroupAllChecked(group: typeof columnGroups[number]): boolean {
@@ -405,7 +319,7 @@ async function onExport() {
   align-items: center;
 }
 
-/* 批量工具栏 */
+/* 多选提示条（多选仅服务于导出，无批量操作） */
 .batch-bar {
   display: flex;
   align-items: center;
@@ -416,9 +330,7 @@ async function onExport() {
   border-radius: var(--radius-md);
   margin-bottom: 12px;
 }
-.batch-info { display: flex; align-items: center; gap: 8px; }
 .batch-count { font-size: 13px; font-weight: 600; color: var(--color-primary); }
-.batch-actions { display: flex; gap: 8px; align-items: center; }
 
 .batch-bar-enter-active, .batch-bar-leave-active {
   transition: all 0.25s var(--ease-out);
