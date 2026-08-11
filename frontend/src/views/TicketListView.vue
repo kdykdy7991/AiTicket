@@ -296,9 +296,9 @@ async function onExport() {
 /* 多选已移除，无相关样式 */
 
 .list-card { border: 1px solid var(--color-border-light); }
-.list-card :deep(.el-card__body) { padding: 0 16px; }
-/* 表头不内缩：负 margin 抵消左右 16px 内边距，让表头顶到卡片边 */
-.list-card :deep(.el-table__header-wrapper) { margin: 0 -16px; }
+.list-card :deep(.el-card__body) { padding: 0; }
+/* 仅数据行留 16px：给 body-wrapper 加 padding，header-wrapper 仍然贴卡片边 */
+.list-card :deep(.el-table__body-wrapper) { padding: 0 16px; }
 
 /* 快捷分类标签 */
 .quick-tabs {
