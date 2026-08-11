@@ -39,21 +39,8 @@
 
     <TicketFilters :model-value="ticketStore.filters" @update:model-value="onFilterChange" />
 
-    <!-- 选中提示（多选仅服务于导出） -->
-    <transition name="batch-bar">
-      <div v-if="selectedTickets.length > 0" class="batch-bar">
-        <span class="batch-count">已选 {{ selectedTickets.length }} 条</span>
-        <el-button text size="small" @click="clearSelection">取消选择</el-button>
-      </div>
-    </transition>
-
     <el-card shadow="never" v-loading="ticketStore.loading" class="list-card">
-      <TicketTable
-        ref="ticketTableRef"
-        :tickets="ticketStore.tickets"
-        :selectable="true"
-        @selection-change="onSelectionChange"
-      />
+      <TicketTable :tickets="ticketStore.tickets" />
 
       <div class="pagination-wrapper">
         <el-pagination
@@ -121,7 +108,7 @@ import { ticketApi } from '@/api/tickets'
 import TicketFilters from '@/components/ticket/TicketFilters.vue'
 import TicketTable from '@/components/ticket/TicketTable.vue'
 import { ElMessage } from 'element-plus'
-import type { TicketFilters as Filters, Ticket, ExportColumn } from '@/types'
+import type { TicketFilters as Filters, ExportColumn } from '@/types'
 
 const router = useRouter()
 const ticketStore = useTicketStore()
@@ -160,10 +147,6 @@ function onQuickTab(key: string) {
   ticketStore.setFilters(filters)
   ticketStore.fetchTickets(1)
 }
-
-const selectedTickets = ref<Ticket[]>([])
-// 持有 TicketTable 实例的引用，调用其暴露的 clearSelection 同步清掉 el-table 内部勾选
-const ticketTableRef = ref<{ clearSelection: () => void } | null>(null)
 
 // 导出
 const exportDialogVisible = ref(false)
@@ -232,15 +215,6 @@ function onFilterChange(filters: Filters) {
 
 function onPageChange(page: number) {
   ticketStore.fetchTickets(page)
-}
-
-function onSelectionChange(rows: Ticket[]) {
-  selectedTickets.value = rows
-}
-
-function clearSelection() {
-  selectedTickets.value = []
-  ticketTableRef.value?.clearSelection()
 }
 
 function isGroupAllChecked(group: typeof columnGroups[number]): boolean {
@@ -319,26 +293,7 @@ async function onExport() {
   align-items: center;
 }
 
-/* 多选提示条（多选仅服务于导出，无批量操作） */
-.batch-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  background: rgba(99, 91, 255, 0.06);
-  border: 1px solid rgba(99, 91, 255, 0.20);
-  border-radius: var(--radius-md);
-  margin-bottom: 12px;
-}
-.batch-count { font-size: 13px; font-weight: 600; color: var(--color-primary); }
-
-.batch-bar-enter-active, .batch-bar-leave-active {
-  transition: all 0.25s var(--ease-out);
-}
-.batch-bar-enter-from, .batch-bar-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
-}
+/* 多选已移除，无相关样式 */
 
 .list-card { border: 1px solid var(--color-border-light); }
 .list-card :deep(.el-card__body) { padding: 0; }

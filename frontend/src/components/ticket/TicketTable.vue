@@ -5,11 +5,8 @@
     highlight-current-row
     style="width: 100%"
     @row-click="onRowClick"
-    @selection-change="onSelectionChange"
     class="ticket-table"
-    ref="tableRef"
   >
-    <el-table-column v-if="selectable" type="selection" width="48" />
     <el-table-column prop="number" label="编号" width="145">
       <template #default="{ row }">
         <span class="number-cell">{{ row.number || '—' }}</span>
@@ -78,22 +75,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import type { TableInstance } from 'element-plus'
 import StateTag from '@/components/common/StateTag.vue'
 import PriorityIcon from '@/components/common/PriorityIcon.vue'
 import UserAvatar from '@/components/common/UserAvatar.vue'
 import RelativeTime from '@/components/common/RelativeTime.vue'
 import type { Ticket } from '@/types'
 
-const props = withDefaults(defineProps<{
+defineProps<{
   tickets: Ticket[]
-  selectable?: boolean
-}>(), { selectable: false })
-
-const emit = defineEmits<{
-  'selection-change': [tickets: Ticket[]]
 }>()
 
 const router = useRouter()
@@ -188,17 +178,6 @@ function rowClassName({ row }: { row: Ticket }): string {
 function onRowClick(row: Ticket) {
   router.push({ name: 'TicketDetail', params: { id: row.id } })
 }
-
-function onSelectionChange(rows: Ticket[]) {
-  emit('selection-change', rows)
-}
-
-const tableRef = ref<TableInstance>()
-
-/** 暴露给父组件，批量取消时同步清掉 el-table 内部的勾选状态 */
-defineExpose({
-  clearSelection: () => tableRef.value?.clearSelection(),
-})
 </script>
 
 <style scoped>
