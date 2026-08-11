@@ -298,8 +298,9 @@ async function onExport() {
 .list-card { border: 1px solid var(--color-border-light); }
 .list-card :deep(.el-card__body) { padding: 0; }
 /* 行背景（灰色行/表头灰底）顶满卡片边：表格本身贴卡片边
-   视觉留白改由数据行单元格左右 padding 提供，避免挤压时间列 */
-.list-card :deep(.el-table__body-wrapper .el-table__cell) {
+   视觉留白改由所有单元格左右 padding 提供，避免挤压时间列
+   表头和数据行用同一份 padding，标题和内容对齐 */
+.list-card :deep(.el-table .el-table__cell) {
   padding-left: 16px;
   padding-right: 16px;
 }
