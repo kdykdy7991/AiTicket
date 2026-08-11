@@ -297,6 +297,8 @@ async function onExport() {
 
 .list-card { border: 1px solid var(--color-border-light); }
 .list-card :deep(.el-card__body) { padding: 0 16px; }
+/* 表头不内缩：负 margin 抵消左右 16px 内边距，让表头顶到卡片边 */
+.list-card :deep(.el-table__header-wrapper) { margin: 0 -16px; }
 
 /* 快捷分类标签 */
 .quick-tabs {
