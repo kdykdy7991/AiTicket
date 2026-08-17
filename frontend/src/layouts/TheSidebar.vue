@@ -94,13 +94,12 @@ const iconCategory = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none
 
 const mainMenu = computed(() => {
   const items = [
-    // { path: '/dashboard', label: '仪表盘', icon: iconDashboard },
-    { path: '/report', label: '统计报表', icon: iconReport },
     { path: '/tickets', label: '工单', icon: iconTickets },
   ]
-  // 我的草稿 / 新建工单仅客服和管理员可见
+  // 统计报表 / 我的草稿 / 新建工单仅客服和管理员可见
   if (authStore.isAgent) {
     items.push(
+      { path: '/report', label: '统计报表', icon: iconReport },
       { path: '/tickets/drafts', label: '我的草稿', icon: iconDraft },
       { path: '/tickets/new', label: '新建工单', icon: iconNew },
     )
