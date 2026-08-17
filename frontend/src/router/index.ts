@@ -24,7 +24,7 @@ const routes: RouteRecordRaw[] = [
     path: '/report',
     name: 'Report',
     component: () => import('@/views/ReportView.vue'),
-    meta: { title: '统计报表' },
+    meta: { title: '统计报表', requiresAgent: true },
   },
   {
     path: '/tickets',
@@ -85,6 +85,11 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return { name: 'TicketList' }
+  }
+
+  // 统计报表仅客服和管理员可访问
+  if (to.meta.requiresAgent && !auth.isAgent) {
     return { name: 'TicketList' }
   }
 

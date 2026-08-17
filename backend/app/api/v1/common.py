@@ -598,7 +598,7 @@ stats_router = APIRouter(tags=["stats"])
 async def dashboard_stats(
     group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("admin", "agent")),
 ):
     from datetime import datetime, timezone
     from sqlalchemy import or_
@@ -695,7 +695,7 @@ async def report_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("admin", "agent")),
 ):
     """按时间范围聚合统计报表。
 
@@ -986,7 +986,7 @@ async def trend_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("admin", "agent")),
 ):
     """按天返回新增/闭环趋势，供折线图使用。"""
     from datetime import date, datetime, timedelta, timezone
