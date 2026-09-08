@@ -299,7 +299,7 @@ async def create_article(
         ticket.urged_at = now
         ticket.urged_by_id = user.id
         await db.flush()
-        await remind_handler(ticket, article)
+        await remind_handler(ticket, article, db)
 
     # 追加信息副作用：标记工单已有追加信息
     if type == "addition":

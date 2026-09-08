@@ -27,8 +27,9 @@
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
+            <el-button text size="small" :disabled="!row.dingtalk_webhook_url" @click="onTestDingtalk('group', row)">测试机器人</el-button>
             <el-button text size="small" @click="openEdit('group', row)">编辑</el-button>
             <el-button text size="small" type="danger" @click="onRemove('group', row)">删除</el-button>
           </template>
@@ -56,8 +57,9 @@
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
+            <el-button text size="small" :disabled="!row.dingtalk_webhook_url" @click="onTestDingtalk('skill', row)">测试机器人</el-button>
             <el-button text size="small" @click="openEdit('skill', row)">编辑</el-button>
             <el-button text size="small" type="danger" @click="onRemove('skill', row)">删除</el-button>
           </template>
@@ -192,6 +194,17 @@ async function onRemove(type: 'group' | 'skill', row: GroupItem) {
     // 后端返回 400 时拦截器已弹消息，这里兜底
     const msg = e?.response?.data?.error?.message || e?.response?.data?.detail
     if (msg) ElMessage.error(msg)
+  }
+}
+
+async function onTestDingtalk(type: 'group' | 'skill', row: GroupItem) {
+  try {
+    if (type === 'group') await groupApi.testDingtalk(row.id)
+    else await skillGroupApi.testDingtalk(row.id)
+    ElMessage.success('测试消息已发送，请在钉钉群中确认')
+  } catch (e: any) {
+    const msg = e?.response?.data?.detail || '测试发送失败'
+    ElMessage.error(msg)
   }
 }
 

@@ -31,6 +31,10 @@ export const groupApi = {
     const res = await api.delete(`/groups/${id}`)
     return res.data
   },
+  async testDingtalk(id: number): Promise<any> {
+    const res = await api.post(`/groups/${id}/test-dingtalk`)
+    return res.data
+  },
 }
 
 export const skillGroupApi = {
@@ -48,6 +52,10 @@ export const skillGroupApi = {
   },
   async remove(id: number): Promise<any> {
     const res = await api.delete(`/skill-groups/${id}`)
+    return res.data
+  },
+  async testDingtalk(id: number): Promise<any> {
+    const res = await api.post(`/skill-groups/${id}/test-dingtalk`)
     return res.data
   },
 }

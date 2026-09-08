@@ -18,6 +18,7 @@ from app.schemas.common import (
     GroupOut, RegionCreate, RegionOut, SLAPolicyCreate, SLAPolicyOut,
     SkillGroupCreate, SkillGroupOut, UserCreate, UserOut, UserUpdate,
 )
+from app.services.notification import send_dingtalk_text
 
 # ── Users ─────────────────────────────────────────────────
 
@@ -234,6 +235,27 @@ async def update_group(
     return {"data": {"id": g.id, "name": g.name}}
 
 
+@groups_router.post("/groups/{group_id}/test-dingtalk")
+async def test_group_dingtalk(
+    group_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+):
+    result = await db.execute(select(Group).where(Group.id == group_id))
+    group = result.scalar_one_or_none()
+    if not group:
+        raise NotFoundError("客服组", group_id)
+    if not group.dingtalk_webhook_url:
+        raise HTTPException(422, detail="请先配置并保存钉钉 Webhook")
+    send_result = await send_dingtalk_text(
+        group.dingtalk_webhook_url,
+        f"【客服工单系统】客服组「{group.name}」机器人连接测试成功",
+    )
+    if not send_result.success:
+        raise HTTPException(502, detail=send_result.error_message)
+    return {"data": {"success": True}}
+
+
 @groups_router.delete("/groups/{group_id}")
 async def delete_group(
     group_id: int,
@@ -323,6 +345,27 @@ async def update_skill_group(
     g.dingtalk_webhook_url = body.dingtalk_webhook_url
     await db.flush()
     return {"data": {"id": g.id, "name": g.name}}
+
+
+@skill_groups_router.post("/skill-groups/{group_id}/test-dingtalk")
+async def test_skill_group_dingtalk(
+    group_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+):
+    result = await db.execute(select(SkillGroup).where(SkillGroup.id == group_id))
+    group = result.scalar_one_or_none()
+    if not group:
+        raise NotFoundError("对接部门", group_id)
+    if not group.dingtalk_webhook_url:
+        raise HTTPException(422, detail="请先配置并保存钉钉 Webhook")
+    send_result = await send_dingtalk_text(
+        group.dingtalk_webhook_url,
+        f"【客服工单系统】对接部门「{group.name}」机器人连接测试成功",
+    )
+    if not send_result.success:
+        raise HTTPException(502, detail=send_result.error_message)
+    return {"data": {"success": True}}
 
 
 @skill_groups_router.delete("/skill-groups/{group_id}")
@@ -1047,4 +1090,3 @@ async def trend_stats(
         cur += timedelta(days=1)
 
     return {"data": {"date_from": date_from, "date_to": date_to, "days": days}}
-
