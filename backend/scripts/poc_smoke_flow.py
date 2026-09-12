@@ -2,9 +2,9 @@
 
 用五个业务角色账号（+ 隐藏管理员）真实走一遍总约定主流程：
 
-    售前提交 → 批准人审批 → 专项小组确认 → 专项小组流转分系统
-    → 分系统接收 → 分系统提交闭环计划 → 售前确认计划
-    → 分系统提交分析验证 → 质量评审 → 质量登记缺陷 → 已闭环
+    售前提交 → 批准人审批 → 专项小组确认并流转分系统
+    → 分系统提交闭环计划 → 售前确认计划 → 分系统提交分析验证
+    → 质量评审 → 批准人复核闭环
 
 前置：`alembic upgrade head` + `python scripts/seed.py`，并已启动 API。
 
@@ -188,18 +188,15 @@ class POCSmokeFlow:
             payload={
                 "verification_status": "resolved",
                 "verification_conclusion": "现场验证通过，连续 72 小时无掉线",
-                "quality_review_result": "同意纳入缺陷库",
+                "quality_review_result": "同意闭环",
             },
             comment="评审通过",
         )
         await self.act(
-            "quality",
+            "approver",
             ticket_id,
-            "register_defect",
-            payload={
-                "defect_id": "BUG-POC-0001",
-                "defect_repository_path": "svn://svn.example.com/poc/trunk/defects#1001",
-            },
+            "approve_closure",
+            comment="评审结果确认，批准闭环",
         )
 
         print("\n4) 闭环结果校验")
@@ -207,10 +204,9 @@ class POCSmokeFlow:
         checks = [
             ("终态为 closed", final["state"] == "closed"),
             ("无可用动作", final["allowed_actions"] == []),
-            ("缺陷 ID 已登记", bool(final["defect_id"])),
-            ("SVN 路径已登记", bool(final["defect_repository_path"])),
-            ("状态版本递增", final["state_version"] >= 10),
-            ("流程日志完整", len(final["state_logs"]) >= 10),
+            ("闭环时间已记录", bool(final["closed_at"])),
+            ("状态版本递增", final["state_version"] >= 8),
+            ("流程日志完整", len(final["state_logs"]) >= 8),
             ("已逾期标记为否", final["is_overdue"] is False),
         ]
         for label, ok in checks:

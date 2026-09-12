@@ -177,6 +177,9 @@ def _return_target_matches(ticket: Any, actor: Any) -> bool:
             actor_has_role(actor, BusinessRole.SUBSYSTEM)
             and ticket.subsystem_owner_id == actor.id
         )
+    if target == TicketState.PENDING_QUALITY_REVIEW.value:
+        # 质量是角色级责任，任意质量人员都可以继续处理
+        return actor_has_role(actor, BusinessRole.QUALITY)
     return False
 
 
@@ -466,13 +469,6 @@ async def execute_action(
             ticket.verification_conclusion = payload["verification_conclusion"]
         if payload.get("quality_review_result") is not None:
             ticket.quality_review_result = payload["quality_review_result"]
-    elif action is TicketAction.REGISTER_DEFECT:
-        if payload.get("defect_id") is not None:
-            ticket.defect_id = str(payload["defect_id"]).strip()
-        if payload.get("defect_repository_path") is not None:
-            ticket.defect_repository_path = str(payload["defect_repository_path"]).strip()
-        ticket.defect_registered_at = now_utc()
-        ticket.defect_registered_by_id = actor.id
     elif action in (TicketAction.REJECT, TicketAction.RETURN):
         # 先进入 returned 展示状态，退回目标写入 return_to_state
         return_target = _resolve_return_target(ticket, rule, payload)
@@ -562,6 +558,7 @@ def _resubmit_target(ticket: Any) -> TicketState:
         raise HTTPException(400, detail="return_to_state 取值非法")
     allowed = {
         TicketState.PENDING_APPROVAL,
+        TicketState.PENDING_QUALITY_REVIEW,
         TicketState.PLANNING,
         TicketState.PROCESSING,
     }

@@ -12,7 +12,7 @@
 → 售前确认闭环计划
 → 分系统提交分析验证结果
 → 质量评审
-→ 质量登记缺陷库信息
+→ 批准人复核
 → 已闭环
 ```
 
@@ -30,10 +30,10 @@
 | 编码 | 展示名称 | 主要职责 |
 | --- | --- | --- |
 | `presales` | 售前 | 创建问题、确认闭环计划、参与验证 |
-| `approver` | 批准人 | 审批售前提交的问题 |
+| `approver` | 批准人 | 审批售前提交的问题；质量评审后复核并批准闭环 |
 | `taskforce` | 专项小组 | 确认问题描述并选择分系统，确认即流转（不通过则驳回） |
 | `subsystem` | 分系统 | 接收、制定计划、分析整改及验证 |
-| `quality` | 质量 | 跟踪、评审、登记缺陷库 |
+| `quality` | 质量 | 跟踪、组织评审、给出验证结论 |
 | `admin` | 系统管理员 | 隐藏管理角色；业务操作兜底 |
 
 约束：
@@ -67,7 +67,7 @@
 | 4 | `pending_plan_confirmation` | 待计划确认 | 售前 |
 | 5 | `processing` | 分析验证中 | 分系统 |
 | 6 | `pending_quality_review` | 待质量评审 | 质量 |
-| 7 | `pending_defect_registration` | 待缺陷入库 | 质量 |
+| 7 | `pending_final_approval` | 待批准人复核 | 批准人 |
 | 8 | `closed` | 已闭环 | 无 |
 | — | `returned` | 已退回 | 根据 `return_to_state` 确定 |
 | — | `cancelled` | 已撤销 | 无 |
@@ -85,8 +85,8 @@
 | `planning` | `submit_plan` | `pending_plan_confirmation` | 对应 `subsystem` | `long_term_measure`、`planned_completion_at`；临时措施可选 |
 | `pending_plan_confirmation` | `confirm_plan` | `processing` | 创建该问题的 `presales` | 可选确认意见 |
 | `processing` | `submit_analysis` | `pending_quality_review` | 对应 `subsystem` | `initial_investigation`、`root_cause`、`analysis_report` |
-| `pending_quality_review` | `pass_review` | `pending_defect_registration` | `quality` | `verification_status`、`verification_conclusion`、`quality_review_result` |
-| `pending_defect_registration` | `register_defect` | `closed` | `quality` | `defect_id`、`defect_repository_path` |
+| `pending_quality_review` | `pass_review` | `pending_final_approval` | `quality` | `verification_status`、`verification_conclusion`、`quality_review_result` |
+| `pending_final_approval` | `approve_closure` | `closed` | 该问题的 `approver` | 可选复核意见 |
 
 ### 3.2 退回和撤销
 
@@ -97,6 +97,7 @@
   - 待确认流转驳回 → `pending_approval`
   - 计划确认退回 → `planning`
   - 质量评审退回 → `processing`
+  - 批准人复核驳回 → `pending_quality_review`（界面文案「驳回」）
 - `returned` 只是动作展示状态；创建人或对应责任人重新提交后进入 `return_to_state`。
 - 创建人可在 `pending_approval` 或 `returned` 执行 `cancel`；管理员可兜底撤销未闭环问题。
 - `closed`、`cancelled` 为终态。
@@ -156,12 +157,9 @@
 | `root_cause` | text | 分析验证 |
 | `analysis_report` | text | 分析验证 |
 | `actual_completion_at` | datetime | 分析验证提交时自动写入 |
-| `verification_status` | enum | 质量评审 |
+| `verification_status` | enum | 质量评审（通过后进入批准人复核）|
 | `verification_conclusion` | text | 质量评审 |
 | `quality_review_result` | text | 质量评审 |
-| `defect_id` | string(100) | 缺陷入库 |
-| `defect_repository_path` | string(1000) | 缺陷入库；SVN 路径或链接 |
-| `defect_registered_at` | datetime | 缺陷入库时自动写入 |
 
 `verification_status` 固定值：`resolved`、`temporarily_resolved`、`pending_reproduction`、`unresolved`。
 
@@ -261,7 +259,7 @@
 - 必填字段缺失无法流转。
 - 每次动作记录操作人、时间、前后状态、意见和人员快照。
 - 退回后能够修订并重新进入正确节点。
-- 最终必须登记缺陷 ID 和 SVN 路径才能闭环。
+- 最终必须经质量评审并得到批准人复核批准才能闭环。
 - 前后端构建、类型检查和自动化测试通过。
 - 多角色用户可以在同一张工单上依次完成其拥有的角色的全部动作。
 
@@ -272,5 +270,6 @@
 | 2026-09-12 | 建立 POC 契约（单角色） | 初版 |
 | 2026-09-12 | 创建阶段新增必填字段 `proposer`（提出人）、`proposer_department`（提出部门） | 售前改用公用账号后需手填真实提出人与部门；列表/详情/导出与「POC 问题反馈表」一致。 |
 | 2026-09-12 | 「普通用户只能拥有一个业务角色」→ 支持一人多角色 | `users.role` 单值列改为 `user_roles` 关联表；人员/登录/时间线接口的 `role` 改为 `roles: string[]`；数据范围与 `allowed_actions` 按角色并集计算；`GET /users?role=x` 语义改为「拥有该角色」。前后端同时改造。 |
+| 2026-09-12 | 删除「待缺陷入库」节点，质量评审后新增「待批准人复核」 | 删除状态 `pending_defect_registration` 与动作 `register_defect`：缺陷入库在 SVN 侧完成，不作为工单系统内的流转节点，工单也不再记录缺陷 ID / SVN 路径（数据库列一并删除）。`pass_review` 目标改为 `pending_final_approval`；新增 `approve_closure`（批准闭环，角色 `approver`、人员范围为该问题的 `approver_id`），批准即 `closed`；批准人可执行 `return` 驳回并退回 `pending_quality_review`。 |
 | 2026-09-12 | 「待问题确认 / 待流转 / 待分系统接收」三步合并为一步 | 删除状态 `pending_confirmation`、`pending_acceptance` 与动作 `confirm_problem`、`accept`；`approve` 目标改为 `pending_routing`（展示名「待确认流转」）；专项小组用 `route` 一次完成确认与流转，目标改为 `planning`，可选填 `confirmation_comment`；专项小组不通过时执行 `return`（界面显示「驳回」）回 `pending_approval`；`acceptance_comment` 不再产生。主流程由 10 步变为 8 步。 |
 | 2026-09-12 | `taskforce` 数据范围由「全部未闭环问题」收紧为「批准人批准之后的未闭环问题」 | 待审批阶段问题归售前与批准人，专项小组不再可见（列表、详情、附件、导出、统计一致生效）；`pending_routing` 起可见。被批准人驳回退回售前（`returned` + 退回目标 `pending_approval`）的问题同样不可见。 |

@@ -295,7 +295,7 @@ async def test_export_respects_scope(api):
     export = await api.c.get("/api/v1/tickets/export")
     assert number in export.text
     assert "问题编号" in export.text
-    assert "SVN路径" in export.text
+    assert "验证状态" in export.text
 
 
 async def test_legacy_ticket_and_draft_are_hidden_from_lists(api):

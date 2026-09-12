@@ -90,8 +90,6 @@ const PAYLOAD_FIELDS: { key: string; label: string }[] = [
   { key: 'verification_status', label: '验证状态' },
   { key: 'verification_conclusion', label: '验证结论' },
   { key: 'quality_review_result', label: '质量评审结果' },
-  { key: 'defect_id', label: '缺陷 ID' },
-  { key: 'defect_repository_path', label: 'SVN 路径' },
   { key: 'return_to_state', label: '退回目标' },
 ]
 

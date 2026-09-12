@@ -24,7 +24,7 @@ export const POC_STATE_OPTIONS = [
   { value: 'pending_plan_confirmation', label: '待计划确认', type: 'warning' },
   { value: 'processing', label: '分析验证中', type: 'primary' },
   { value: 'pending_quality_review', label: '待质量评审', type: 'warning' },
-  { value: 'pending_defect_registration', label: '待缺陷入库', type: 'warning' },
+  { value: 'pending_final_approval', label: '待批准人复核', type: 'warning' },
   { value: 'closed', label: '已闭环', type: 'success' },
   { value: 'returned', label: '已退回', type: 'danger' },
   { value: 'cancelled', label: '已撤销', type: 'info' },
@@ -72,7 +72,7 @@ export type TicketAction =
   | 'confirm_plan'
   | 'submit_analysis'
   | 'pass_review'
-  | 'register_defect'
+  | 'approve_closure'
   | 'return'
   | 'resubmit'
   | 'cancel'
@@ -86,7 +86,7 @@ export const ACTION_LABELS: Record<TicketAction, string> = {
   confirm_plan: '确认闭环计划',
   submit_analysis: '提交分析验证',
   pass_review: '通过质量评审',
-  register_defect: '登记缺陷并闭环',
+  approve_closure: '批准闭环',
   return: '退回',
   resubmit: '重新提交',
   cancel: '撤销',
@@ -96,12 +96,14 @@ export const ACTION_LABELS: Record<TicketAction, string> = {
 export const HISTORICAL_ACTION_LABELS: Record<string, string> = {
   confirm_problem: '确认问题（旧）',
   accept: '确认接收（旧）',
+  register_defect: '登记缺陷并闭环（旧）',
 }
 
 /** 流程合并前出现过的状态编码：不再产生，仅用于渲染历史日志 */
 export const HISTORICAL_STATE_LABELS: Record<string, string> = {
   pending_confirmation: '待问题确认（旧）',
   pending_acceptance: '待分系统接收（旧）',
+  pending_defect_registration: '待缺陷入库（旧）',
 }
 
 export function actionLabel(action?: string | null): string {

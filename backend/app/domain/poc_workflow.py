@@ -51,7 +51,8 @@ class TicketState(StrEnum):
     PENDING_PLAN_CONFIRMATION = "pending_plan_confirmation"
     PROCESSING = "processing"
     PENDING_QUALITY_REVIEW = "pending_quality_review"
-    PENDING_DEFECT_REGISTRATION = "pending_defect_registration"
+    #: 质量评审通过后由批准人复核，批准即闭环
+    PENDING_FINAL_APPROVAL = "pending_final_approval"
     CLOSED = "closed"
     RETURNED = "returned"
     CANCELLED = "cancelled"
@@ -65,7 +66,7 @@ MAIN_FLOW_STATES: tuple[TicketState, ...] = (
     TicketState.PENDING_PLAN_CONFIRMATION,
     TicketState.PROCESSING,
     TicketState.PENDING_QUALITY_REVIEW,
-    TicketState.PENDING_DEFECT_REGISTRATION,
+    TicketState.PENDING_FINAL_APPROVAL,
     TicketState.CLOSED,
 )
 
@@ -136,7 +137,8 @@ class TicketAction(StrEnum):
     CONFIRM_PLAN = "confirm_plan"
     SUBMIT_ANALYSIS = "submit_analysis"
     PASS_REVIEW = "pass_review"
-    REGISTER_DEFECT = "register_defect"
+    #: 批准人复核质量评审结果，批准即闭环
+    APPROVE_CLOSURE = "approve_closure"
     RETURN = "return"
     RESUBMIT = "resubmit"
     CANCEL = "cancel"
@@ -152,7 +154,7 @@ ACTION_ORDER: tuple[TicketAction, ...] = (
     TicketAction.CONFIRM_PLAN,
     TicketAction.SUBMIT_ANALYSIS,
     TicketAction.PASS_REVIEW,
-    TicketAction.REGISTER_DEFECT,
+    TicketAction.APPROVE_CLOSURE,
     TicketAction.RESUBMIT,
     TicketAction.RETURN,
     TicketAction.REJECT,
@@ -163,6 +165,7 @@ ACTION_ORDER: tuple[TicketAction, ...] = (
 HISTORICAL_ACTIONS: dict[str, str] = {
     "confirm_problem": "确认问题（旧）",
     "accept": "确认接收（旧）",
+    "register_defect": "登记缺陷并闭环（旧）",
 }
 
 
@@ -242,7 +245,7 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         payload_fields=("initial_investigation", "root_cause", "analysis_report"),
     ),
     (TicketState.PENDING_QUALITY_REVIEW, TicketAction.PASS_REVIEW): _R(
-        target_state=TicketState.PENDING_DEFECT_REGISTRATION,
+        target_state=TicketState.PENDING_FINAL_APPROVAL,
         roles=frozenset({BusinessRole.QUALITY}),
         required_fields=(
             "verification_status",
@@ -255,11 +258,11 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
             "quality_review_result",
         ),
     ),
-    (TicketState.PENDING_DEFECT_REGISTRATION, TicketAction.REGISTER_DEFECT): _R(
+    # 批准人复核：批准即闭环
+    (TicketState.PENDING_FINAL_APPROVAL, TicketAction.APPROVE_CLOSURE): _R(
         target_state=TicketState.CLOSED,
-        roles=frozenset({BusinessRole.QUALITY}),
-        required_fields=("defect_id", "defect_repository_path"),
-        payload_fields=("defect_id", "defect_repository_path"),
+        roles=frozenset({BusinessRole.APPROVER}),
+        scope=ActorScope.ASSIGNED_APPROVER,
     ),
     # 否决：批准人驳回
     (TicketState.PENDING_APPROVAL, TicketAction.REJECT): _R(
@@ -292,11 +295,20 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         payload_fields=("return_to_state",),
         return_targets=frozenset({TicketState.PROCESSING}),
     ),
+    # 批准人复核驳回：退回质量重新评审
+    (TicketState.PENDING_FINAL_APPROVAL, TicketAction.RETURN): _R(
+        target_state=TicketState.RETURNED,
+        roles=frozenset({BusinessRole.APPROVER}),
+        scope=ActorScope.ASSIGNED_APPROVER,
+        comment_required=True,
+        payload_fields=("return_to_state",),
+        return_targets=frozenset({TicketState.PENDING_QUALITY_REVIEW}),
+    ),
     # 退回后重新提交：目标由 return_to_state 决定
     (TicketState.RETURNED, TicketAction.RESUBMIT): _R(
         target_state=None,
         roles=frozenset(
-            {BusinessRole.PRESALES, BusinessRole.SUBSYSTEM}
+            {BusinessRole.PRESALES, BusinessRole.SUBSYSTEM, BusinessRole.QUALITY}
         ),
         scope=ActorScope.RETURN_TARGET,
     ),
@@ -323,7 +335,12 @@ for _state in STATE_ORDER:
         if _frm is _state and _rule.target_state is not None:
             _targets.add(_rule.target_state)
     if _state is TicketState.RETURNED:
-        _targets |= {TicketState.PENDING_APPROVAL, TicketState.PLANNING, TicketState.PROCESSING}
+        _targets |= {
+            TicketState.PENDING_APPROVAL,
+            TicketState.PENDING_QUALITY_REVIEW,
+            TicketState.PLANNING,
+            TicketState.PROCESSING,
+        }
     TRANSITIONS[_state] = frozenset(_targets)
 
 #: 动作 -> 业务必填字段（供文档/测试遍历）
@@ -336,6 +353,7 @@ ACTION_REQUIREMENTS: dict[TicketAction, tuple[str, ...]] = {
 #: 退回目标 -> 重新提交后的责任角色与责任字段
 RETURN_TARGET_RESPONSIBLE_ROLE: dict[TicketState, BusinessRole] = {
     TicketState.PENDING_APPROVAL: BusinessRole.PRESALES,
+    TicketState.PENDING_QUALITY_REVIEW: BusinessRole.QUALITY,
     TicketState.PLANNING: BusinessRole.SUBSYSTEM,
     TicketState.PROCESSING: BusinessRole.SUBSYSTEM,
 }
@@ -351,7 +369,7 @@ RESPONSIBLE_ROLE_BY_STATE: dict[TicketState, BusinessRole | None] = {
     TicketState.PENDING_PLAN_CONFIRMATION: BusinessRole.PRESALES,
     TicketState.PROCESSING: BusinessRole.SUBSYSTEM,
     TicketState.PENDING_QUALITY_REVIEW: BusinessRole.QUALITY,
-    TicketState.PENDING_DEFECT_REGISTRATION: BusinessRole.QUALITY,
+    TicketState.PENDING_FINAL_APPROVAL: BusinessRole.APPROVER,
     TicketState.CLOSED: None,
     TicketState.CANCELLED: None,
     TicketState.RETURNED: None,  # 由 return_to_state 决定
@@ -360,6 +378,7 @@ RESPONSIBLE_ROLE_BY_STATE: dict[TicketState, BusinessRole | None] = {
 #: 责任角色落到的具体人员字段
 RESPONSIBLE_USER_FIELD_BY_STATE: dict[TicketState, str | None] = {
     TicketState.PENDING_APPROVAL: "approver_id",
+    TicketState.PENDING_FINAL_APPROVAL: "approver_id",
     TicketState.PLANNING: "subsystem_owner_id",
     TicketState.PENDING_PLAN_CONFIRMATION: "creator_id",
     TicketState.PROCESSING: "subsystem_owner_id",

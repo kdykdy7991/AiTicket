@@ -75,12 +75,6 @@ class Ticket(Base):
     verification_status: Mapped[str | None] = mapped_column(String(30))
     verification_conclusion: Mapped[str | None] = mapped_column(Text)
     quality_review_result: Mapped[str | None] = mapped_column(Text)
-    defect_id: Mapped[str | None] = mapped_column(String(100))
-    defect_repository_path: Mapped[str | None] = mapped_column(String(1000))
-    defect_registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    defect_registered_by_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
-    )
 
     # ── 流程控制 ──────────────────────────────────────────
     state: Mapped[str] = mapped_column(String(30), nullable=False)
@@ -112,9 +106,6 @@ class Ticket(Base):
     creator = relationship("User", foreign_keys=[creator_id], lazy="selectin")
     approver = relationship("User", foreign_keys=[approver_id], lazy="selectin")
     subsystem_owner = relationship("User", foreign_keys=[subsystem_owner_id], lazy="selectin")
-    defect_registered_by = relationship(
-        "User", foreign_keys=[defect_registered_by_id], lazy="selectin"
-    )
     skill_group = relationship("SkillGroup", lazy="selectin")
     state_logs = relationship(
         "TicketStateLog",

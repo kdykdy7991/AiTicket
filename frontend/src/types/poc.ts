@@ -82,7 +82,6 @@ export interface PocTicketBrief {
   actual_completion_at: string | null
   is_overdue: boolean
   verification_status: VerificationStatus | null
-  defect_id: string | null
   created_at: string
   updated_at: string
 }
@@ -104,10 +103,6 @@ export interface PocTicketDetail extends PocTicketBrief {
   analysis_report: string | null
   verification_conclusion: string | null
   quality_review_result: string | null
-  defect_repository_path: string | null
-  defect_registered_at: string | null
-  defect_registered_by_id: number | null
-  defect_registered_by_name: string | null
   closed_at: string | null
   allowed_actions: TicketAction[]
   attachments: PocAttachment[]

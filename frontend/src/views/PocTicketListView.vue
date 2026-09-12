@@ -1,7 +1,7 @@
 <template>
   <div>
     <div class="page-header">
-      <div><h1>POC 问题</h1><p>跟踪问题从提交审批到缺陷入库的完整过程</p></div>
+      <div><h1>POC 问题</h1><p>跟踪问题从提交审批到批准闭环的完整过程</p></div>
       <div class="actions">
         <el-button v-if="auth.canViewReport" :loading="exporting" @click="exportList">导出跟踪表</el-button>
         <el-button v-if="auth.canCreateTicket" type="primary" @click="router.push('/tickets/new')">新建 POC 问题</el-button>

@@ -37,15 +37,7 @@ MAIN_FLOW_STEPS = [
         },
         None,
     ),
-    (
-        "quality01",
-        TicketAction.REGISTER_DEFECT,
-        {
-            "defect_id": "BUG-2026-0912",
-            "defect_repository_path": "svn://svn.example.com/poc/trunk#12345",
-        },
-        None,
-    ),
+    ("approver01", TicketAction.APPROVE_CLOSURE, {}, "评审结果确认，批准闭环"),
 ]
 
 #: 执行完前 n 步后工单所处的状态
@@ -56,7 +48,7 @@ STATES_AFTER_STEPS = [
     TicketState.PENDING_PLAN_CONFIRMATION,
     TicketState.PROCESSING,
     TicketState.PENDING_QUALITY_REVIEW,
-    TicketState.PENDING_DEFECT_REGISTRATION,
+    TicketState.PENDING_FINAL_APPROVAL,
     TicketState.CLOSED,
 ]
 
@@ -68,7 +60,7 @@ FORWARD_ACTION_BY_STATE = {
     TicketState.PENDING_PLAN_CONFIRMATION: TicketAction.CONFIRM_PLAN,
     TicketState.PROCESSING: TicketAction.SUBMIT_ANALYSIS,
     TicketState.PENDING_QUALITY_REVIEW: TicketAction.PASS_REVIEW,
-    TicketState.PENDING_DEFECT_REGISTRATION: TicketAction.REGISTER_DEFECT,
+    TicketState.PENDING_FINAL_APPROVAL: TicketAction.APPROVE_CLOSURE,
 }
 
 

@@ -40,7 +40,7 @@ def test_responsible_role_mapping():
     assert responsible_role_for(TicketState.PENDING_PLAN_CONFIRMATION) == "presales"
     assert responsible_role_for(TicketState.PROCESSING) == "subsystem"
     assert responsible_role_for(TicketState.PENDING_QUALITY_REVIEW) == "quality"
-    assert responsible_role_for(TicketState.PENDING_DEFECT_REGISTRATION) == "quality"
+    assert responsible_role_for(TicketState.PENDING_FINAL_APPROVAL) == "approver"
     assert responsible_role_for(TicketState.CLOSED) is None
     assert responsible_role_for(TicketState.RETURNED, TicketState.PLANNING) == "subsystem"
     assert responsible_role_for(TicketState.RETURNED, TicketState.PENDING_APPROVAL) == "presales"
@@ -62,10 +62,6 @@ def test_required_action_fields_match_contract():
         "verification_status",
         "verification_conclusion",
         "quality_review_result",
-    )
-    assert ACTION_REQUIREMENTS[TicketAction.REGISTER_DEFECT] == (
-        "defect_id",
-        "defect_repository_path",
     )
 
 
@@ -96,7 +92,7 @@ async def test_create_formal_ticket_enters_pending_approval(api):
 
 
 async def test_full_main_flow_from_presales_to_closed(api):
-    """售前提交 → 批准 → 专项小组确认并流转 → 计划 → 确认 → 分析 → 评审 → 入库闭环。"""
+    """售前提交 → 批准 → 专项小组确认并流转 → 计划 → 确认 → 分析 → 质量评审 → 批准复核闭环。"""
     api.as_("presales01")
     created = await api.create_ticket()
     assert created.status_code == 201, created.text
@@ -123,10 +119,7 @@ async def test_full_main_flow_from_presales_to_closed(api):
     assert final["state"] == "closed"
     assert final["allowed_actions"] == []
     assert final["verification_status"] == "resolved"
-    assert final["defect_id"] == "BUG-2026-0912"
-    assert final["defect_repository_path"].startswith("svn://")
-    assert final["defect_registered_at"] is not None
-    assert final["defect_registered_by_id"] == api.uid("quality01")
+    assert "defect_id" not in final
     assert final["closed_at"] is not None
     assert final["actual_completion_at"] is not None
     assert final["is_overdue"] is False

@@ -189,32 +189,65 @@ async def test_invalid_verification_status_returns_422(api):
     assert "verification_status" in resp.text
 
 
-async def test_register_defect_requires_defect_info(api):
+async def test_final_approval_closes_ticket(api):
+    """质量评审后由批准人复核：批准即闭环，未闭环前不是终态。"""
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 6)  # pending_defect_registration
+    await run_steps(api, ticket_id, 6)  # pending_final_approval
 
+    api.as_("approver01")
+    detail = await api.detail(ticket_id)
+    assert detail["state"] == "pending_final_approval"
+    assert detail["allowed_actions"] == ["approve_closure", "return"]
+    assert detail["current_responsible_role"] == "approver"
+    assert detail["current_responsible_user_id"] == api.uid("approver01")
+
+    # 其他业务角色不能代批
     api.as_("quality01")
-    resp = await api.action(
-        ticket_id, "register_defect", payload={"defect_id": "BUG-1"}, expect=400
-    )
-    assert "defect_repository_path" in resp.text
+    await api.action(ticket_id, "approve_closure", expect=403)
 
-    resp = await api.action(
-        ticket_id,
-        "register_defect",
-        payload={"defect_id": "BUG-1", "defect_repository_path": "   "},
-        expect=400,
-    )
-    assert "defect_repository_path" in resp.text
+    api.as_("approver01")
+    closed = await api.acted(ticket_id, "approve_closure", comment="同意闭环")
+    assert closed["state"] == "closed"
+    assert closed["allowed_actions"] == []
+    assert closed["state_logs"][-1]["action"] == "approve_closure"
 
-    # 补全后可以闭环
-    detail = await api.acted(
+
+async def test_final_approval_reject_returns_to_quality_review(api):
+    """批准人复核不通过 → 退回质量重新评审（原因必填）。"""
+    api.as_("presales01")
+    ticket_id = (await api.create_ticket()).json()["data"]["id"]
+    await run_steps(api, ticket_id, 6)  # pending_final_approval
+
+    api.as_("approver01")
+    await api.action(ticket_id, "return", payload={}, expect=400)  # 缺原因
+
+    detail = await api.acted(ticket_id, "return", comment="验证证据不足")
+    assert detail["state"] == "returned"
+    assert detail["return_to_state"] == "pending_quality_review"
+    assert detail["current_responsible_role"] == "quality"
+
+    # 质量重新提交后回到评审节点，再次评审通过则回到批准人复核
+    api.as_("quality01")
+    resent = await api.acted(ticket_id, "resubmit", comment="已补充验证证据")
+    assert resent["state"] == "pending_quality_review"
+
+    back = await api.acted(
         ticket_id,
-        "register_defect",
-        payload={"defect_id": "BUG-1", "defect_repository_path": "svn://svn/poc#1"},
+        "pass_review",
+        comment="补充证据后确认通过",
+        payload={
+            "verification_status": "resolved",
+            "verification_conclusion": "补充证据后确认已解决",
+            "quality_review_result": "同意闭环",
+        },
     )
-    assert detail["state"] == "closed"
+    assert back["state"] == "pending_final_approval"
+
+    # 批准人复核通过 → 闭环
+    api.as_("approver01")
+    closed = await api.acted(ticket_id, "approve_closure", comment="同意闭环")
+    assert closed["state"] == "closed"
 
 
 async def test_terminal_ticket_rejects_further_actions(api):
@@ -224,7 +257,7 @@ async def test_terminal_ticket_rejects_further_actions(api):
 
     api.as_("quality01")
     version = (await api.detail(ticket_id))["state_version"]
-    for action in ("register_defect", "pass_review", "cancel"):
+    for action in ("approve_closure", "pass_review", "cancel"):
         resp = await api.action(ticket_id, action, version=version, expect=400)
         assert "终态" in resp.text
 
@@ -370,7 +403,7 @@ async def test_return_path_quality_review_to_processing(api):
             "quality_review_result": "同意入库",
         },
     )
-    assert detail["state"] == "pending_defect_registration"
+    assert detail["state"] == "pending_final_approval"
     assert detail["verification_status"] == "temporarily_resolved"
 
 

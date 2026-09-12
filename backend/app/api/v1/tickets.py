@@ -90,7 +90,7 @@ def _aware(value: datetime | None) -> datetime | None:
 
 def _people(ticket: Ticket) -> dict[int, str]:
     mapping: dict[int, str] = {}
-    for attr in ("creator", "approver", "subsystem_owner", "defect_registered_by"):
+    for attr in ("creator", "approver", "subsystem_owner"):
         person = getattr(ticket, attr, None)
         if person is not None:
             mapping[person.id] = person.name
@@ -130,7 +130,6 @@ def _brief(ticket: Ticket) -> TicketBrief:
         actual_completion_at=ticket.actual_completion_at,
         is_overdue=compute_is_overdue(ticket),
         verification_status=ticket.verification_status,
-        defect_id=ticket.defect_id,
         created_at=ticket.created_at,
         updated_at=ticket.updated_at,
     )
@@ -192,12 +191,6 @@ def _detail(ticket: Ticket, actor: User) -> TicketDetail:
         analysis_report=ticket.analysis_report,
         verification_conclusion=ticket.verification_conclusion,
         quality_review_result=ticket.quality_review_result,
-        defect_repository_path=ticket.defect_repository_path,
-        defect_registered_at=ticket.defect_registered_at,
-        defect_registered_by_id=ticket.defect_registered_by_id,
-        defect_registered_by_name=(
-            ticket.defect_registered_by.name if ticket.defect_registered_by else None
-        ),
         closed_at=ticket.closed_at,
         allowed_actions=allowed_actions(ticket, actor),
         attachments=[_attachment_out(a) for a in (ticket.attachments or [])],
@@ -411,7 +404,6 @@ def _apply_filters(
             | Ticket.customer_name.ilike(like)
             | Ticket.problem_type.ilike(like)
             | Ticket.description.ilike(like)
-            | Ticket.defect_id.ilike(like)
         )
     if date_from:
         try:
@@ -657,8 +649,6 @@ async def export_tickets(
         ("计划完成时间", lambda t: fmt(t.planned_completion_at)),
         ("是否逾期", lambda t: "是" if compute_is_overdue(t) else "否"),
         ("验证状态", lambda t: t.verification_status or ""),
-        ("缺陷ID", lambda t: t.defect_id or ""),
-        ("SVN路径", lambda t: t.defect_repository_path or ""),
         ("创建人", lambda t: t.creator.name if t.creator else ""),
         ("创建时间", lambda t: fmt(t.created_at)),
         ("闭环时间", lambda t: fmt(t.closed_at)),

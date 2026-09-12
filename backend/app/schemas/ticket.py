@@ -194,7 +194,6 @@ class TicketBrief(BaseModel):
     actual_completion_at: datetime | None = None
     is_overdue: bool = False
     verification_status: str | None = None
-    defect_id: str | None = None
 
     created_at: datetime
     updated_at: datetime
@@ -219,10 +218,6 @@ class TicketDetail(TicketBrief):
     analysis_report: str | None = None
     verification_conclusion: str | None = None
     quality_review_result: str | None = None
-    defect_repository_path: str | None = None
-    defect_registered_at: datetime | None = None
-    defect_registered_by_id: int | None = None
-    defect_registered_by_name: str | None = None
     closed_at: datetime | None = None
 
     allowed_actions: list[str] = Field(default_factory=list)

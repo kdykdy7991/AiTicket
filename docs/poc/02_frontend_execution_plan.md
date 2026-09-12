@@ -182,7 +182,7 @@ ticketApi.downloadAttachment(attachmentId)
 - 闭环计划
 - 分析验证
 - 待质量评审
-- 待缺陷入库
+- 待批准人复核
 - 已闭环
 - 已退回
 
@@ -248,7 +248,7 @@ components/poc/actions/DefectRegistrationForm.vue
 | `confirm_plan` | 确认意见；确认或退回 |
 | `submit_analysis` | 初步排查、根因、分析报告、附件 |
 | `pass_review` | 验证状态、验证结论、质量评审结果 |
-| `register_defect` | 缺陷 ID、SVN 路径 |
+| `approve_closure` | 复核意见可选；「批准闭环」按钮；驳回需填原因（退回质量评审） |
 | `return` | 退回原因必填，目标由当前节点固定决定；在 `pending_routing` 上按钮文案为「驳回」 |
 | `resubmit` | 展示被退回原因，修改后重新提交 |
 | `cancel` | 撤销原因必填 |
@@ -335,7 +335,7 @@ p1_urgent/p2_high/p3_normal/p4_enterprise
 5. 分系统提交计划后，售前确认或退回。
 6. 分系统提交分析验证和附件。
 7. 质量选择四种验证状态之一并填写结论。
-8. 未填缺陷 ID 或 SVN 路径时不能提交入库。
+8. 质量评审通过后必须由批准人复核批准才能闭环。
 9. 完整闭环后页面只读。
 10. 三条退回路径均能看到原因并重新提交。
 11. 管理员可以代操作，但不会出现在业务角色选择器中。
