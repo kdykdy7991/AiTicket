@@ -72,10 +72,35 @@
         </div>
       </el-card>
 
+      <el-card shadow="never" class="form-card">
+        <template #header><strong>现场材料</strong></template>
+        <div class="material-row">
+          <label class="material-button">
+            <input type="file" multiple :accept="ACCEPT" @change="onPickFiles" />
+            选择图片或附件
+          </label>
+          <span class="material-hint">
+            支持 {{ ALLOWED_EXT.join('、') }}；单个不超过 {{ MAX_FILE_MB }} MB；选择后将在「保存草稿」或「提交审批」时上传
+          </span>
+        </div>
+        <ul v-if="pendingFiles.length || uploadedAttachments.length" class="material-list">
+          <li v-for="(file, index) in pendingFiles" :key="`pending-${index}`">
+            <span class="material-name">{{ file.name }}</span>
+            <small>{{ formatSize(file.size) }} · 待上传</small>
+            <el-button text size="small" type="danger" @click="pendingFiles.splice(index, 1)">移除</el-button>
+          </li>
+          <li v-for="attachment in uploadedAttachments" :key="`uploaded-${attachment.id}`">
+            <span class="material-name link" @click="downloadAttachment(attachment)">{{ attachment.original_filename }}</span>
+            <small>{{ formatSize(attachment.size) }} · 已上传 · {{ stateLabel(attachment.stage) }}</small>
+          </li>
+        </ul>
+        <el-empty v-else description="暂未添加现场材料" :image-size="60" />
+      </el-card>
+
       <div class="form-actions">
         <el-button @click="router.push('/tickets')">取消</el-button>
-        <el-button :loading="saving" @click="saveDraft(false)">保存草稿</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitForApproval">提交审批</el-button>
+        <el-button :loading="saving || uploading" @click="saveDraft(false)">保存草稿</el-button>
+        <el-button type="primary" :loading="submitting || uploading" @click="submitForApproval">提交审批</el-button>
       </div>
     </el-form>
   </div>
@@ -87,8 +112,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { pocTicketApi } from '@/api/pocTickets'
 import { userApi, type UserItem } from '@/api/users'
-import { POC_PRIORITY_OPTIONS } from '@/domain/pocWorkflow'
-import type { PocTicketForm } from '@/types/poc'
+import { POC_PRIORITY_OPTIONS, stateLabel } from '@/domain/pocWorkflow'
+import type { PocAttachment, PocTicketForm } from '@/types/poc'
 
 const route = useRoute()
 const router = useRouter()
@@ -97,6 +122,14 @@ const approvers = ref<UserItem[]>([])
 const approversLoading = ref(false)
 const saving = ref(false)
 const submitting = ref(false)
+const uploading = ref(false)
+const pendingFiles = ref<File[]>([])
+const uploadedAttachments = ref<PocAttachment[]>([])
+
+const MAX_FILE_MB = 20
+const MAX_FILE_SIZE = MAX_FILE_MB * 1024 * 1024
+const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'log', 'zip']
+const ACCEPT = ALLOWED_EXT.map(ext => `.${ext}`).join(',')
 const draftId = ref<number | null>(Number(route.query.draft_id) || null)
 
 const form = reactive<PocTicketForm>({
@@ -121,6 +154,53 @@ function payload(): PocTicketForm {
   return { ...form }
 }
 
+function formatSize(size: number): string {
+  if (size < 1024) return `${size} B`
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
+  return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+/** 选择本地文件：前端先做一遍格式/大小校验，后端仍会再校验一次 */
+function onPickFiles(event: Event) {
+  const input = event.target as HTMLInputElement
+  const accepted: File[] = []
+  for (const file of Array.from(input.files || [])) {
+    const ext = file.name.split('.').pop()?.toLowerCase() || ''
+    if (!ALLOWED_EXT.includes(ext)) {
+      ElMessage.error(`不支持的文件类型：${file.name}`)
+      continue
+    }
+    if (file.size === 0) {
+      ElMessage.error(`${file.name} 是空文件`)
+      continue
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      ElMessage.error(`${file.name} 超过 ${MAX_FILE_MB} MB`)
+      continue
+    }
+    accepted.push(file)
+  }
+  pendingFiles.value = [...pendingFiles.value, ...accepted]
+  input.value = '' // 允许再次选择同一个文件
+}
+
+/** 附件必须挂在工单上：先拿到草稿 ID，再上传 */
+async function uploadPendingFiles(ticketId: number) {
+  if (!pendingFiles.value.length) return
+  uploading.value = true
+  try {
+    const saved = await pocTicketApi.uploadAttachments(ticketId, pendingFiles.value)
+    uploadedAttachments.value = [...uploadedAttachments.value, ...saved]
+    pendingFiles.value = []
+  } finally {
+    uploading.value = false
+  }
+}
+
+async function downloadAttachment(attachment: PocAttachment) {
+  await pocTicketApi.downloadAttachment(attachment)
+}
+
 async function saveDraft(showMessage = true) {
   saving.value = true
   try {
@@ -128,6 +208,8 @@ async function saveDraft(showMessage = true) {
       ? await pocTicketApi.updateDraft(draftId.value, payload())
       : await pocTicketApi.createDraft(payload())
     draftId.value = draft.id
+    if (Array.isArray(draft.attachments)) uploadedAttachments.value = draft.attachments
+    await uploadPendingFiles(draft.id)
     await router.replace({ query: { ...route.query, draft_id: String(draft.id) } })
     if (showMessage) ElMessage.success('草稿已保存')
     return draft
@@ -142,6 +224,7 @@ async function submitForApproval() {
   try {
     if (!draftId.value) await saveDraft(false)
     if (!draftId.value) return
+    await uploadPendingFiles(draftId.value)
     const ticket = await pocTicketApi.submitDraft(draftId.value, payload())
     ElMessage.success('已提交，等待批准人审批')
     await router.push({ name: 'TicketDetail', params: { id: ticket.id } })
@@ -159,8 +242,11 @@ onMounted(async () => {
     ])
     approvers.value = approverList
     if (draft) {
+      uploadedAttachments.value = draft.attachments || []
       Object.assign(form, {
-        title: draft.title || '', product_line: draft.product_line || '', customer_name: draft.customer_name || '',
+        title: draft.title || '',
+        proposer: draft.proposer || '', proposer_department: draft.proposer_department || '',
+        product_line: draft.product_line || '', customer_name: draft.customer_name || '',
         priority: draft.priority, problem_type: draft.problem_type || '', closure_requirement: draft.closure_requirement || '',
         occurred_at: draft.occurred_at || '', location: draft.location || '', longitude: draft.longitude, latitude: draft.latitude,
         device_info: draft.device_info || '', description: draft.description || '', approver_id: draft.approver_id,
@@ -182,6 +268,15 @@ onMounted(async () => {
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 24px; }
 .span-2 { grid-column: span 2; }
 .form-actions { display: flex; justify-content: flex-end; gap: 10px; position: sticky; bottom: 0; padding: 16px; background: rgba(255, 255, 255, 0.94); border-top: 1px solid var(--color-border-light); backdrop-filter: blur(8px); z-index: 2; }
+.material-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.material-button { display: inline-flex; align-items: center; padding: 8px 14px; border: 1px solid var(--color-primary); border-radius: 8px; color: var(--color-primary); font-size: 13px; cursor: pointer; }
+.material-button input { display: none; }
+.material-hint { color: var(--color-text-tertiary); font-size: 12px; line-height: 1.6; }
+.material-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
+.material-list li { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--color-border-light); border-radius: 8px; }
+.material-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.material-name.link { color: var(--color-primary); cursor: pointer; }
+.material-list small { color: var(--color-text-tertiary); font-size: 12px; white-space: nowrap; }
 .priority-option { display: inline-flex; align-items: center; gap: 8px; }
 .priority-option i { width: 8px; height: 8px; border-radius: 50%; }
 @media (max-width: 760px) { .form-grid { grid-template-columns: 1fr; } .span-2 { grid-column: span 1; } }
