@@ -64,6 +64,7 @@ USERS = [
     ("subsystem01", "邓雪群", "subsystem", "系统总体"),
     ("subsystem02", "卢翔", "subsystem", "卫星平台"),
     ("subsystem03", "余华伟", "subsystem", "终端系统"),
+    ("subsystem04", "邱庆举（应用平台）", "subsystem", "应用平台"),
     ("subsystem05", "倪汉华", "subsystem", "测运控平台"),
     ("quality01", "金凯", "quality", None),
     ("quality02", "马祥艺", "quality", None),
