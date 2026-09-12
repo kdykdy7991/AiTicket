@@ -149,7 +149,7 @@ async def execute_action(
 
 修改 `backend/app/schemas/ticket.py`：
 
-- `TicketCreate` 按总约定创建字段定义。
+- `TicketCreate` 按总约定创建字段定义（含必填的 `proposer`、`proposer_department`）。
 - 草稿允许字段为空，正式提交使用单独 Schema 或业务校验。
 - `TicketUpdate` 只允许当前阶段可编辑的非状态字段。
 - 新增 `TicketActionRequest`：`action`、`comment`、`payload`、`expected_version`。

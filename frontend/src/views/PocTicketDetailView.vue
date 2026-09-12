@@ -15,7 +15,7 @@
       <div class="detail-grid">
         <main>
           <el-card shadow="never" class="section"><template #header><strong>问题信息</strong></template>
-            <div class="fields"><Field label="客户名称" :value="ticket.customer_name"/><Field label="产品线" :value="ticket.product_line"/><Field label="问题类型" :value="ticket.problem_type"/><Field label="发生时间" :value="formatTime(ticket.occurred_at)"/><Field label="发生地点" :value="ticket.location"/><Field label="坐标" :value="coordinates"/><Field label="闭环要求" :value="ticket.closure_requirement" wide/><Field label="设备信息" :value="ticket.device_info" wide/><Field label="问题现象" :value="ticket.description" wide/></div>
+            <div class="fields"><Field label="提出人" :value="ticket.proposer"/><Field label="提出部门" :value="ticket.proposer_department"/><Field label="客户名称" :value="ticket.customer_name"/><Field label="产品线" :value="ticket.product_line"/><Field label="问题类型" :value="ticket.problem_type"/><Field label="发生时间" :value="formatTime(ticket.occurred_at)"/><Field label="发生地点" :value="ticket.location"/><Field label="坐标" :value="coordinates"/><Field label="闭环要求" :value="ticket.closure_requirement" wide/><Field label="设备信息" :value="ticket.device_info" wide/><Field label="问题现象" :value="ticket.description" wide/></div>
           </el-card>
           <el-card v-if="hasPlan" shadow="never" class="section"><template #header><strong>闭环计划</strong></template><div class="fields"><Field label="临时处置措施" :value="ticket.temporary_measure" wide/><Field label="长期整改措施" :value="ticket.long_term_measure" wide/><Field label="计划完成时间" :value="formatTime(ticket.planned_completion_at)"/><Field label="售前确认意见" :value="ticket.plan_confirmation_comment"/></div></el-card>
           <el-card v-if="hasAnalysis" shadow="never" class="section"><template #header><strong>分析验证</strong></template><div class="fields"><Field label="初步排查结论" :value="ticket.initial_investigation" wide/><Field label="根本原因分析" :value="ticket.root_cause" wide/><Field label="质量问题分析报告" :value="ticket.analysis_report" wide/></div></el-card>
@@ -28,7 +28,7 @@
 
         <aside>
           <el-card shadow="never" class="section sticky"><template #header><strong>当前处理</strong></template>
-            <dl><dt>责任角色</dt><dd>{{ roleLabel(ticket.current_responsible_role) }}</dd><dt>责任人</dt><dd>{{ ticket.current_responsible_user_name || '待分配' }}</dd><dt>所属分系统</dt><dd>{{ ticket.skill_group_name || '—' }}</dd><dt>批准人</dt><dd>{{ ticket.approver_name || '—' }}</dd></dl>
+            <dl><dt>提出人</dt><dd>{{ ticket.proposer || '—' }}</dd><dt>提出部门</dt><dd>{{ ticket.proposer_department || '—' }}</dd><dt>责任角色</dt><dd>{{ roleLabel(ticket.current_responsible_role) }}</dd><dt>责任人</dt><dd>{{ ticket.current_responsible_user_name || '待分配' }}</dd><dt>所属分系统</dt><dd>{{ ticket.skill_group_name || '—' }}</dd><dt>批准人</dt><dd>{{ ticket.approver_name || '—' }}</dd></dl>
             <el-alert v-if="ticket.state === 'returned'" type="error" :closable="false" title="问题已退回，请根据流程记录修订后重新提交" />
             <div v-if="ticket.allowed_actions.length" class="action-list"><el-button v-for="action in ticket.allowed_actions" :key="action" :type="buttonType(action)" @click="openAction(action)">{{ actionLabel(action) }}</el-button></div>
             <el-empty v-else description="当前没有待处理动作" :image-size="70" />

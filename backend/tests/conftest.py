@@ -135,6 +135,8 @@ class ApiHarness:
     async def create_ticket(self, *, draft: bool = False, **overrides):
         payload = {
             "title": "POC 现场终端掉线",
+            "proposer": "张三",
+            "proposer_department": "售前与解决方案部",
             "product_line": "卫星通信终端",
             "customer_name": "某省应急厅",
             "priority": "p2_normal",

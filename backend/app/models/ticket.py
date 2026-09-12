@@ -37,6 +37,9 @@ class Ticket(Base):
 
     # ── 创建阶段字段 ──────────────────────────────────────
     title: Mapped[str | None] = mapped_column(String(500))
+    # 业务字段：真实提出人与部门（售前组公用账号时由填写人手工指定）
+    proposer: Mapped[str | None] = mapped_column(String(100))
+    proposer_department: Mapped[str | None] = mapped_column(String(100))
     product_line: Mapped[str | None] = mapped_column(String(100))
     customer_name: Mapped[str | None] = mapped_column(String(100))
     problem_type: Mapped[str | None] = mapped_column(String(100))

@@ -15,6 +15,12 @@
           <el-form-item label="问题名称" prop="title" class="span-2">
             <el-input v-model="form.title" maxlength="500" show-word-limit placeholder="一句话概括 POC 问题" />
           </el-form-item>
+          <el-form-item label="提出人" prop="proposer">
+            <el-input v-model="form.proposer" maxlength="100" placeholder="填写实际反馈问题的人" />
+          </el-form-item>
+          <el-form-item label="提出部门" prop="proposer_department">
+            <el-input v-model="form.proposer_department" maxlength="100" placeholder="填写提出人所属部门" />
+          </el-form-item>
           <el-form-item label="产品线" prop="product_line">
             <el-input v-model="form.product_line" maxlength="100" placeholder="填写产品线" />
           </el-form-item>
@@ -94,14 +100,16 @@ const submitting = ref(false)
 const draftId = ref<number | null>(Number(route.query.draft_id) || null)
 
 const form = reactive<PocTicketForm>({
-  title: '', product_line: '', customer_name: '', priority: 'p2_normal',
+  title: '', proposer: '', proposer_department: '',
+  product_line: '', customer_name: '', priority: 'p2_normal',
   problem_type: '', closure_requirement: '', occurred_at: '', location: '',
   longitude: null, latitude: null, device_info: '', description: '', approver_id: null,
 })
 
 const required = (message: string) => [{ required: true, message, trigger: ['blur', 'change'] }]
 const rules: FormRules = {
-  title: required('请输入问题名称'), product_line: required('请输入产品线'),
+  title: required('请输入问题名称'), proposer: required('请输入提出人'),
+  proposer_department: required('请输入提出部门'), product_line: required('请输入产品线'),
   customer_name: required('请输入客户名称'), priority: required('请选择问题级别'),
   problem_type: required('请输入问题类型'), closure_requirement: required('请输入闭环要求'),
   occurred_at: required('请选择发生时间'), location: required('请输入发生地点'),

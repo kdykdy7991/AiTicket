@@ -116,6 +116,8 @@
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `title` | string(500) | 是 | 问题名称 |
+| `proposer` | string(100) | 是 | 提出人：实际反馈问题的人（售前组使用公用账号，必须手填） |
+| `proposer_department` | string(100) | 是 | 提出部门：提出人所属部门 |
 | `product_line` | string(100) | 是 | 产品线；第一阶段文本输入 |
 | `customer_name` | string(100) | 是 | 客户名称 |
 | `priority` | enum | 是 | 固定 P0—P3 编码 |
@@ -129,6 +131,10 @@
 | `description` | text | 是 | 问题现象概述 |
 | `approver_id` | bigint | 是 | 必须是有效 `approver` |
 | `attachments` | file[] | 否 | 现场照片或其他证据 |
+
+`proposer` / `proposer_department` 是**业务字段**，与系统自动生成的 `creator_id` /
+`creator_department`（账号及其部门快照）不同：售前使用公用账号时，前者才代表真实的
+提出人和提出部门。二者都必须在正式提交时非空，草稿可以为空。
 
 系统自动生成：`number`、`creator_id`、`creator_department` 快照、`created_at`、初始状态。
 
@@ -262,4 +268,5 @@
 | 日期 | 变更 | 影响 |
 | --- | --- | --- |
 | 2026-09-12 | 建立 POC 契约（单角色） | 初版 |
+| 2026-09-12 | 创建阶段新增必填字段 `proposer`（提出人）、`proposer_department`（提出部门） | 售前改用公用账号后需手填真实提出人与部门；列表/详情/导出与「POC 问题反馈表」一致。 |
 | 2026-09-12 | 「普通用户只能拥有一个业务角色」→ 支持一人多角色 | `users.role` 单值列改为 `user_roles` 关联表；人员/登录/时间线接口的 `role` 改为 `roles: string[]`；数据范围与 `allowed_actions` 按角色并集计算；`GET /users?role=x` 语义改为「拥有该角色」。前后端同时改造。 |

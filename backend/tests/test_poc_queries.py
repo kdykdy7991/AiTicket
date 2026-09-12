@@ -93,6 +93,8 @@ async def test_export_contains_poc_tracking_columns(api):
     assert header.split(",") == [
         "问题编号",
         "问题名称",
+        "提出人",
+        "提出部门",
         "客户名称",
         "产品线",
         "问题级别",

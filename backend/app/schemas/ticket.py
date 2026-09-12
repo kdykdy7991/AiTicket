@@ -16,6 +16,8 @@ from app.domain.poc_workflow import Priority, TicketAction
 #: 正式提交时必须填写的创建阶段字段（草稿不受限）
 CREATE_REQUIRED_FIELDS: tuple[str, ...] = (
     "title",
+    "proposer",
+    "proposer_department",
     "product_line",
     "customer_name",
     "priority",
@@ -38,6 +40,10 @@ class TicketCreate(PocRequest):
 
     is_draft: bool = False
     title: str | None = Field(default=None, max_length=500)
+    proposer: str | None = Field(default=None, max_length=100, description="提出人")
+    proposer_department: str | None = Field(
+        default=None, max_length=100, description="提出部门"
+    )
     product_line: str | None = Field(default=None, max_length=100)
     customer_name: str | None = Field(default=None, max_length=100)
     priority: Priority = Priority.P2_NORMAL
@@ -55,6 +61,8 @@ class TicketCreate(PocRequest):
 #: 创建阶段可编辑字段（PATCH）
 CREATION_EDITABLE_FIELDS: tuple[str, ...] = (
     "title",
+    "proposer",
+    "proposer_department",
     "product_line",
     "customer_name",
     "priority",
@@ -91,6 +99,8 @@ class TicketUpdate(PocRequest):
     """
 
     title: str | None = Field(default=None, max_length=500)
+    proposer: str | None = Field(default=None, max_length=100)
+    proposer_department: str | None = Field(default=None, max_length=100)
     product_line: str | None = Field(default=None, max_length=100)
     customer_name: str | None = Field(default=None, max_length=100)
     priority: Priority | None = None
@@ -155,6 +165,8 @@ class TicketBrief(BaseModel):
     id: int
     number: str | None = None
     title: str | None = None
+    proposer: str | None = None
+    proposer_department: str | None = None
     product_line: str | None = None
     customer_name: str | None = None
     priority: str
@@ -237,6 +249,8 @@ class DraftSubmitRequest(PocRequest):
     """草稿正式提交。允许提交时补齐创建阶段字段。"""
 
     title: str | None = Field(default=None, max_length=500)
+    proposer: str | None = Field(default=None, max_length=100)
+    proposer_department: str | None = Field(default=None, max_length=100)
     product_line: str | None = Field(default=None, max_length=100)
     customer_name: str | None = Field(default=None, max_length=100)
     priority: Priority | None = None

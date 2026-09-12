@@ -463,3 +463,96 @@ async def test_deleted_ticket_detail_returns_404(api):
     assert (
         await api.c.post(f"/api/v1/tickets/drafts/{draft_id}/submit")
     ).status_code == 404
+
+
+# ── 提出人 / 提出部门必填（售前组公用账号）────────────────────
+
+
+async def test_create_requires_proposer_fields(api):
+    api.as_("presales01")
+
+    resp = await api.create_ticket(proposer=None)
+    assert resp.status_code == 400, resp.text
+    assert "proposer" in resp.text
+
+    resp = await api.create_ticket(proposer_department=None)
+    assert resp.status_code == 400, resp.text
+    assert "proposer_department" in resp.text
+
+    resp = await api.create_ticket(proposer="   ", proposer_department="  ")
+    assert resp.status_code == 400, resp.text
+    assert "proposer" in resp.text and "proposer_department" in resp.text
+
+
+async def test_draft_can_omit_proposer_but_submit_requires_it(api):
+    api.as_("presales01")
+    draft = await api.create_ticket(
+        draft=True, proposer=None, proposer_department=None
+    )
+    assert draft.status_code == 201, draft.text
+    draft_id = draft.json()["data"]["id"]
+    assert draft.json()["data"]["proposer"] is None
+
+    # 草稿直接提交 → 缺少提出人/提出部门
+    resp = await api.c.post(f"/api/v1/tickets/drafts/{draft_id}/submit")
+    assert resp.status_code == 400, resp.text
+    assert "proposer" in resp.text
+
+    # 提交时补齐即可
+    resp = await api.c.post(
+        f"/api/v1/tickets/drafts/{draft_id}/submit",
+        json={"proposer": "李四", "proposer_department": "售前与解决方案部"},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["state"] == "pending_approval"
+    assert data["proposer"] == "李四"
+    assert data["proposer_department"] == "售前与解决方案部"
+
+
+async def test_proposer_fields_visible_in_list_detail_and_export(api):
+    api.as_("presales01")
+    ticket_id = (
+        await api.create_ticket(proposer="王五", proposer_department="售前一组")
+    ).json()["data"]["id"]
+
+    api.as_("quality01")
+    detail = await api.detail(ticket_id)
+    assert detail["proposer"] == "王五"
+    assert detail["proposer_department"] == "售前一组"
+
+    listed = (await api.c.get("/api/v1/tickets")).json()["data"]
+    row = next(t for t in listed if t["id"] == ticket_id)
+    assert row["proposer"] == "王五"
+    assert row["proposer_department"] == "售前一组"
+
+    # 关键词可以按提出人/提出部门检索
+    hits = (await api.c.get("/api/v1/tickets", params={"keyword": "王五"})).json()["data"]
+    assert [t["id"] for t in hits] == [ticket_id]
+    hits = (
+        await api.c.get("/api/v1/tickets", params={"keyword": "售前一组"})
+    ).json()["data"]
+    assert [t["id"] for t in hits] == [ticket_id]
+
+    export = await api.c.get("/api/v1/tickets/export")
+    assert "王五" in export.text and "售前一组" in export.text
+
+
+async def test_creator_can_fix_proposer_before_approval(api):
+    api.as_("presales01")
+    ticket_id = (await api.create_ticket()).json()["data"]["id"]
+
+    resp = await api.c.patch(
+        f"/api/v1/tickets/{ticket_id}",
+        json={"proposer": "赵六", "proposer_department": "售前二组"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["proposer"] == "赵六"
+    assert resp.json()["proposer_department"] == "售前二组"
+
+    # 审批阶段之后（非创建人可编辑节点）不允许再改
+    api.as_("approver01")
+    await api.action(ticket_id, "approve")
+    api.as_("quality01")
+    resp = await api.c.patch(f"/api/v1/tickets/{ticket_id}", json={"proposer": "越权"})
+    assert resp.status_code == 403, resp.text

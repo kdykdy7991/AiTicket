@@ -139,6 +139,8 @@ ticketApi.downloadAttachment(attachmentId)
 
 1. 基本信息
    - 问题名称
+   - 提出人（必填，售前组公用账号时必须手填）
+   - 提出部门（必填）
    - 产品线
    - 客户名称
    - 问题级别

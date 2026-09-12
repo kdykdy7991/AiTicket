@@ -40,6 +40,8 @@ export interface PocTicketBrief {
   id: number
   number: string | null
   title: string | null
+  proposer: string | null
+  proposer_department: string | null
   product_line: string | null
   customer_name: string | null
   priority: PocPriority
@@ -99,6 +101,8 @@ export interface PocTicketDetail extends PocTicketBrief {
 
 export interface PocTicketForm {
   title: string
+  proposer: string
+  proposer_department: string
   product_line: string
   customer_name: string
   priority: PocPriority

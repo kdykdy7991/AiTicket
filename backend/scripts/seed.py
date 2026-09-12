@@ -58,8 +58,8 @@ _SKDY_HASH = "$2b$12$PlEUsC1JRHiZVoUdSUj4y.H/kzyqXWQ4jwfOkMMM3o2sb8.Bcnl/O"
 # 一个用户可以拥有多个业务角色；roles 为全量集合，重复执行会覆盖。
 USERS = [
     ("admin", "系统管理员", ["admin"], None),
-    ("presales01", "售前-张伟", ["presales"], None),
-    ("presales02", "售前-李娜", ["presales"], None),
+    # 售前组共用账号：真实提出人/提出部门在新建问题时填写（必填）
+    ("presales", "售前组", ["presales"], None),
     # 邱庆举同时是批准人和应用平台负责人：一人多角色，只用一个账号
     ("approver01", "邱庆举", ["approver", "subsystem"], "应用平台"),
     ("taskforce01", "陈毅君", ["taskforce"], None),

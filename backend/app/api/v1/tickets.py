@@ -104,6 +104,8 @@ def _brief(ticket: Ticket) -> TicketBrief:
         id=ticket.id,
         number=ticket.number,
         title=ticket.title,
+        proposer=ticket.proposer,
+        proposer_department=ticket.proposer_department,
         product_line=ticket.product_line,
         customer_name=ticket.customer_name,
         priority=ticket.priority,
@@ -238,6 +240,8 @@ async def _get_ticket_or_404(db: AsyncSession, ticket_id: int, *, lock: bool = F
 def _apply_create_fields(ticket: Ticket, body) -> None:
     for field in (
         "title",
+        "proposer",
+        "proposer_department",
         "product_line",
         "customer_name",
         "problem_type",
@@ -403,6 +407,8 @@ def _apply_filters(
         query = query.where(
             Ticket.number.ilike(like)
             | Ticket.title.ilike(like)
+            | Ticket.proposer.ilike(like)
+            | Ticket.proposer_department.ilike(like)
             | Ticket.product_line.ilike(like)
             | Ticket.customer_name.ilike(like)
             | Ticket.problem_type.ilike(like)
@@ -636,6 +642,8 @@ async def export_tickets(
     columns = [
         ("问题编号", lambda t: t.number or ""),
         ("问题名称", lambda t: t.title or ""),
+        ("提出人", lambda t: t.proposer or ""),
+        ("提出部门", lambda t: t.proposer_department or ""),
         ("客户名称", lambda t: t.customer_name or ""),
         ("产品线", lambda t: t.product_line or ""),
         ("问题级别", lambda t: t.priority),
