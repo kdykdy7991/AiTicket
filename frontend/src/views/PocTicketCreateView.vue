@@ -83,18 +83,13 @@
             支持 {{ ALLOWED_EXT.join('、') }}；单个不超过 {{ MAX_FILE_MB }} MB；选择后将在「保存草稿」或「提交审批」时上传
           </span>
         </div>
-        <ul v-if="pendingFiles.length || uploadedAttachments.length" class="material-list">
-          <li v-for="(file, index) in pendingFiles" :key="`pending-${index}`">
-            <span class="material-name">{{ file.name }}</span>
-            <small>{{ formatSize(file.size) }} · 待上传</small>
-            <el-button text size="small" type="danger" @click="pendingFiles.splice(index, 1)">移除</el-button>
-          </li>
-          <li v-for="attachment in uploadedAttachments" :key="`uploaded-${attachment.id}`">
-            <span class="material-name link" @click="downloadAttachment(attachment)">{{ attachment.original_filename }}</span>
-            <small>{{ formatSize(attachment.size) }} · 已上传 · {{ stateLabel(attachment.stage) }}</small>
-          </li>
-        </ul>
-        <el-empty v-else description="暂未添加现场材料" :image-size="60" />
+        <div class="material-list">
+          <PocAttachmentList
+            :items="materialItems"
+            empty-text="暂未添加现场材料"
+            @remove="removePending"
+          />
+        </div>
       </el-card>
 
       <div class="form-actions">
@@ -107,13 +102,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { pocTicketApi } from '@/api/pocTickets'
 import { userApi, type UserItem } from '@/api/users'
+import PocAttachmentList from '@/components/poc/PocAttachmentList.vue'
 import { POC_PRIORITY_OPTIONS, stateLabel } from '@/domain/pocWorkflow'
-import type { PocAttachment, PocTicketForm } from '@/types/poc'
+import type { PocAttachment, PocAttachmentItem, PocTicketForm } from '@/types/poc'
 
 const route = useRoute()
 const router = useRouter()
@@ -154,10 +150,28 @@ function payload(): PocTicketForm {
   return { ...form }
 }
 
-function formatSize(size: number): string {
-  if (size < 1024) return `${size} B`
-  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
-  return `${(size / 1024 / 1024).toFixed(1)} MB`
+/** 待上传的本地文件 + 已上传的服务端附件，统一交给附件列表渲染（图片可预览） */
+const materialItems = computed<PocAttachmentItem[]>(() => [
+  ...pendingFiles.value.map((file, index) => ({
+    key: `pending-${index}`,
+    name: file.name,
+    size: file.size,
+    hint: '待上传',
+    file,
+    removable: true,
+  })),
+  ...uploadedAttachments.value.map(attachment => ({
+    key: `att-${attachment.id}`,
+    name: attachment.original_filename,
+    size: attachment.size,
+    hint: `已上传 · ${attachment.stage ? stateLabel(attachment.stage) : '—'}`,
+    attachment,
+  })),
+])
+
+/** 移除待上传文件：按 File 身份比较，避免同名文件被一起删掉 */
+function removePending(item: PocAttachmentItem) {
+  if (item.file) pendingFiles.value = pendingFiles.value.filter(file => file !== item.file)
 }
 
 /** 选择本地文件：前端先做一遍格式/大小校验，后端仍会再校验一次 */
@@ -195,10 +209,6 @@ async function uploadPendingFiles(ticketId: number) {
   } finally {
     uploading.value = false
   }
-}
-
-async function downloadAttachment(attachment: PocAttachment) {
-  await pocTicketApi.downloadAttachment(attachment)
 }
 
 async function saveDraft(showMessage = true) {
@@ -272,11 +282,7 @@ onMounted(async () => {
 .material-button { display: inline-flex; align-items: center; padding: 8px 14px; border: 1px solid var(--color-primary); border-radius: 8px; color: var(--color-primary); font-size: 13px; cursor: pointer; }
 .material-button input { display: none; }
 .material-hint { color: var(--color-text-tertiary); font-size: 12px; line-height: 1.6; }
-.material-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 8px; }
-.material-list li { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--color-border-light); border-radius: 8px; }
-.material-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.material-name.link { color: var(--color-primary); cursor: pointer; }
-.material-list small { color: var(--color-text-tertiary); font-size: 12px; white-space: nowrap; }
+.material-list { margin-top: 14px; }
 .priority-option { display: inline-flex; align-items: center; gap: 8px; }
 .priority-option i { width: 8px; height: 8px; border-radius: 50%; }
 @media (max-width: 760px) { .form-grid { grid-template-columns: 1fr; } .span-2 { grid-column: span 1; } }

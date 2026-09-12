@@ -19,6 +19,22 @@ export interface PocAttachment {
   created_at: string
 }
 
+/** 附件展示项：服务端附件或本地待上传文件，统一给附件列表组件渲染 */
+export interface PocAttachmentItem {
+  /** 列表渲染 key；图片预览/下载的对象 URL 按 File 身份或附件 id 缓存，不依赖此值 */
+  key: string
+  name: string
+  size?: number
+  /** 附加说明，例如「待上传」「已上传 · 待审批」 */
+  hint?: string
+  /** 已提交到服务端的附件：预览/下载时按需带鉴权拉取 */
+  attachment?: PocAttachment
+  /** 本地待上传文件：直接用 File 生成对象 URL */
+  file?: File
+  /** 是否展示「移除」按钮 */
+  removable?: boolean
+}
+
 export interface PocStateLog {
   id: number
   action: string | null
