@@ -28,11 +28,12 @@
 
           <div class="timeline-meta">
             <DateTimeLabel :iso="node.log.created_at" />
-            <span>
-              操作人：{{ node.log.operator_name || '系统' }}<template v-if="rolesText(node.log)">（{{ rolesText(node.log) }}）</template>
-            </span>
-            <span v-if="node.nextResponsible">下一责任角色：{{ node.nextResponsible }}</span>
-            <span v-if="node.comment" :class="{ reason: node.isReturn }">
+            <span>操作人：{{ node.log.operator_name || '系统' }}</span>
+            <span v-if="node.operatorSubsystem">所属系统：{{ node.operatorSubsystem }}</span>
+            <span v-if="node.showNextResponsible && node.nextResponsibleSystem">下一责任系统：{{ node.nextResponsibleSystem }}</span>
+            <span v-else-if="node.showNextResponsible && node.nextResponsibleRole">下一责任角色：{{ node.nextResponsibleRole }}</span>
+            <span v-if="node.showNextResponsible && node.nextResponsibleUser">下一责任人：{{ node.nextResponsibleUser }}</span>
+            <span v-if="node.comment" class="comment-summary" :class="{ reason: node.isReturn }" :title="node.comment">
               {{ node.isReturn ? '退回原因' : '意见' }}：{{ node.comment }}
             </span>
           </div>
@@ -60,7 +61,6 @@ import {
   VERIFICATION_STATUS_OPTIONS,
   actionLabel,
   roleLabel,
-  roleLabels,
   stateLabel,
   stateType,
   type PocState,
@@ -75,12 +75,12 @@ const props = defineProps<{
   currentState?: PocState | string | null
   /** 分系统字典，用于把 route 动作 payload 里的 skill_group_id 还原成名称 */
   skillGroups?: Group[]
+  /** 当前问题所属分系统；分系统人员的对外身份使用此名称 */
+  subsystemName?: string | null
 }>()
 
 //: payload 里需要展示的字段（其余字段与 comment 重复或属于内部字段）
 const PAYLOAD_FIELDS: { key: string; label: string }[] = [
-  { key: 'skill_group_id', label: '分系统' },
-  { key: 'subsystem_owner_id', label: '分系统负责人' },
   { key: 'temporary_measure', label: '临时处置措施' },
   { key: 'long_term_measure', label: '长期整改措施' },
   { key: 'planned_completion_at', label: '计划完成时间' },
@@ -106,14 +106,14 @@ interface TimelineNode {
   isReturn: boolean
   returnBadge: string
   comment: string | null
-  nextResponsible: string
+  operatorSubsystem: string
+  showNextResponsible: boolean
+  nextResponsibleSystem: string
+  nextResponsibleRole: string
+  nextResponsibleUser: string
   details: { label: string; value: string }[]
 }
 
-function rolesText(log: PocStateLog): string {
-  const text = roleLabels(log.operator_roles)
-  return text === '—' ? '' : text
-}
 
 function skillGroupName(id: unknown): string {
   const found = props.skillGroups?.find(group => group.id === Number(id))
@@ -133,6 +133,15 @@ function formatValue(key: string, value: unknown, log: PocStateLog): string {
   return String(value)
 }
 
+const SUBSYSTEM_ACTIONS = new Set(['submit_plan', 'submit_analysis'])
+const COMMENT_SUMMARY_LENGTH = 160
+const DETAIL_SUMMARY_LENGTH = 120
+
+function summarize(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}…` : normalized
+}
+
 const nodes = computed<TimelineNode[]>(() => {
   const sorted = [...(props.logs || [])].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
@@ -148,17 +157,15 @@ const nodes = computed<TimelineNode[]>(() => {
       isReturn,
       returnBadge: log.action === 'reject' ? '驳回' : isReturn ? '退回' : '',
       // 首条日志的 comment 固定是「提交审批」，与动作名重复
-      comment: log.action ? log.comment : null,
-      nextResponsible: nextRole
-        ? `${roleLabel(nextRole)}${log.responsible_user_name_snapshot ? `（${log.responsible_user_name_snapshot}）` : ''}`
-        : '',
+      comment: log.action && log.comment ? summarize(log.comment, COMMENT_SUMMARY_LENGTH) : null,
+      showNextResponsible: index === sorted.length - 1 && log.to_state === props.currentState && !['closed', 'cancelled'].includes(log.to_state),      operatorSubsystem: log.action && SUBSYSTEM_ACTIONS.has(log.action) ? (props.subsystemName || '') : '',      nextResponsibleSystem: nextRole === 'subsystem' ? (props.subsystemName || '') : '',      nextResponsibleRole: nextRole && nextRole !== 'subsystem' ? roleLabel(nextRole) : '',      nextResponsibleUser: log.responsible_user_name_snapshot || '',
       details: PAYLOAD_FIELDS.filter(field => {
         if (COMMENT_BACKED_FIELDS.has(field.key)) return false
         const value = payload[field.key]
         return value != null && value !== ''
       }).map(field => ({
         label: field.label,
-        value: formatValue(field.key, payload[field.key], log),
+        value: summarize(formatValue(field.key, payload[field.key], log), DETAIL_SUMMARY_LENGTH),
       })),
     }
   })
@@ -229,6 +236,7 @@ const nodes = computed<TimelineNode[]>(() => {
   border-radius: var(--radius-md);
   padding: 10px 14px;
   border: 1px solid var(--color-border-light);
+  overflow: hidden;
 }
 
 .is-current .timeline-content {
@@ -312,11 +320,20 @@ const nodes = computed<TimelineNode[]>(() => {
 
 .timeline-meta .reason { color: var(--color-warning-text); }
 
+.comment-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .detail-block {
   margin-top: 10px;
   padding: 10px 12px;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border-light);
+  overflow: hidden;
   border-radius: var(--radius-sm);
 }
 
@@ -341,7 +358,11 @@ const nodes = computed<TimelineNode[]>(() => {
   margin: 0;
   color: var(--color-text-primary);
   line-height: 1.6;
-  white-space: pre-wrap;
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
   word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 </style>
