@@ -1,6 +1,8 @@
+export type RoleName = 'admin' | 'presales' | 'approver' | 'taskforce' | 'subsystem' | 'quality'
+
 export interface Role {
   id: number
-  name: 'admin' | 'agent' | 'customer'
+  name: RoleName
   permissions: string[]
 }
 
@@ -23,10 +25,15 @@ export interface User {
   email: string
   firstname: string
   lastname: string
-  role: Role
+  /** 一个用户可以拥有多个业务角色（多角色） */
+  roles: RoleName[]
   groups?: Group[]
   organization?: Organization | null
   active: boolean
+  name?: string
+  username?: string
+  group_id?: number | null
+  is_group_leader?: boolean
 }
 
 // —— 客服组端到端工单需求补充（P7）新增类型 ——

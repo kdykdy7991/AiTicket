@@ -1,13 +1,13 @@
 import api from './index'
-import type { LoginPayload, LoginResponse } from '@/types'
+import type { LoginPayload, LoginResponse, RoleName } from '@/types'
 
 interface BackendUserInfo {
   id: number
   username: string
   name: string
-  role: string
-  group_id: number | null
-  is_group_leader: boolean
+  /** 多角色：一个用户可拥有多个业务角色编码 */
+  roles: string[]
+  skill_groups?: Array<{ id: number; name: string }>
 }
 
 interface BackendLoginResponse {
@@ -25,11 +25,10 @@ function adaptUser(u: BackendUserInfo) {
     email: u.username,                                          // 用 username 充当 email 字段
     firstname: u.name,
     lastname: '',
-    role: { id: 0, name: u.role as 'admin' | 'agent' | 'customer', permissions: [] },
+    roles: (u.roles || []) as RoleName[],
     active: true,
-    // 额外字段：用于权限判断（受理按钮、批量操作等）
-    group_id: u.group_id,
-    is_group_leader: u.is_group_leader,
+    name: u.name,
+    username: u.username,
   }
 }
 
@@ -44,6 +43,8 @@ export const authApi = {
     return {
       access_token: res.access_token,
       refresh_token: res.refresh_token,
+      token_type: res.token_type,
+      expires_in: res.expires_in,
       user: adaptUser(res.user) as any,
     }
   },
@@ -55,6 +56,8 @@ export const authApi = {
     return {
       access_token: res.access_token,
       refresh_token: res.refresh_token,
+      token_type: res.token_type,
+      expires_in: res.expires_in,
       user: adaptUser(res.user) as any,
     }
   },

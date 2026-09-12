@@ -9,12 +9,24 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
 
   const isLoggedIn = computed(() => !!accessToken.value)
-  const userRole = computed(() => {
-    const r = (user.value as any)?.role
-    return typeof r === 'string' ? r : r?.name || null
+  /** 当前用户拥有的全部业务角色（多角色） */
+  const userRoles = computed<string[]>(() => {
+    const raw = (user.value as any)?.roles
+    if (Array.isArray(raw)) return raw
+    const single = (user.value as any)?.role            // 兼容旧本地缓存
+    if (typeof single === 'string') return [single]
+    return single?.name ? [single.name] : []
   })
-  const isAdmin = computed(() => userRole.value === 'admin')
-  const isAgent = computed(() => userRole.value === 'agent' || userRole.value === 'admin')
+  /** 是否拥有其中任一角色 */
+  const hasRole = (...roles: string[]) => roles.some(role => userRoles.value.includes(role))
+  const isAdmin = computed(() => hasRole('admin'))
+  const isPresales = computed(() => hasRole('presales'))
+  const isApprover = computed(() => hasRole('approver'))
+  const isTaskforce = computed(() => hasRole('taskforce'))
+  const isSubsystem = computed(() => hasRole('subsystem'))
+  const isQuality = computed(() => hasRole('quality'))
+  const canCreateTicket = computed(() => isPresales.value || isAdmin.value)
+  const canViewReport = computed(() => isQuality.value || isAdmin.value)
   const displayName = computed(() => {
     if (!user.value) return ''
     const u = user.value as any
@@ -51,7 +63,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     accessToken, refreshToken, user,
-    isLoggedIn, userRole, isAdmin, isAgent, displayName,
+    isLoggedIn, userRoles, hasRole, isAdmin,
+    isPresales, isApprover, isTaskforce, isSubsystem, isQuality,
+    canCreateTicket, canViewReport, displayName,
     login, logout,
   }
 })

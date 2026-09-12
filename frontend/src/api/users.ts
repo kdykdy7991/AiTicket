@@ -1,8 +1,9 @@
 import api from './index'
 
 export interface SkillGroupMembership {
-  skill_group_id: number
-  is_dispatcher: boolean
+  id?: number
+  name?: string
+  skill_group_id?: number
 }
 
 export interface UserItem {
@@ -10,9 +11,8 @@ export interface UserItem {
   username: string
   name: string
   phone: string | null
-  role: string
-  group_id: number | null
-  is_group_leader: boolean
+  /** 多角色：一个用户可拥有多个业务角色编码 */
+  roles: string[]
   is_active: boolean
   dingtalk_id: string | null
   skill_groups: SkillGroupMembership[]
@@ -24,9 +24,8 @@ export interface UserPayload {
   name?: string
   phone?: string | null
   password?: string
-  role?: string
-  group_id?: number | null
-  is_group_leader?: boolean
+  /** 全量替换角色集合，至少一个 */
+  roles?: string[]
   skill_groups?: SkillGroupMembership[]
   dingtalk_id?: string | null
   is_active?: boolean
