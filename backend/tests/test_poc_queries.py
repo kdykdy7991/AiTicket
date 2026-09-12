@@ -117,7 +117,7 @@ async def test_metadata_endpoints_for_role_selectors(api):
     api.as_("taskforce01")
 
     approvers = (await api.c.get("/api/v1/users", params={"role": "approver"})).json()["data"]
-    assert [u["name"] for u in approvers] == ["邱总", "备用批准人"]
+    assert [u["name"] for u in approvers] == ["邱庆举", "备用批准人"]
     assert all(u["role"] == "approver" for u in approvers)
     # 非管理员只拿到流程需要的最小字段
     assert set(approvers[0]) == {"id", "username", "name", "role", "skill_groups", "is_active"}

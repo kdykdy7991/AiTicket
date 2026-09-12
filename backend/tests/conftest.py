@@ -58,7 +58,7 @@ FIXTURE_USERS = [
     ("admin", "系统管理员", "admin", None),
     ("presales01", "售前-张伟", "presales", None),
     ("presales02", "售前-李娜", "presales", None),
-    ("approver01", "邱总", "approver", None),
+    ("approver01", "邱庆举", "approver", None),
     ("approver02", "备用批准人", "approver", None),
     ("taskforce01", "陈毅君", "taskforce", None),
     ("subsystem01", "邓雪群", "subsystem", "系统总体"),

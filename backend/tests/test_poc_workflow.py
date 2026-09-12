@@ -141,7 +141,7 @@ async def test_full_main_flow_from_presales_to_closed(api):
     assert actions[1:] == [step[1].value for step in MAIN_FLOW_STEPS]
 
     approve_log = final["state_logs"][1]
-    assert approve_log["operator_name"] == "邱总"
+    assert approve_log["operator_name"] == "邱庆举"
     assert approve_log["operator_role"] == "approver"
     assert approve_log["comment"] == "同意，转专项小组确认"
     assert approve_log["from_state"] == "pending_approval"
