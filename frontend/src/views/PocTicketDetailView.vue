@@ -21,9 +21,7 @@
           <el-card v-if="hasAnalysis" shadow="never" class="section"><template #header><strong>分析验证</strong></template><div class="fields"><Field label="初步排查结论" :value="ticket.initial_investigation" wide/><Field label="根本原因分析" :value="ticket.root_cause" wide/><Field label="质量问题分析报告" :value="ticket.analysis_report" wide/></div></el-card>
           <el-card v-if="hasReview" shadow="never" class="section"><template #header><strong>质量评审与缺陷入库</strong></template><div class="fields"><Field label="验证状态" :value="verificationLabel"/><Field label="验证结论" :value="ticket.verification_conclusion" wide/><Field label="质量评审结果" :value="ticket.quality_review_result" wide/><Field label="缺陷 ID" :value="ticket.defect_id"/><Field label="SVN 路径" :value="ticket.defect_repository_path" wide/></div></el-card>
           <el-card shadow="never" class="section attachment-section"><template #header><div class="section-header"><strong>相关材料</strong><label class="upload-button"><input type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.log,.zip" @change="uploadFiles"/>{{ uploading ? '上传中…' : '上传附件' }}</label></div></template><PocAttachmentList :items="attachmentItems" empty-text="暂无附件"/></el-card>
-          <el-card shadow="never" class="section"><template #header><strong>流程记录</strong></template>
-            <el-timeline><el-timeline-item v-for="log in [...ticket.state_logs].reverse()" :key="log.id" :timestamp="formatTime(log.created_at)" placement="top"><strong>{{ stateLabel(log.to_state) }}</strong><span class="log-meta">{{ log.operator_name || '系统' }} · {{ roleLabels(log.operator_roles) }}</span><p v-if="log.comment">{{ log.comment }}</p></el-timeline-item></el-timeline>
-          </el-card>
+          <el-card shadow="never" class="section"><template #header><strong>流程记录</strong></template><PocStateTimeline :logs="ticket.state_logs" :current-state="ticket.state" :skill-groups="skillGroups"/></el-card>
         </main>
 
         <aside>
@@ -60,7 +58,8 @@ import { pocTicketApi } from '@/api/pocTickets'
 import { userApi, type UserItem } from '@/api/users'
 import { pocMetaApi } from '@/api/pocMeta'
 import PocAttachmentList from '@/components/poc/PocAttachmentList.vue'
-import { MAIN_FLOW_STATES, POC_STATE_OPTIONS, VERIFICATION_STATUS_OPTIONS, priorityLabel, roleLabel, roleLabels, stateLabel, type PocState, type TicketAction } from '@/domain/pocWorkflow'
+import PocStateTimeline from '@/components/poc/PocStateTimeline.vue'
+import { MAIN_FLOW_STATES, VERIFICATION_STATUS_OPTIONS, actionLabel, priorityLabel, roleLabel, stateLabel, stateType, type PocState, type TicketAction } from '@/domain/pocWorkflow'
 import type { PocAttachmentItem, PocTicketDetail } from '@/types/poc'
 import type { Group } from '@/types'
 
@@ -69,8 +68,7 @@ const route=useRoute(), router=useRouter(); const loading=ref(false), submitting
 const ticket=ref<PocTicketDetail|null>(null); const currentAction=ref<TicketAction>('approve'); const comment=ref(''); const actionPayload=reactive<Record<string, any>>({}); const skillGroups=ref<Group[]>([]); const subsystemUsers=ref<UserItem[]>([])
 const hasPlan=computed(()=>!!(ticket.value?.long_term_measure||ticket.value?.planned_completion_at)); const hasAnalysis=computed(()=>!!(ticket.value?.root_cause||ticket.value?.analysis_report)); const hasReview=computed(()=>!!(ticket.value?.verification_status||ticket.value?.quality_review_result||ticket.value?.defect_id));
 const coordinates=computed(()=>ticket.value?.longitude!=null&&ticket.value?.latitude!=null?`${ticket.value.longitude}, ${ticket.value.latitude}`:'—'); const verificationLabel=computed(()=>VERIFICATION_STATUS_OPTIONS.find(v=>v.value===ticket.value?.verification_status)?.label||'—')
-const ACTION_LABELS:Record<TicketAction,string>={approve:'审批通过',reject:'驳回',confirm_problem:'确认问题',route:'流转分系统',accept:'确认接收',submit_plan:'提交闭环计划',confirm_plan:'确认闭环计划',submit_analysis:'提交分析验证',pass_review:'通过质量评审',register_defect:'登记缺陷并闭环',return:'退回',resubmit:'重新提交',cancel:'撤销'}
-function actionLabel(a:TicketAction){return ACTION_LABELS[a]||a} function buttonType(a:TicketAction){return ['reject','return','cancel'].includes(a)?'danger':'primary'} function formatTime(v:string|null){return v?dayjs(v).format('YYYY-MM-DD HH:mm'):'—'} function stateType(s:PocState){return POC_STATE_OPTIONS.find(x=>x.value===s)?.type||'info'} function stateIndex(s:PocState){return MAIN_FLOW_STATES.indexOf(s)}
+function buttonType(a:TicketAction){return ['reject','return','cancel'].includes(a)?'danger':'primary'} function formatTime(v:string|null){return v?dayjs(v).format('YYYY-MM-DD HH:mm'):'—'} function stateIndex(s:PocState){return MAIN_FLOW_STATES.indexOf(s)}
 const commentRequired=computed(()=>['reject','return','cancel'].includes(currentAction.value)); const showComment=computed(()=>!['route','submit_plan','submit_analysis','pass_review','register_defect','resubmit'].includes(currentAction.value));
 const canSubmit=computed(()=>{const p=actionPayload,a=currentAction.value;if(commentRequired.value&&!comment.value.trim())return false;if(a==='route')return !!p.skill_group_id&&!!p.subsystem_owner_id;if(a==='submit_plan')return !!p.long_term_measure?.trim()&&!!p.planned_completion_at;if(a==='submit_analysis')return !!p.initial_investigation?.trim()&&!!p.root_cause?.trim()&&!!p.analysis_report?.trim();if(a==='pass_review')return !!p.verification_status&&!!p.verification_conclusion?.trim()&&!!p.quality_review_result?.trim();if(a==='register_defect')return !!p.defect_id?.trim()&&!!p.defect_repository_path?.trim();return true})
 const attachmentItems=computed<PocAttachmentItem[]>(()=>(ticket.value?.attachments||[]).map(a=>({key:`att-${a.id}`,name:a.original_filename,size:a.size,hint:`${a.stage?stateLabel(a.stage as PocState):'—'} · ${a.uploader_name||'未知'}`,attachment:a})))

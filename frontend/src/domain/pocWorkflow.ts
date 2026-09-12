@@ -81,6 +81,32 @@ export type TicketAction =
   | 'resubmit'
   | 'cancel'
 
+/** 动作展示文案；流程记录里的首条日志 action 为 null，表示提交审批 */
+export const ACTION_LABELS: Record<TicketAction, string> = {
+  approve: '审批通过',
+  reject: '驳回',
+  confirm_problem: '确认问题',
+  route: '流转分系统',
+  accept: '确认接收',
+  submit_plan: '提交闭环计划',
+  confirm_plan: '确认闭环计划',
+  submit_analysis: '提交分析验证',
+  pass_review: '通过质量评审',
+  register_defect: '登记缺陷并闭环',
+  return: '退回',
+  resubmit: '重新提交',
+  cancel: '撤销',
+}
+
+export function actionLabel(action?: string | null): string {
+  return action ? ACTION_LABELS[action as TicketAction] || action : '提交审批'
+}
+
+/** 状态标签色（el-tag type / 流程记录状态胶囊共用） */
+export function stateType(state?: string | null): string {
+  return POC_STATE_OPTIONS.find(item => item.value === state)?.type || 'info'
+}
+
 export function roleLabel(role?: string | null): string {
   return role ? ROLE_LABELS[role as BusinessRole] || role : '—'
 }
