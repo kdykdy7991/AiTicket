@@ -86,6 +86,17 @@ TERMINAL_STATES: frozenset[TicketState] = frozenset(
 #: 已闭环/已撤销之外的状态集合，用于“未闭环”查询与逾期判断
 OPEN_STATES: frozenset[TicketState] = frozenset(STATE_ORDER) - TERMINAL_STATES
 
+#: 专项小组数据范围：**批准人批准之后**的未闭环节点。
+#: `pending_approval` 阶段问题归售前与批准人，专项小组不参与，不可见。
+#: `returned` 额外按退回目标判断，见 taskforce_visible()。
+TASKFORCE_VISIBLE_STATES: frozenset[TicketState] = (
+    frozenset(OPEN_STATES) - {TicketState.PENDING_APPROVAL}
+)
+
+TASKFORCE_VISIBLE_VALUES: frozenset[str] = frozenset(
+    state.value for state in TASKFORCE_VISIBLE_STATES
+)
+
 
 # ── 优先级 ─────────────────────────────────────────────────
 
@@ -371,6 +382,23 @@ RESPONSIBLE_USER_FIELD_BY_STATE: dict[TicketState, str | None] = {
 def is_terminal(state: TicketState | str) -> bool:
     state = _as_state(state)
     return state in TERMINAL_STATES
+
+
+def taskforce_visible(
+    state: TicketState | str, return_to_state: TicketState | str | None = None
+) -> bool:
+    """专项小组能否看到该问题（数据范围）。
+
+    规则：批准人批准之后的未闭环节点可见；待审批、已闭环、已撤销不可见。
+    `returned` 按退回目标判断——退回目标是 `pending_approval` 时问题仍在审批前
+    阶段（售前修改后重新提交审批），专项小组不可见。
+    """
+    state = _as_state(state)
+    if state not in TASKFORCE_VISIBLE_STATES:
+        return False
+    if state is TicketState.RETURNED and return_to_state is not None:
+        return _as_state(return_to_state) is not TicketState.PENDING_APPROVAL
+    return True
 
 
 def _as_state(state: TicketState | str) -> TicketState:

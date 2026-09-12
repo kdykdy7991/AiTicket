@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import ColumnElement, false, or_, select
+from sqlalchemy import ColumnElement, and_, false, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
@@ -24,6 +24,7 @@ from app.domain.poc_workflow import (
     ActorScope,
     BusinessRole,
     Priority,
+    TASKFORCE_VISIBLE_VALUES,
     TicketAction,
     TicketState,
     TERMINAL_STATES,
@@ -32,6 +33,7 @@ from app.domain.poc_workflow import (
     is_terminal,
     responsible_role_for,
     responsible_user_field_for,
+    taskforce_visible,
 )
 from app.models.ticket import Ticket
 
@@ -102,8 +104,8 @@ def ticket_scope(actor: Any) -> ColumnElement | None:
 
     conditions: list[ColumnElement] = []
     if BusinessRole.TASKFORCE.value in roles:
-        # 专项小组：全部未闭环问题，用于判断涉及分系统
-        conditions.append(Ticket.state.notin_(TERMINAL_VALUES))
+        # 专项小组：批准人批准之后的未闭环问题（不含待审批）
+        conditions.append(_taskforce_scope_condition())
     if BusinessRole.PRESALES.value in roles:
         conditions.append(Ticket.creator_id == actor.id)
     if BusinessRole.APPROVER.value in roles:
@@ -118,6 +120,23 @@ def ticket_scope(actor: Any) -> ColumnElement | None:
     return or_(*conditions)
 
 
+def _taskforce_scope_condition() -> ColumnElement:
+    """`taskforce_visible()` 的 SQL 等价条件，二者必须保持一致。
+
+    `returned` 只有退回目标是 `pending_approval` 时不可见，
+    用 IS DISTINCT FROM 让 `return_to_state IS NULL` 的历史行保持可见。
+    """
+    return and_(
+        Ticket.state.in_(tuple(TASKFORCE_VISIBLE_VALUES)),
+        or_(
+            Ticket.state != TicketState.RETURNED.value,
+            Ticket.return_to_state.is_distinct_from(
+                TicketState.PENDING_APPROVAL.value
+            ),
+        ),
+    )
+
+
 def can_view(ticket: Any, actor: Any) -> bool:
     """单条可见性判断，规则与 ticket_scope() 保持一致（多角色取并集）。"""
     roles = actor_roles(actor)
@@ -125,7 +144,9 @@ def can_view(ticket: Any, actor: Any) -> bool:
         return ticket.creator_id == actor.id or BusinessRole.ADMIN.value in roles
     if roles & {BusinessRole.ADMIN.value, BusinessRole.QUALITY.value}:
         return True
-    if BusinessRole.TASKFORCE.value in roles and ticket.state not in TERMINAL_VALUES:
+    if BusinessRole.TASKFORCE.value in roles and taskforce_visible(
+        ticket.state, ticket.return_to_state
+    ):
         return True
     if BusinessRole.PRESALES.value in roles and ticket.creator_id == actor.id:
         return True
