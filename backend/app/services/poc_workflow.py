@@ -427,12 +427,10 @@ async def execute_action(
     # 7. 写入业务字段
     if action is TicketAction.APPROVE:
         pass
-    elif action is TicketAction.CONFIRM_PROBLEM:
-        ticket.confirmation_comment = _text(payload, comment, "confirmation_comment")
     elif action is TicketAction.ROUTE:
+        # 专项小组一步完成：确认说明 + 选定分系统与分系统负责人
+        ticket.confirmation_comment = _text(payload, comment, "confirmation_comment")
         await _apply_route(db, ticket, payload)
-    elif action is TicketAction.ACCEPT:
-        ticket.acceptance_comment = _text(payload, comment, "acceptance_comment")
     elif action is TicketAction.SUBMIT_PLAN:
         if payload.get("temporary_measure") is not None:
             ticket.temporary_measure = payload["temporary_measure"] or None

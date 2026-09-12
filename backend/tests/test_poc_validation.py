@@ -109,7 +109,7 @@ async def test_version_conflict_returns_409(api):
 async def test_missing_required_action_payload_returns_400(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 2)  # pending_routing
+    await run_steps(api, ticket_id, 1)  # pending_routing
 
     api.as_("taskforce01")
     resp = await api.action(ticket_id, "route", payload={}, expect=400)
@@ -124,7 +124,7 @@ async def test_missing_required_action_payload_returns_400(api):
 async def test_route_rejects_wrong_subsystem_owner(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 2)
+    await run_steps(api, ticket_id, 1)
 
     api.as_("taskforce01")
     # 角色不符
@@ -173,7 +173,7 @@ async def test_unknown_payload_field_returns_422(api):
 async def test_invalid_verification_status_returns_422(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 7)  # pending_quality_review
+    await run_steps(api, ticket_id, 5)  # pending_quality_review
 
     api.as_("quality01")
     resp = await api.action(
@@ -192,7 +192,7 @@ async def test_invalid_verification_status_returns_422(api):
 async def test_register_defect_requires_defect_info(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 8)  # pending_defect_registration
+    await run_steps(api, ticket_id, 6)  # pending_defect_registration
 
     api.as_("quality01")
     resp = await api.action(
@@ -220,7 +220,7 @@ async def test_register_defect_requires_defect_info(api):
 async def test_terminal_ticket_rejects_further_actions(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 9)  # closed
+    await run_steps(api, ticket_id, 7)  # closed
 
     api.as_("quality01")
     version = (await api.detail(ticket_id))["state_version"]
@@ -269,13 +269,13 @@ async def test_reject_then_resubmit_returns_to_pending_approval(api):
 
     api.as_("approver01")
     detail = await api.acted(ticket_id, "approve", comment="补充完整，同意")
-    assert detail["state"] == "pending_confirmation"
+    assert detail["state"] == "pending_routing"
 
 
-async def test_return_path_problem_confirmation_to_pending_approval(api):
+async def test_return_path_taskforce_node_to_pending_approval(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 1)  # pending_confirmation
+    await run_steps(api, ticket_id, 1)  # pending_routing
 
     api.as_("taskforce01")
     await api.action(ticket_id, "return", payload={}, expect=400)  # 缺原因
@@ -303,7 +303,7 @@ async def test_return_path_problem_confirmation_to_pending_approval(api):
 async def test_return_path_plan_confirmation_to_planning(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 5)  # pending_plan_confirmation
+    await run_steps(api, ticket_id, 3)  # pending_plan_confirmation
 
     api.as_("presales01")
     detail = await api.acted(
@@ -336,7 +336,7 @@ async def test_return_path_plan_confirmation_to_planning(api):
 async def test_return_path_quality_review_to_processing(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 7)  # pending_quality_review
+    await run_steps(api, ticket_id, 5)  # pending_quality_review
 
     api.as_("quality01")
     detail = await api.acted(ticket_id, "return", comment="分析报告缺少复现证据")
@@ -377,7 +377,7 @@ async def test_return_path_quality_review_to_processing(api):
 async def test_return_target_is_fixed_per_node(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 1)  # pending_confirmation
+    await run_steps(api, ticket_id, 1)  # pending_routing
 
     api.as_("taskforce01")
     resp = await api.action(
@@ -393,7 +393,7 @@ async def test_return_target_is_fixed_per_node(api):
 async def test_patch_field_scope_by_node(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 4)  # planning
+    await run_steps(api, ticket_id, 2)  # planning
 
     # 当前节点责任人不懂的字段不允许改
     api.as_("subsystem01")
@@ -408,7 +408,7 @@ async def test_patch_field_scope_by_node(api):
     assert ok.json()["long_term_measure"] == "先写草稿措施"
 
     # 角色级节点（专项小组）没有可编辑字段
-    await run_steps(api, ticket_id, 7, start=4)  # pending_routing
+    await run_steps(api, ticket_id, 5, start=2)  # pending_quality_review
     api.as_("taskforce01")
     resp = await api.c.patch(f"/api/v1/tickets/{ticket_id}", json={"title": "改标题"})
     assert resp.status_code == 403, resp.text
@@ -556,3 +556,31 @@ async def test_creator_can_fix_proposer_before_approval(api):
     api.as_("quality01")
     resp = await api.c.patch(f"/api/v1/tickets/{ticket_id}", json={"proposer": "越权"})
     assert resp.status_code == 403, resp.text
+
+
+async def test_merged_away_actions_are_rejected(api):
+    """流程合并后 confirm_problem / accept 不再是合法动作。"""
+    api.as_("presales01")
+    ticket_id = (await api.create_ticket()).json()["data"]["id"]
+    await run_steps(api, ticket_id, 1)  # pending_routing：专项小组节点
+
+    api.as_("taskforce01")
+    await api.action(ticket_id, "confirm_problem", expect=422)
+    await api.action(ticket_id, "accept", expect=422)
+
+    # 合并后的正向动作一次完成确认与流转
+    detail = await api.acted(
+        ticket_id,
+        "route",
+        comment="问题描述准确，转终端系统",
+        payload={
+            "skill_group_id": api.sg("终端系统"),
+            "subsystem_owner_id": api.uid("subsystem03"),
+        },
+    )
+    assert detail["state"] == "planning"
+    assert detail["confirmation_comment"] == "问题描述准确，转终端系统"
+    assert detail["skill_group_name"] == "终端系统"
+    assert detail["subsystem_owner_name"] == "余华伟"
+    assert detail["current_responsible_role"] == "subsystem"
+    assert detail["current_responsible_user_id"] == api.uid("subsystem03")

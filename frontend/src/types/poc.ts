@@ -96,7 +96,6 @@ export interface PocTicketDetail extends PocTicketBrief {
   device_info: string | null
   description: string | null
   confirmation_comment: string | null
-  acceptance_comment: string | null
   temporary_measure: string | null
   long_term_measure: string | null
   plan_confirmation_comment: string | null

@@ -56,9 +56,7 @@ export type BusinessRole =
 
 export type PocState =
   | 'pending_approval'
-  | 'pending_confirmation'
   | 'pending_routing'
-  | 'pending_acceptance'
   | 'planning'
   | 'pending_plan_confirmation'
   | 'processing'
@@ -180,8 +178,7 @@ ticketApi.downloadAttachment(attachmentId)
 - 全部
 - 我的待办
 - 待审批
-- 待问题确认
-- 待分系统接收
+- 待确认流转
 - 闭环计划
 - 分析验证
 - 待质量评审
@@ -246,15 +243,13 @@ components/poc/actions/DefectRegistrationForm.vue
 | --- | --- |
 | `approve` | 审批意见；通过按钮 |
 | `reject` | 驳回原因必填 |
-| `confirm_problem` | 确认意见；确认按钮 |
-| `route` | 分系统、分系统负责人必填 |
-| `accept` | 接收意见可选 |
+| `route` | 分系统、分系统负责人必填；确认说明可选（专项小组一步完成「确认问题 + 流转分系统」）|
 | `submit_plan` | 临时措施、长期措施、计划完成时间 |
 | `confirm_plan` | 确认意见；确认或退回 |
 | `submit_analysis` | 初步排查、根因、分析报告、附件 |
 | `pass_review` | 验证状态、验证结论、质量评审结果 |
 | `register_defect` | 缺陷 ID、SVN 路径 |
-| `return` | 退回原因必填，目标由当前节点固定决定 |
+| `return` | 退回原因必填，目标由当前节点固定决定；在 `pending_routing` 上按钮文案为「驳回」 |
 | `resubmit` | 展示被退回原因，修改后重新提交 |
 | `cancel` | 撤销原因必填 |
 
@@ -335,7 +330,7 @@ p1_urgent/p2_high/p3_normal/p4_enterprise
 
 1. 售前保存草稿、继续编辑、提交审批。
 2. 批准人只看到本人待审批问题，并可通过/驳回。
-3. 专项小组确认问题并选择分系统负责人。
+3. 专项小组确认问题并选择分系统负责人（一步完成确认与流转）。
 4. 非对应分系统人员看不到接收和填写计划按钮。
 5. 分系统提交计划后，售前确认或退回。
 6. 分系统提交分析验证和附件。

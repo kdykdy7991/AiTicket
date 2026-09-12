@@ -63,14 +63,14 @@ async def test_same_subsystem_member_can_view_but_not_act(api):
     """同分系统其他成员可以查看，但不能执行分系统动作。"""
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 3)  # pending_acceptance
+    await run_steps(api, ticket_id, 2)  # planning（已流转到系统总体）
 
-    api.as_("subsystem06")
+    api.as_("subsystem06")  # 系统总体的同事，但不是该问题的分系统负责人
     detail = await api.detail(ticket_id)
-    assert detail["state"] == "pending_acceptance"
-    assert "accept" not in detail["allowed_actions"]
+    assert detail["state"] == "planning"
+    assert "submit_plan" not in detail["allowed_actions"]
 
-    await api.action(ticket_id, "accept", expect=403)
+    await api.action(ticket_id, "submit_plan", expect=403)
 
 
 async def test_admin_has_fallback_power(api):
@@ -84,7 +84,7 @@ async def test_admin_has_fallback_power(api):
     assert detail["state"] == "pending_approval"
 
     updated = await api.acted(ticket_id, "approve", comment="管理员代审批")
-    assert updated["state"] == "pending_confirmation"
+    assert updated["state"] == "pending_routing"
     assert updated["state_logs"][-1]["operator_name"] == "系统管理员"
 
     admin_view = (await api.c.get("/api/v1/users", params={"role": "approver"})).json()["data"]
@@ -131,7 +131,7 @@ async def test_approver_scope_is_limited_to_assigned_tickets(api):
 async def test_subsystem_scope_follows_skill_group(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 3)  # 流转到系统总体
+    await run_steps(api, ticket_id, 2)  # planning：已流转到系统总体
 
     api.as_("subsystem02")  # 卫星平台
     assert (await api.c.get("/api/v1/tickets")).json()["data"] == []
@@ -161,8 +161,8 @@ async def test_taskforce_cannot_see_pending_approval(api):
     listed = (await api.c.get("/api/v1/tickets")).json()["data"]
     assert [t["id"] for t in listed] == [ticket_id]
     detail = await api.detail(ticket_id)
-    assert detail["state"] == "pending_confirmation"
-    assert detail["allowed_actions"] == ["confirm_problem", "return"]
+    assert detail["state"] == "pending_routing"
+    assert detail["allowed_actions"] == ["route", "return"]
 
 
 async def test_taskforce_list_and_export_follow_scope(api):
@@ -257,7 +257,7 @@ async def test_taskforce_returned_visibility_follows_return_target(api):
     # 另一条走到质量评审后被退回分系统（审批后阶段），专项小组仍应可见
     api.as_("presales01")
     processed = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, processed, 7)  # pending_quality_review
+    await run_steps(api, processed, 5)  # pending_quality_review
     api.as_("quality01")
     await api.action(
         processed,

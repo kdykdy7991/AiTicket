@@ -35,9 +35,7 @@ def test_every_state_has_actions_and_terminals_are_final():
 
 def test_responsible_role_mapping():
     assert responsible_role_for(TicketState.PENDING_APPROVAL) == "approver"
-    assert responsible_role_for(TicketState.PENDING_CONFIRMATION) == "taskforce"
     assert responsible_role_for(TicketState.PENDING_ROUTING) == "taskforce"
-    assert responsible_role_for(TicketState.PENDING_ACCEPTANCE) == "subsystem"
     assert responsible_role_for(TicketState.PLANNING) == "subsystem"
     assert responsible_role_for(TicketState.PENDING_PLAN_CONFIRMATION) == "presales"
     assert responsible_role_for(TicketState.PROCESSING) == "subsystem"
@@ -98,7 +96,7 @@ async def test_create_formal_ticket_enters_pending_approval(api):
 
 
 async def test_full_main_flow_from_presales_to_closed(api):
-    """售前提交 → 批准 → 确认 → 流转 → 接收 → 计划 → 确认 → 分析 → 评审 → 入库闭环。"""
+    """售前提交 → 批准 → 专项小组确认并流转 → 计划 → 确认 → 分析 → 评审 → 入库闭环。"""
     api.as_("presales01")
     created = await api.create_ticket()
     assert created.status_code == 201, created.text
@@ -132,9 +130,9 @@ async def test_full_main_flow_from_presales_to_closed(api):
     assert final["closed_at"] is not None
     assert final["actual_completion_at"] is not None
     assert final["is_overdue"] is False
-    # 建单日志 1 条 + 9 个动作
-    assert final["state_version"] == 10
-    assert len(final["state_logs"]) == 10
+    # 建单日志 1 条 + 7 个动作
+    assert final["state_version"] == 8
+    assert len(final["state_logs"]) == 8
 
     actions = [log["action"] for log in final["state_logs"]]
     assert actions[0] is None
@@ -143,9 +141,9 @@ async def test_full_main_flow_from_presales_to_closed(api):
     approve_log = final["state_logs"][1]
     assert approve_log["operator_name"] == "邱庆举"
     assert approve_log["operator_roles"] == ["approver"]
-    assert approve_log["comment"] == "同意，转专项小组确认"
+    assert approve_log["comment"] == "同意，转专项小组确认并流转"
     assert approve_log["from_state"] == "pending_approval"
-    assert approve_log["to_state"] == "pending_confirmation"
+    assert approve_log["to_state"] == "pending_routing"
     assert approve_log["responsible_role_snapshot"] == "taskforce"
     assert approve_log["state_version"] == 2
 
@@ -167,7 +165,7 @@ async def test_state_logs_endpoint_matches_detail(api):
     resp = await api.c.get(f"/api/v1/tickets/{ticket_id}/state-logs")
     assert resp.status_code == 200, resp.text
     logs = resp.json()["data"]
-    assert [log["to_state"] for log in logs] == ["pending_approval", "pending_confirmation"]
+    assert [log["to_state"] for log in logs] == ["pending_approval", "pending_routing"]
     assert logs[-1]["operator_roles"] == ["approver"]
 
 
@@ -206,7 +204,6 @@ async def test_overdue_flag_follows_planned_completion(api):
     api.as_("approver01")
     await api.action(ticket_id, "approve")
     api.as_("taskforce01")
-    await api.action(ticket_id, "confirm_problem")
     await api.action(
         ticket_id,
         "route",
@@ -216,7 +213,6 @@ async def test_overdue_flag_follows_planned_completion(api):
         },
     )
     api.as_("subsystem03")
-    await api.action(ticket_id, "accept")
     detail = await api.acted(
         ticket_id,
         "submit_plan",
@@ -239,7 +235,7 @@ async def test_notification_failure_does_not_rollback_action(api):
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
     api.as_("approver01")
     detail = await api.acted(ticket_id, "approve")
-    assert detail["state"] == "pending_confirmation"
+    assert detail["state"] == "pending_routing"
 
     async with api.session() as s:
         rows = (
@@ -253,7 +249,7 @@ async def test_notification_failure_does_not_rollback_action(api):
         assert rows[-1].target_user_id is None  # 专项小组是角色级责任，无具体人员
 
         ticket = (await s.execute(select(Ticket).where(Ticket.id == ticket_id))).scalar_one()
-        assert ticket.state == "pending_confirmation"
+        assert ticket.state == "pending_routing"
         assert ticket.state_version == 2
 
 

@@ -149,8 +149,7 @@ class POCSmokeFlow:
         )
 
         print("\n3) 主流程流转")
-        await self.act("approver", ticket_id, "approve", comment="同意，转专项小组确认")
-        await self.act("taskforce", ticket_id, "confirm_problem", comment="问题描述准确，进入流转")
+        await self.act("approver", ticket_id, "approve", comment="同意，转专项小组确认并流转")
         await self.act(
             "taskforce",
             ticket_id,
@@ -159,9 +158,8 @@ class POCSmokeFlow:
                 "skill_group_id": self.skill_group_ids[SUBSYSTEM_NAME],
                 "subsystem_owner_id": self.user_ids["subsystem"],
             },
-            comment="判定为终端系统问题",
+            comment="问题描述准确，判定为终端系统问题",
         )
-        await self.act("subsystem", ticket_id, "accept", comment="已接收，安排排查")
         await self.act(
             "subsystem",
             ticket_id,

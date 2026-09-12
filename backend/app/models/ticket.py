@@ -57,10 +57,12 @@ class Ticket(Base):
     creator_department: Mapped[str | None] = mapped_column(String(100))
 
     # ── 后续阶段字段 ──────────────────────────────────────
+    #: 专项小组「确认并流转」时填写的确认说明
     confirmation_comment: Mapped[str | None] = mapped_column(Text)
     subsystem_owner_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL")
     )
+    #: migration-only：流程合并前「分系统接收」环节的意见，业务代码不再读写
     acceptance_comment: Mapped[str | None] = mapped_column(Text)
     temporary_measure: Mapped[str | None] = mapped_column(Text)
     long_term_measure: Mapped[str | None] = mapped_column(Text)

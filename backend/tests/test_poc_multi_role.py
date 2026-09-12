@@ -41,27 +41,26 @@ async def test_one_account_covers_two_roles_in_same_ticket(api):
     assert pending["allowed_actions"] == ["approve", "reject"]
 
     approved = await api.acted(ticket_id, "approve", comment="同意")
-    assert approved["state"] == "pending_confirmation"
+    assert approved["state"] == "pending_routing"
 
-    # 专项小组确认并流转给同一个账号（它同时拥有 subsystem 角色）
+    # 专项小组一步确认并流转给同一个账号（它同时拥有 subsystem 角色）
     api.as_("taskforce01")
-    await api.action(ticket_id, "confirm_problem", comment="描述准确")
     await api.action(
         ticket_id,
         "route",
+        comment="描述准确",
         payload={
             "skill_group_id": api.sg("系统总体"),
             "subsystem_owner_id": api.uid("multi01"),
         },
     )
 
-    # 阶段二：作为分系统负责人
+    # 阶段二：作为分系统负责人，直接进入闭环计划制定
     api.as_("multi01")
-    accepting = await api.detail(ticket_id)
-    assert accepting["state"] == "pending_acceptance"
-    assert accepting["allowed_actions"] == ["accept"]
+    planning = await api.detail(ticket_id)
+    assert planning["state"] == "planning"
+    assert planning["allowed_actions"] == ["submit_plan"]
 
-    await api.action(ticket_id, "accept", comment="已接收")
     planned = await api.acted(
         ticket_id,
         "submit_plan",
@@ -91,7 +90,9 @@ async def test_one_account_covers_two_roles_in_same_ticket(api):
     api.as_("quality01")
     detail = await api.detail(ticket_id)
     assert detail["state_logs"][1]["operator_roles"] == ["approver", "subsystem"]
-    assert detail["state_logs"][4]["action"] == "accept"
+    assert detail["state_logs"][1]["action"] == "approve"
+    assert detail["state_logs"][3]["action"] == "submit_plan"
+    assert detail["state_logs"][3]["operator_roles"] == ["approver", "subsystem"]
 
 
 async def test_multi_role_data_scope_is_union(api):
@@ -112,7 +113,6 @@ async def test_multi_role_data_scope_is_union(api):
     api.as_("approver01")
     await api.action(other, "approve")
     api.as_("taskforce01")
-    await api.action(other, "confirm_problem")
     await api.action(
         other,
         "route",
@@ -126,7 +126,6 @@ async def test_multi_role_data_scope_is_union(api):
     api.as_("approver01")
     await api.action(third, "approve")
     api.as_("taskforce01")
-    await api.action(third, "confirm_problem")
     await api.action(
         third,
         "route",

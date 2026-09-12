@@ -184,7 +184,6 @@ def _detail(ticket: Ticket, actor: User) -> TicketDetail:
         device_info=ticket.device_info,
         description=ticket.description,
         confirmation_comment=ticket.confirmation_comment,
-        acceptance_comment=ticket.acceptance_comment,
         temporary_measure=ticket.temporary_measure,
         long_term_measure=ticket.long_term_measure,
         plan_confirmation_comment=ticket.plan_confirmation_comment,
@@ -373,7 +372,6 @@ def _apply_filters(
                 (
                     Ticket.state.in_(
                         [
-                            TicketState.PENDING_ACCEPTANCE.value,
                             TicketState.PLANNING.value,
                             TicketState.PROCESSING.value,
                         ]

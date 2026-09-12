@@ -19,9 +19,7 @@ export const ROLE_LABELS: Record<BusinessRole, string> = Object.fromEntries(
 
 export const POC_STATE_OPTIONS = [
   { value: 'pending_approval', label: '待审批', type: 'warning' },
-  { value: 'pending_confirmation', label: '待问题确认', type: 'warning' },
-  { value: 'pending_routing', label: '待流转', type: 'warning' },
-  { value: 'pending_acceptance', label: '待分系统接收', type: 'warning' },
+  { value: 'pending_routing', label: '待确认流转', type: 'warning' },
   { value: 'planning', label: '闭环计划制定中', type: 'primary' },
   { value: 'pending_plan_confirmation', label: '待计划确认', type: 'warning' },
   { value: 'processing', label: '分析验证中', type: 'primary' },
@@ -69,9 +67,7 @@ export type VerificationStatus = typeof VERIFICATION_STATUS_OPTIONS[number]['val
 export type TicketAction =
   | 'approve'
   | 'reject'
-  | 'confirm_problem'
   | 'route'
-  | 'accept'
   | 'submit_plan'
   | 'confirm_plan'
   | 'submit_analysis'
@@ -85,9 +81,7 @@ export type TicketAction =
 export const ACTION_LABELS: Record<TicketAction, string> = {
   approve: '审批通过',
   reject: '驳回',
-  confirm_problem: '确认问题',
-  route: '流转分系统',
-  accept: '确认接收',
+  route: '确认并流转',
   submit_plan: '提交闭环计划',
   confirm_plan: '确认闭环计划',
   submit_analysis: '提交分析验证',
@@ -98,8 +92,23 @@ export const ACTION_LABELS: Record<TicketAction, string> = {
   cancel: '撤销',
 }
 
+/** 流程合并前出现过的动作编码：不再产生，仅用于渲染历史日志 */
+export const HISTORICAL_ACTION_LABELS: Record<string, string> = {
+  confirm_problem: '确认问题（旧）',
+  accept: '确认接收（旧）',
+}
+
+/** 流程合并前出现过的状态编码：不再产生，仅用于渲染历史日志 */
+export const HISTORICAL_STATE_LABELS: Record<string, string> = {
+  pending_confirmation: '待问题确认（旧）',
+  pending_acceptance: '待分系统接收（旧）',
+}
+
 export function actionLabel(action?: string | null): string {
-  return action ? ACTION_LABELS[action as TicketAction] || action : '提交审批'
+  if (!action) return '提交审批'
+  return ACTION_LABELS[action as TicketAction]
+    || HISTORICAL_ACTION_LABELS[action]
+    || action
 }
 
 /** 状态标签色（el-tag type / 流程记录状态胶囊共用） */
@@ -124,7 +133,8 @@ export function hasAnyRole(roles: string[] | undefined | null, ...expected: Busi
 }
 
 export function stateLabel(state?: string | null): string {
-  return state ? STATE_LABELS[state as PocState] || state : '—'
+  if (!state) return '—'
+  return STATE_LABELS[state as PocState] || HISTORICAL_STATE_LABELS[state] || state
 }
 
 export function priorityLabel(priority?: string | null): string {

@@ -7,8 +7,7 @@
 ```text
 售前提交
 → 批准人审批
-→ 专项小组确认问题并选择分系统
-→ 分系统确认接收
+→ 专项小组确认问题并选择分系统（确认即流转到分系统）
 → 分系统提交闭环计划
 → 售前确认闭环计划
 → 分系统提交分析验证结果
@@ -32,7 +31,7 @@
 | --- | --- | --- |
 | `presales` | 售前 | 创建问题、确认闭环计划、参与验证 |
 | `approver` | 批准人 | 审批售前提交的问题 |
-| `taskforce` | 专项小组 | 确认问题描述、选择并流转分系统 |
+| `taskforce` | 专项小组 | 确认问题描述并选择分系统，确认即流转（不通过则驳回） |
 | `subsystem` | 分系统 | 接收、制定计划、分析整改及验证 |
 | `quality` | 质量 | 跟踪、评审、登记缺陷库 |
 | `admin` | 系统管理员 | 隐藏管理角色；业务操作兜底 |
@@ -47,7 +46,7 @@
   - 可执行动作 = 各角色动作规则与对应人员范围都满足的并集（`allowed_actions`）；
   - 流程节点上的「当前责任角色」仍由**工单状态**决定（单值），与操作人拥有几个角色无关。
 - `subsystem` 用户通过 `skill_groups` 关联一个或多个分系统；拥有 `subsystem` 角色的用户才可被选为分系统负责人。
-- `taskforce` 可查看**批准人批准之后**的未闭环 POC 问题（`pending_confirmation` 起），
+- `taskforce` 可查看**批准人批准之后**的未闭环 POC 问题（`pending_routing` 起），
   用于判断涉及分系统。待审批（`pending_approval`）阶段问题尚未进入专项小组环节，
   专项小组不可见；被批准人驳回后处于 `returned` 且退回目标为 `pending_approval`
   的问题同样不可见。
@@ -63,26 +62,26 @@
 | 顺序 | 编码 | 展示名称 | 当前责任角色 |
 | --- | --- | --- | --- |
 | 1 | `pending_approval` | 待审批 | 批准人 |
-| 2 | `pending_confirmation` | 待问题确认 | 专项小组 |
-| 3 | `pending_routing` | 待流转 | 专项小组 |
-| 4 | `pending_acceptance` | 待分系统接收 | 分系统 |
-| 5 | `planning` | 闭环计划制定中 | 分系统 |
-| 6 | `pending_plan_confirmation` | 待计划确认 | 售前 |
-| 7 | `processing` | 分析验证中 | 分系统 |
-| 8 | `pending_quality_review` | 待质量评审 | 质量 |
-| 9 | `pending_defect_registration` | 待缺陷入库 | 质量 |
-| 10 | `closed` | 已闭环 | 无 |
+| 2 | `pending_routing` | 待确认流转 | 专项小组 |
+| 3 | `planning` | 闭环计划制定中 | 分系统 |
+| 4 | `pending_plan_confirmation` | 待计划确认 | 售前 |
+| 5 | `processing` | 分析验证中 | 分系统 |
+| 6 | `pending_quality_review` | 待质量评审 | 质量 |
+| 7 | `pending_defect_registration` | 待缺陷入库 | 质量 |
+| 8 | `closed` | 已闭环 | 无 |
 | — | `returned` | 已退回 | 根据 `return_to_state` 确定 |
 | — | `cancelled` | 已撤销 | 无 |
+
+专项小组节点为**一步到位**：确认问题描述、选定分系统与分系统负责人都在
+`pending_routing` 一次完成，通过即流转到分系统（直接进入 `planning`），
+分系统无需再确认接收。
 
 ### 3.1 正向动作
 
 | 当前状态 | 动作编码 | 下一状态 | 操作角色 | 后端必填数据 |
 | --- | --- | --- | --- | --- |
-| `pending_approval` | `approve` | `pending_confirmation` | `approver` | 可选审批意见 |
-| `pending_confirmation` | `confirm_problem` | `pending_routing` | `taskforce` | `confirmation_comment` 可选 |
-| `pending_routing` | `route` | `pending_acceptance` | `taskforce` | `skill_group_id`、`subsystem_owner_id` |
-| `pending_acceptance` | `accept` | `planning` | 对应 `subsystem` | 可选接收意见 |
+| `pending_approval` | `approve` | `pending_routing` | `approver` | 可选审批意见 |
+| `pending_routing` | `route` | `planning` | `taskforce` | `skill_group_id`、`subsystem_owner_id`；`confirmation_comment` 可选 |
 | `planning` | `submit_plan` | `pending_plan_confirmation` | 对应 `subsystem` | `long_term_measure`、`planned_completion_at`；临时措施可选 |
 | `pending_plan_confirmation` | `confirm_plan` | `processing` | 创建该问题的 `presales` | 可选确认意见 |
 | `processing` | `submit_analysis` | `pending_quality_review` | 对应 `subsystem` | `initial_investigation`、`root_cause`、`analysis_report` |
@@ -93,8 +92,9 @@
 
 - 审批人可以执行 `reject`，填写原因后进入 `returned`，`return_to_state=pending_approval`，由创建人修改后重新提交。
 - 专项小组、售前、质量可以执行 `return`，必须填写原因，并明确 `return_to_state`。
+  - 专项小组在 `pending_routing` 判定不通过时即执行 `return`（界面文案「驳回」）。
 - 第一阶段限定退回目标：
-  - 问题确认退回 → `pending_approval`
+  - 待确认流转驳回 → `pending_approval`
   - 计划确认退回 → `planning`
   - 质量评审退回 → `processing`
 - `returned` 只是动作展示状态；创建人或对应责任人重新提交后进入 `return_to_state`。
@@ -145,10 +145,9 @@
 
 | 字段 | 类型 | 写入节点 |
 | --- | --- | --- |
-| `confirmation_comment` | text | 问题确认 |
+| `confirmation_comment` | text | 确认并流转（`route`）|
 | `skill_group_id` | bigint | 问题流转 |
 | `subsystem_owner_id` | bigint | 问题流转 |
-| `acceptance_comment` | text | 分系统接收 |
 | `temporary_measure` | text | 闭环计划 |
 | `long_term_measure` | text | 闭环计划 |
 | `planned_completion_at` | datetime | 闭环计划 |
@@ -273,4 +272,5 @@
 | 2026-09-12 | 建立 POC 契约（单角色） | 初版 |
 | 2026-09-12 | 创建阶段新增必填字段 `proposer`（提出人）、`proposer_department`（提出部门） | 售前改用公用账号后需手填真实提出人与部门；列表/详情/导出与「POC 问题反馈表」一致。 |
 | 2026-09-12 | 「普通用户只能拥有一个业务角色」→ 支持一人多角色 | `users.role` 单值列改为 `user_roles` 关联表；人员/登录/时间线接口的 `role` 改为 `roles: string[]`；数据范围与 `allowed_actions` 按角色并集计算；`GET /users?role=x` 语义改为「拥有该角色」。前后端同时改造。 |
-| 2026-09-12 | `taskforce` 数据范围由「全部未闭环问题」收紧为「批准人批准之后的未闭环问题」 | 待审批阶段问题归售前与批准人，专项小组不再可见（列表、详情、附件、导出、统计一致生效）；`pending_confirmation` 起可见。被批准人驳回退回售前（`returned` + 退回目标 `pending_approval`）的问题同样不可见。 |
+| 2026-09-12 | 「待问题确认 / 待流转 / 待分系统接收」三步合并为一步 | 删除状态 `pending_confirmation`、`pending_acceptance` 与动作 `confirm_problem`、`accept`；`approve` 目标改为 `pending_routing`（展示名「待确认流转」）；专项小组用 `route` 一次完成确认与流转，目标改为 `planning`，可选填 `confirmation_comment`；专项小组不通过时执行 `return`（界面显示「驳回」）回 `pending_approval`；`acceptance_comment` 不再产生。主流程由 10 步变为 8 步。 |
+| 2026-09-12 | `taskforce` 数据范围由「全部未闭环问题」收紧为「批准人批准之后的未闭环问题」 | 待审批阶段问题归售前与批准人，专项小组不再可见（列表、详情、附件、导出、统计一致生效）；`pending_routing` 起可见。被批准人驳回退回售前（`returned` + 退回目标 `pending_approval`）的问题同样不可见。 |

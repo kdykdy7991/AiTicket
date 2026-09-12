@@ -6,7 +6,7 @@ from helpers import run_steps
 async def test_dashboard_uses_poc_states_and_scope(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 4)  # planning
+    await run_steps(api, ticket_id, 2)  # planning
 
     api.as_("quality01")
     resp = await api.c.get("/api/v1/stats/dashboard")
@@ -29,7 +29,7 @@ async def test_dashboard_uses_poc_states_and_scope(api):
 async def test_report_and_trend_for_period(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 9)  # closed
+    await run_steps(api, ticket_id, 7)  # closed
 
     api.as_("quality01")
     today = __import__("datetime").date.today().isoformat()

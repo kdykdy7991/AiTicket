@@ -45,9 +45,8 @@ ROLE_VALUES: frozenset[str] = frozenset(role.value for role in ALL_ROLES)
 
 class TicketState(StrEnum):
     PENDING_APPROVAL = "pending_approval"
-    PENDING_CONFIRMATION = "pending_confirmation"
+    #: 专项小组一步完成「确认问题 + 选择分系统并流转」
     PENDING_ROUTING = "pending_routing"
-    PENDING_ACCEPTANCE = "pending_acceptance"
     PLANNING = "planning"
     PENDING_PLAN_CONFIRMATION = "pending_plan_confirmation"
     PROCESSING = "processing"
@@ -61,9 +60,7 @@ class TicketState(StrEnum):
 #: 正向主流程顺序（不含 returned / cancelled）
 MAIN_FLOW_STATES: tuple[TicketState, ...] = (
     TicketState.PENDING_APPROVAL,
-    TicketState.PENDING_CONFIRMATION,
     TicketState.PENDING_ROUTING,
-    TicketState.PENDING_ACCEPTANCE,
     TicketState.PLANNING,
     TicketState.PENDING_PLAN_CONFIRMATION,
     TicketState.PROCESSING,
@@ -133,9 +130,8 @@ VERIFICATION_STATUS_VALUES: frozenset[str] = frozenset(
 class TicketAction(StrEnum):
     APPROVE = "approve"
     REJECT = "reject"
-    CONFIRM_PROBLEM = "confirm_problem"
+    #: 专项小组：确认问题描述 + 选定分系统与分系统负责人，一步流转到分系统
     ROUTE = "route"
-    ACCEPT = "accept"
     SUBMIT_PLAN = "submit_plan"
     CONFIRM_PLAN = "confirm_plan"
     SUBMIT_ANALYSIS = "submit_analysis"
@@ -151,9 +147,7 @@ ACTION_VALUES: frozenset[str] = frozenset(a.value for a in TicketAction)
 #: 动作展示/序列化顺序（allowed_actions 按此排序）
 ACTION_ORDER: tuple[TicketAction, ...] = (
     TicketAction.APPROVE,
-    TicketAction.CONFIRM_PROBLEM,
     TicketAction.ROUTE,
-    TicketAction.ACCEPT,
     TicketAction.SUBMIT_PLAN,
     TicketAction.CONFIRM_PLAN,
     TicketAction.SUBMIT_ANALYSIS,
@@ -164,6 +158,12 @@ ACTION_ORDER: tuple[TicketAction, ...] = (
     TicketAction.REJECT,
     TicketAction.CANCEL,
 )
+
+#: 流程合并前的历史动作编码：不再产生，但历史日志仍按此展示
+HISTORICAL_ACTIONS: dict[str, str] = {
+    "confirm_problem": "确认问题（旧）",
+    "accept": "确认接收（旧）",
+}
 
 
 # ── 动作权限/校验规则 ──────────────────────────────────────
@@ -210,26 +210,16 @@ _R = ActionRule
 ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
     # 正向主流程
     (TicketState.PENDING_APPROVAL, TicketAction.APPROVE): _R(
-        target_state=TicketState.PENDING_CONFIRMATION,
+        target_state=TicketState.PENDING_ROUTING,
         roles=frozenset({BusinessRole.APPROVER}),
         scope=ActorScope.ASSIGNED_APPROVER,
     ),
-    (TicketState.PENDING_CONFIRMATION, TicketAction.CONFIRM_PROBLEM): _R(
-        target_state=TicketState.PENDING_ROUTING,
-        roles=frozenset({BusinessRole.TASKFORCE}),
-        payload_fields=("confirmation_comment",),
-    ),
+    # 专项小组一步到位：确认问题描述 + 选定分系统与负责人 → 直接进入分系统闭环计划
     (TicketState.PENDING_ROUTING, TicketAction.ROUTE): _R(
-        target_state=TicketState.PENDING_ACCEPTANCE,
+        target_state=TicketState.PLANNING,
         roles=frozenset({BusinessRole.TASKFORCE}),
         required_fields=("skill_group_id", "subsystem_owner_id"),
-        payload_fields=("skill_group_id", "subsystem_owner_id"),
-    ),
-    (TicketState.PENDING_ACCEPTANCE, TicketAction.ACCEPT): _R(
-        target_state=TicketState.PLANNING,
-        roles=frozenset({BusinessRole.SUBSYSTEM}),
-        scope=ActorScope.SUBSYSTEM_OWNER,
-        payload_fields=("acceptance_comment",),
+        payload_fields=("confirmation_comment", "skill_group_id", "subsystem_owner_id"),
     ),
     (TicketState.PLANNING, TicketAction.SUBMIT_PLAN): _R(
         target_state=TicketState.PENDING_PLAN_CONFIRMATION,
@@ -280,7 +270,7 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         fixed_return_to=TicketState.PENDING_APPROVAL,
     ),
     # 三条退回路径
-    (TicketState.PENDING_CONFIRMATION, TicketAction.RETURN): _R(
+    (TicketState.PENDING_ROUTING, TicketAction.RETURN): _R(
         target_state=TicketState.RETURNED,
         roles=frozenset({BusinessRole.TASKFORCE}),
         comment_required=True,
@@ -356,9 +346,7 @@ RETURN_TARGET_RESPONSIBLE_ROLE: dict[TicketState, BusinessRole] = {
 
 RESPONSIBLE_ROLE_BY_STATE: dict[TicketState, BusinessRole | None] = {
     TicketState.PENDING_APPROVAL: BusinessRole.APPROVER,
-    TicketState.PENDING_CONFIRMATION: BusinessRole.TASKFORCE,
     TicketState.PENDING_ROUTING: BusinessRole.TASKFORCE,
-    TicketState.PENDING_ACCEPTANCE: BusinessRole.SUBSYSTEM,
     TicketState.PLANNING: BusinessRole.SUBSYSTEM,
     TicketState.PENDING_PLAN_CONFIRMATION: BusinessRole.PRESALES,
     TicketState.PROCESSING: BusinessRole.SUBSYSTEM,
@@ -372,7 +360,6 @@ RESPONSIBLE_ROLE_BY_STATE: dict[TicketState, BusinessRole | None] = {
 #: 责任角色落到的具体人员字段
 RESPONSIBLE_USER_FIELD_BY_STATE: dict[TicketState, str | None] = {
     TicketState.PENDING_APPROVAL: "approver_id",
-    TicketState.PENDING_ACCEPTANCE: "subsystem_owner_id",
     TicketState.PLANNING: "subsystem_owner_id",
     TicketState.PENDING_PLAN_CONFIRMATION: "creator_id",
     TicketState.PROCESSING: "subsystem_owner_id",

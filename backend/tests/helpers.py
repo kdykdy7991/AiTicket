@@ -4,15 +4,8 @@ from app.domain.poc_workflow import TicketAction, TicketState
 
 #: 主流程动作序列（不含建单）。route 的 payload 由 run_steps 动态填充。
 MAIN_FLOW_STEPS = [
-    ("approver01", TicketAction.APPROVE, {}, "同意，转专项小组确认"),
-    (
-        "taskforce01",
-        TicketAction.CONFIRM_PROBLEM,
-        {"confirmation_comment": "问题描述准确完整"},
-        None,
-    ),
-    ("taskforce01", TicketAction.ROUTE, {}, None),
-    ("subsystem01", TicketAction.ACCEPT, {"acceptance_comment": "已接收，开始排查"}, None),
+    ("approver01", TicketAction.APPROVE, {}, "同意，转专项小组确认并流转"),
+    ("taskforce01", TicketAction.ROUTE, {}, "问题描述准确，流转分系统整改"),
     (
         "subsystem01",
         TicketAction.SUBMIT_PLAN,
@@ -58,9 +51,7 @@ MAIN_FLOW_STEPS = [
 #: 执行完前 n 步后工单所处的状态
 STATES_AFTER_STEPS = [
     TicketState.PENDING_APPROVAL,
-    TicketState.PENDING_CONFIRMATION,
     TicketState.PENDING_ROUTING,
-    TicketState.PENDING_ACCEPTANCE,
     TicketState.PLANNING,
     TicketState.PENDING_PLAN_CONFIRMATION,
     TicketState.PROCESSING,
@@ -72,9 +63,7 @@ STATES_AFTER_STEPS = [
 #: 某个状态下允许执行的动作（第一个是主流程正向动作）
 FORWARD_ACTION_BY_STATE = {
     TicketState.PENDING_APPROVAL: TicketAction.APPROVE,
-    TicketState.PENDING_CONFIRMATION: TicketAction.CONFIRM_PROBLEM,
     TicketState.PENDING_ROUTING: TicketAction.ROUTE,
-    TicketState.PENDING_ACCEPTANCE: TicketAction.ACCEPT,
     TicketState.PLANNING: TicketAction.SUBMIT_PLAN,
     TicketState.PENDING_PLAN_CONFIRMATION: TicketAction.CONFIRM_PLAN,
     TicketState.PROCESSING: TicketAction.SUBMIT_ANALYSIS,

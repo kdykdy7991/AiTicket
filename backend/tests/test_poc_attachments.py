@@ -56,7 +56,7 @@ async def test_creator_uploads_on_draft_and_downloads(api):
 async def test_download_respects_ticket_scope(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 3)  # 流转到系统总体
+    await run_steps(api, ticket_id, 2)  # planning：已流转到系统总体
 
     api.as_("subsystem01")
     uploaded = await _upload(api, ticket_id)
@@ -96,7 +96,7 @@ async def test_upload_requires_node_permission(api):
 async def test_quality_can_upload_at_review_stage(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 7)  # pending_quality_review
+    await run_steps(api, ticket_id, 5)  # pending_quality_review
 
     api.as_("quality01")
     resp = await _upload(
@@ -109,7 +109,7 @@ async def test_quality_can_upload_at_review_stage(api):
 async def test_terminal_ticket_rejects_upload(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
-    await run_steps(api, ticket_id, 9)  # closed
+    await run_steps(api, ticket_id, 7)  # closed
 
     api.as_("quality01")
     resp = await _upload(api, ticket_id)

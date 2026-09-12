@@ -209,8 +209,8 @@ class TicketDetail(TicketBrief):
     device_info: str | None = None
     description: str | None = None
 
+    #: 专项小组「确认并流转」时填写的确认说明
     confirmation_comment: str | None = None
-    acceptance_comment: str | None = None
     temporary_measure: str | None = None
     long_term_measure: str | None = None
     plan_confirmation_comment: str | None = None

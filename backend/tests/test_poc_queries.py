@@ -14,7 +14,7 @@ async def _make_tickets(api, count: int = 2):
         assert resp.status_code == 201, resp.text
         ids.append(resp.json()["data"]["id"])
     if count >= 2:
-        await run_steps(api, ids[0], 4)  # planning，分系统=系统总体，责任人=subsystem01
+        await run_steps(api, ids[0], 2)  # planning，分系统=系统总体，责任人=subsystem01
         # 给第一条填上计划完成时间，用于验证 planned_asc 排序与逾期筛选
         api.as_("subsystem01")
         resp = await api.c.patch(
@@ -145,9 +145,7 @@ async def test_metadata_endpoints_for_role_selectors(api):
     meta = (await api.c.get("/api/v1/meta/poc-workflow")).json()["data"]
     assert meta["states"] == [
         "pending_approval",
-        "pending_confirmation",
         "pending_routing",
-        "pending_acceptance",
         "planning",
         "pending_plan_confirmation",
         "processing",
