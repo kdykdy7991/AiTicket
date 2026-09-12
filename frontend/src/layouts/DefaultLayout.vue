@@ -27,7 +27,9 @@ import TheTopbar from './TheTopbar.vue'
   overflow-y: auto;
 }
 .content-wrapper {
-  max-width: 1400px;
+  width: 100%;
+  max-width: 1800px;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 28px 32px;
   animation: page-in 0.35s var(--ease-out) both;

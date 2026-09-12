@@ -22,7 +22,7 @@
 
       <div class="detail-grid">
         <main>
-          <el-card shadow="never" class="section detail-section"><template #header><strong>问题信息</strong></template>
+          <el-card shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><Document /></el-icon><strong>问题信息</strong></div></template>
             <div class="detail-table"><table><tbody>
               <tr><th>问题类型</th><td>{{ ticket.problem_type || '—' }}</td><th>问题级别</th><td>{{ priorityLabel(ticket.priority) }}</td></tr>
               <tr><th>客户名称</th><td>{{ ticket.customer_name || '—' }}</td><th>产品线</th><td>{{ ticket.product_line || '—' }}</td></tr>
@@ -34,21 +34,21 @@
               <tr><th>闭环要求</th><td colspan="3" class="long-value">{{ ticket.closure_requirement || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
-          <el-card v-if="hasPlan" shadow="never" class="section detail-section"><template #header><strong>闭环计划</strong></template>
+          <el-card v-if="hasPlan" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><Calendar /></el-icon><strong>闭环计划</strong></div></template>
             <div class="detail-table"><table><tbody>
               <tr><th>计划完成时间</th><td>{{ formatTime(ticket.planned_completion_at) }}</td><th>售前确认意见</th><td>{{ ticket.plan_confirmation_comment || '—' }}</td></tr>
               <tr><th>临时处置措施</th><td colspan="3" class="long-value">{{ ticket.temporary_measure || '—' }}</td></tr>
               <tr><th>长期整改措施</th><td colspan="3" class="long-value">{{ ticket.long_term_measure || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
-          <el-card v-if="hasAnalysis" shadow="never" class="section detail-section"><template #header><strong>分析验证</strong></template>
+          <el-card v-if="hasAnalysis" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><DataAnalysis /></el-icon><strong>分析验证</strong></div></template>
             <div class="detail-table"><table><tbody>
               <tr><th>初步排查结论</th><td class="long-value">{{ ticket.initial_investigation || '—' }}</td></tr>
               <tr><th>根本原因分析</th><td class="long-value">{{ ticket.root_cause || '—' }}</td></tr>
               <tr><th>质量问题分析报告</th><td class="long-value">{{ ticket.analysis_report || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
-          <el-card v-if="hasReview" shadow="never" class="section detail-section"><template #header><strong>质量评审</strong></template>
+          <el-card v-if="hasReview" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><CircleCheck /></el-icon><strong>质量评审</strong></div></template>
             <div class="detail-table"><table><tbody>
               <tr><th>验证状态</th><td>{{ verificationLabel }}</td></tr>
               <tr><th>验证结论</th><td class="long-value">{{ ticket.verification_conclusion || '—' }}</td></tr>
@@ -95,6 +95,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
+import { Calendar, CircleCheck, DataAnalysis, Document } from '@element-plus/icons-vue'
 import { pocTicketApi } from '@/api/pocTickets'
 import { userApi, type UserItem } from '@/api/users'
 import { pocMetaApi } from '@/api/pocMeta'
@@ -136,9 +137,10 @@ onMounted(async()=>{await Promise.all([load(),pocMetaApi.getSkillGroups().then(v
 </script>
 
 <style scoped>
-.detail-view{padding-bottom:30px}.page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}.page-header h1{margin:8px 0 4px;font-size:24px}.page-header p{margin:0;color:var(--color-text-tertiary)}.headline-tags{display:flex;align-items:center;gap:10px}.priority{font-weight:700}.p0_blocker{color:#dc2626}.p1_critical{color:#ea580c}.p2_normal{color:#2563eb}.p3_low{color:#64748b}.workflow-strip{display:flex;overflow-x:auto;background:#fff;border:1px solid var(--color-border-light);border-radius:10px;padding:14px;margin-bottom:18px}.step{display:flex;align-items:center;min-width:125px;color:var(--color-text-tertiary);font-size:12px}.step:after{content:'›';margin:0 9px}.step:last-child:after{display:none}.step i{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:50%;background:#eef2f7;margin-right:6px;font-style:normal}.step.done,.step.active{color:var(--color-primary)}.step.done i,.step.active i{background:var(--color-primary);color:#fff}.detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:18px;align-items:start}.timeline-column{position:sticky;top:16px;min-width:0}.section{margin-bottom:16px}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.field.wide{grid-column:span 2}.field span,dt{font-size:12px;color:var(--color-text-tertiary)}.field p{white-space:pre-wrap;margin:5px 0 0;line-height:1.6}dl{display:grid;grid-template-columns:90px 1fr;gap:12px;margin:0 0 18px}dd{margin:0}.sticky{position:sticky;top:16px}.action-list{display:flex;flex-direction:column;gap:9px;margin-top:16px}.action-list .el-button{margin:0;width:100%}.log-meta{margin-left:10px;color:var(--color-text-tertiary);font-size:12px}@media(max-width:900px){.detail-grid{grid-template-columns:1fr}.timeline-column{position:static}}
+.detail-view{padding-bottom:30px}.page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}.page-header h1{margin:8px 0 4px;font-size:24px}.page-header p{margin:0;color:var(--color-text-tertiary)}.headline-tags{display:flex;align-items:center;gap:10px}.priority{font-weight:700}.p0_blocker{color:#dc2626}.p1_critical{color:#ea580c}.p2_normal{color:#2563eb}.p3_low{color:#64748b}.workflow-strip{display:flex;overflow-x:auto;background:#fff;border:1px solid var(--color-border-light);border-radius:10px;padding:14px;margin-bottom:18px}.step{display:flex;align-items:center;min-width:125px;color:var(--color-text-tertiary);font-size:12px}.step:after{content:'›';margin:0 9px}.step:last-child:after{display:none}.step i{display:inline-flex;width:22px;height:22px;align-items:center;justify-content:center;border-radius:50%;background:#eef2f7;margin-right:6px;font-style:normal}.step.done,.step.active{color:var(--color-primary)}.step.done i,.step.active i{background:var(--color-primary);color:#fff}.detail-grid{display:grid;grid-template-columns:minmax(620px,1fr) clamp(320px,25vw,440px);gap:18px;align-items:start}.timeline-column{position:sticky;top:16px;min-width:0}.section{margin-bottom:16px}.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.field.wide{grid-column:span 2}.field span,dt{font-size:12px;color:var(--color-text-tertiary)}.field p{white-space:pre-wrap;margin:5px 0 0;line-height:1.6}dl{display:grid;grid-template-columns:90px 1fr;gap:12px;margin:0 0 18px}dd{margin:0}.sticky{position:sticky;top:16px}.action-list{display:flex;flex-direction:column;gap:9px;margin-top:16px}.action-list .el-button{margin:0;width:100%}.log-meta{margin-left:10px;color:var(--color-text-tertiary);font-size:12px}@media(max-width:1100px){.detail-grid{grid-template-columns:1fr}.timeline-column{position:static}}
 .resubmit-alert{margin-bottom:12px}.section-header{display:flex;align-items:center;justify-content:space-between}.upload-button{padding:7px 12px;border:1px solid var(--color-primary);border-radius:7px;color:var(--color-primary);font-size:13px;cursor:pointer}.upload-button input{display:none}
-.detail-section{overflow:hidden;border:0;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04),0 6px 20px rgba(15,23,42,.05)}.detail-section :deep(.el-card__header){padding:17px 20px;background:#eaf1fb;border-bottom:1px solid #d7e2f1}.detail-section :deep(.el-card__header) strong{font-size:15px;font-weight:600;letter-spacing:-.01em;color:#334155}.detail-section :deep(.el-card__body){padding:0}.detail-table{padding:0 20px}.detail-table table{width:100%;border-collapse:collapse;table-layout:fixed}.detail-table tr{border-bottom:1px solid #f0f1f3}.detail-table tr:last-child{border-bottom:0}.detail-table th,.detail-table td{padding:14px 8px;text-align:left;vertical-align:top;font-size:14px;line-height:1.55}.detail-table th{width:104px;color:#86868b;font-size:13px;font-weight:400;white-space:nowrap}.detail-table td{padding-right:24px;color:#1d1d1f;font-weight:400}.detail-table td:last-child{padding-right:8px}.detail-table .long-value{min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
-.workflow-actions{max-width:1100px;margin:-4px 0 18px}.workflow-actions .el-alert{margin-bottom:10px}.action-buttons{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:40px}.action-buttons>span{margin-right:auto;font-size:13px;color:var(--color-text-tertiary)}.action-buttons .el-button{margin-left:0}
+.detail-section{overflow:hidden;border:1px solid #dfe3ea;border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04),0 6px 20px rgba(15,23,42,.05)}.detail-section :deep(.el-card__header){padding:17px 20px;background:#f0effa;border-bottom:1px solid #e1deef}.detail-section :deep(.el-card__header) strong{font-size:15px;font-weight:600;letter-spacing:-.01em;color:#334155}.detail-section :deep(.el-card__body){padding:0}.detail-table{padding:0 20px}.detail-table table{width:100%;border-collapse:collapse;table-layout:fixed}.detail-table tr{border-bottom:1px solid #f0f1f3}.detail-table tr:last-child{border-bottom:0}.detail-table th,.detail-table td{padding:14px 8px;text-align:left;vertical-align:top;font-size:14px;line-height:1.55}.detail-table th{width:132px;min-width:132px;box-sizing:border-box;color:#73717d;font-size:13px;font-weight:400;white-space:nowrap}.detail-table td{min-width:0;padding-right:24px;overflow-wrap:anywhere;word-break:break-word;color:#1d1d1f;font-weight:400}.detail-table td:last-child{padding-right:8px}.detail-table .long-value{min-height:24px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.7}
+.workflow-actions{width:100%;margin:-4px 0 18px}.workflow-actions .el-alert{margin-bottom:10px}.action-buttons{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:40px}.action-buttons>span{margin-right:auto;font-size:13px;color:var(--color-text-tertiary)}.action-buttons .el-button{margin-left:0}
 @media(max-width:700px){.detail-table{padding:0 14px}.detail-table table,.detail-table tbody,.detail-table tr,.detail-table th,.detail-table td{display:block;width:auto}.detail-table tr{padding:10px 0}.detail-table th{padding:2px 4px 4px}.detail-table td{padding:2px 4px 8px}.detail-table td:last-child{padding-right:4px}.detail-table th:nth-of-type(2){padding-top:10px}}
+.detail-title{display:flex;align-items:center;gap:9px;color:#4f46a5}.detail-title .el-icon{font-size:17px;flex:0 0 auto}.detail-title strong{color:#343247!important}
 </style>
