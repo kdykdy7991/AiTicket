@@ -28,7 +28,7 @@
 
         <aside>
           <el-card shadow="never" class="section sticky"><template #header><strong>当前处理</strong></template>
-            <dl><dt>提出人</dt><dd>{{ ticket.proposer || '—' }}</dd><dt>提出部门</dt><dd>{{ ticket.proposer_department || '—' }}</dd><dt>责任角色</dt><dd>{{ roleLabel(ticket.current_responsible_role) }}</dd><dt>责任人</dt><dd>{{ ticket.current_responsible_user_name || '待分配' }}</dd><dt>所属分系统</dt><dd>{{ ticket.skill_group_name || '—' }}</dd><dt>批准人</dt><dd>{{ ticket.approver_name || '—' }}</dd></dl>
+            <dl><dt>责任角色</dt><dd>{{ roleLabel(ticket.current_responsible_role) }}</dd><dt>所属分系统</dt><dd>{{ ticket.skill_group_name || '—' }}</dd><dt>批准人</dt><dd>{{ ticket.approver_name || '—' }}</dd><template v-if="ticket.subsystem_owner_name"><dt>分系统负责人</dt><dd>{{ ticket.subsystem_owner_name }}</dd></template></dl>
             <el-alert v-if="ticket.state === 'returned'" type="error" :closable="false" title="问题已退回，请根据流程记录修订后重新提交" />
             <div v-if="ticket.allowed_actions.length" class="action-list"><el-button v-for="action in ticket.allowed_actions" :key="action" :type="buttonType(action)" @click="openAction(action)">{{ actionLabel(action) }}</el-button></div>
             <el-empty v-else description="当前没有待处理动作" :image-size="70" />

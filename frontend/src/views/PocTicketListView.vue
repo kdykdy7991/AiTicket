@@ -35,7 +35,7 @@
         <el-table-column label="级别" width="100"><template #default="{ row }"><span :class="['priority', row.priority]">{{ priorityLabel(row.priority) }}</span></template></el-table-column>
         <el-table-column label="当前阶段" min-width="150"><template #default="{ row }"><el-tag :type="stateType(row.state)">{{ stateLabel(row.state) }}</el-tag></template></el-table-column>
         <el-table-column prop="skill_group_name" label="分系统" min-width="120" />
-        <el-table-column prop="current_responsible_user_name" label="当前责任人" min-width="120" />
+        <el-table-column label="当前责任" min-width="150"><template #default="{ row }">{{ responsibleText(row) }}</template></el-table-column>
         <el-table-column label="计划完成时间" min-width="155"><template #default="{ row }"><span :class="{ overdue: row.is_overdue }">{{ formatTime(row.planned_completion_at) }}</span></template></el-table-column>
         <el-table-column label="更新时间" min-width="155"><template #default="{ row }">{{ formatTime(row.updated_at) }}</template></el-table-column>
       </el-table>
@@ -52,7 +52,7 @@ import { ElMessage } from 'element-plus'
 import { pocTicketApi } from '@/api/pocTickets'
 import { pocMetaApi } from '@/api/pocMeta'
 import { useAuthStore } from '@/stores/auth'
-import { POC_PRIORITY_OPTIONS, POC_STATE_OPTIONS, VERIFICATION_STATUS_OPTIONS, priorityLabel, stateLabel, type PocState } from '@/domain/pocWorkflow'
+import { POC_PRIORITY_OPTIONS, POC_STATE_OPTIONS, VERIFICATION_STATUS_OPTIONS, priorityLabel, roleLabel, stateLabel, type PocState } from '@/domain/pocWorkflow'
 import type { PocTicketBrief, PocTicketFilters } from '@/types/poc'
 import type { Group } from '@/types'
 
@@ -71,6 +71,11 @@ function stateType(state: PocState) {
   return POC_STATE_OPTIONS.find(item => item.value === state)?.type || 'info'
 }
 function formatTime(value: string | null) { return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—' }
+/** 当前节点由哪个角色处理；该节点有指定经办人（批准人/分系统负责人/创建人）时一并显示 */
+function responsibleText(row: PocTicketBrief) {
+  const role = roleLabel(row.current_responsible_role)
+  return row.current_responsible_user_name ? `${role} · ${row.current_responsible_user_name}` : role
+}
 function openDetail(row: PocTicketBrief) { router.push({ name: 'TicketDetail', params: { id: row.id } }) }
 function selectState(state: PocState | '') { selectedState.value = state; filters.state = state ? [state] : undefined; reload() }
 function reload() { pagination.page = 1; load(1) }
