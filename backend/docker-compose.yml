@@ -46,17 +46,8 @@ services:
       - ./app:/app/app  # dev: hot reload
       - uploads:/app/uploads
 
-  worker:
-    build: .
-    command: ["python", "-m", "arq", "app.worker.WorkerSettings"]
-    environment:
-      DATABASE_URL: postgresql+asyncpg://skdy:skdy123@db:5432/skdy_ticket
-      REDIS_URL: redis://redis:6379/0
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+  # 说明：旧客服流程的 arq worker（app.worker）随 SLA 扫描一起下线。
+  # POC 闭环流程没有后台任务，钉钉通知在动作事务提交后同步发出。
 
 volumes:
   pgdata:

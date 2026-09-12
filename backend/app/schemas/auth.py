@@ -1,6 +1,8 @@
 """Pydantic schemas for authentication."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.common import SkillGroupRef
 
 
 class LoginRequest(BaseModel):
@@ -18,14 +20,15 @@ class ChangePasswordRequest(BaseModel):
 
 
 class UserInfo(BaseModel):
+    """POC 登录用户信息。旧的客服组/组长字段不再返回。"""
+
     id: int
     username: str
     name: str
     role: str
-    group_id: int | None = None
-    is_group_leader: bool = False
+    skill_groups: list[SkillGroupRef] = Field(default_factory=list)
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
 class LoginResponse(BaseModel):

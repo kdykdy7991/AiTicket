@@ -16,7 +16,8 @@ class User(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     phone: Mapped[str | None] = mapped_column(String(20))
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(20), nullable=False, default="agent")
+    # POC 业务角色：presales/approver/taskforce/subsystem/quality/admin
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="presales")
     group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("groups.id", ondelete="SET NULL"))
     is_group_leader: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

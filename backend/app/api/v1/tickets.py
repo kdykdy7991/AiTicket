@@ -1,8 +1,17 @@
-"""Tickets router — CRUD, batch update, cancel, state logs, duplicate check."""
+"""POC 质量问题闭环工单 API。
+
+所有状态流转只能走 `POST /tickets/{id}/actions`；
+`PATCH /tickets/{id}` 只允许当前责任人在规定节点修改规定字段，
+且永远不能修改 state / 分系统 / 负责人 / 批准人。
+"""
+
+from __future__ import annotations
 
 import csv
 import io
-from datetime import datetime, timedelta, timezone
+import logging
+from datetime import datetime, time, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -12,611 +21,440 @@ from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_role
-from app.core.exceptions import NotFoundError, StateTransitionError
-from app.models.group import Group
-from app.models.category import TicketCategory
-from app.models.sla import SLAPolicy
-from app.models.ticket import Ticket, TicketStateLog
+from app.core.exceptions import ForbiddenError, NotFoundError
+from app.domain.poc_workflow import (
+    BusinessRole,
+    Priority,
+    TicketState,
+    VerificationStatus,
+)
+from app.models.ticket import Ticket, TicketAttachment, TicketStateLog
 from app.models.user import User
 from app.schemas.ticket import (
-    TicketBatchUpdate,
+    ANALYSIS_EDITABLE_FIELDS,
+    CREATION_EDITABLE_FIELDS,
+    CREATE_REQUIRED_FIELDS,
+    PLAN_EDITABLE_FIELDS,
+    DraftSubmitRequest,
+    TicketActionRequest,
+    TicketAttachmentOut,
     TicketBrief,
     TicketCreate,
     TicketCreateResponse,
     TicketDetail,
+    TicketStateLogOut,
     TicketUpdate,
 )
-from app.services.state_machine import validate_transition
+from app.services.poc_workflow import (
+    TERMINAL_VALUES,
+    allowed_actions,
+    compute_is_overdue,
+    ensure_can_view,
+    execute_action,
+    next_priority,
+    now_utc,
+    responsible_role,
+    responsible_user_id as current_responsible_user_id,
+    ticket_scope,
+    verify_approver,
+)
+
+logger = logging.getLogger("poc.api.tickets")
 
 router = APIRouter(tags=["tickets"])
 
-# Chinese labels for states
-STATE_LABELS = {
-    "pending": "待受理", "open": "处理中", "resolved": "已处理",
-    "on_hold": "暂缓处理", "returned": "退回",
-    "archived": "已归档", "cancelled": "已撤销",
+DETAIL_LOAD_OPTIONS = (
+    selectinload(Ticket.attachments).selectinload(TicketAttachment.uploader),
+    selectinload(Ticket.state_logs).selectinload(TicketStateLog.operator),
+    selectinload(Ticket.state_logs).selectinload(TicketStateLog.responsible_user_snapshot),
+)
+
+ROLE_LABELS = {
+    BusinessRole.PRESALES.value: "售前",
+    BusinessRole.APPROVER.value: "批准人",
+    BusinessRole.TASKFORCE.value: "专项小组",
+    BusinessRole.SUBSYSTEM.value: "分系统",
+    BusinessRole.QUALITY.value: "质量",
+    BusinessRole.ADMIN.value: "系统管理员",
 }
 
 
-# 哪些状态转换算"退回"动作，写完 state_log 后用来同步 has_returned
-# - (pending, returned): 客户/客服 退回给创建人
-# - (open, pending):     处理人退回给团队负责人（重新分派）
-RETURN_TRANSITIONS: set[tuple[str, str]] = {
-    ("pending", "returned"),
-    ("open", "pending"),
-}
+# ── 序列化 ─────────────────────────────────────────────────
 
 
-def _snapshot_people(ticket: Ticket, body=None) -> dict:
-    """写入 state_log 时的人员快照：进入新状态那一刻工单上的创建者/对接人/处理人。
-
-    body 字段优先（代表正在应用的新值），未提供则回退到 ticket 当前值。
-    - creator_id 永不变，直接取 ticket
-    - dispatcher / owner：resubmit / 重新指派等场景下 body 会带新值
-    - body 可能是 TicketCreate（无 owner_id 字段）或 TicketUpdate，用 getattr 兜底，
-      避免直接属性访问抛 AttributeError
-    """
-    dispatcher_id = getattr(body, "dispatcher_id", None) if body is not None else None
-    owner_id = getattr(body, "owner_id", None) if body is not None else None
-    return {
-        "creator_id_snapshot": ticket.creator_id,
-        "dispatcher_id_snapshot": dispatcher_id if dispatcher_id is not None else ticket.dispatcher_id,
-        "owner_id_snapshot": owner_id if owner_id is not None else ticket.owner_id,
-    }
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
-def _enforce_business_constraints(ticket: Ticket, target_state: str) -> str:
-    """业务约束：已处理工单不允许直接退回到 on_hold（暂停位）。
-
-    退回 resolved 工单的目标若为 on_hold，自动改写为 open。
-    原因：on_hold 是暂停位，没人主动 unpause 就一直卡着；客服本意是
-    "打回让处理人重做"，open 才是直接去处。
-
-    改写对权限无影响（resolved→open 和 resolved→on_hold 的权限规则一致，
-    都是 creator/agent 可操作）。
-    """
-    if ticket.state == "resolved" and target_state == "on_hold":
-        import logging
-        ticket_id = getattr(ticket, "id", None)
-        logging.getLogger(__name__).warning(
-            f"[resolved→on_hold rewrite] ticket_id={ticket_id} "
-            f"requested=on_hold → effective=open"
-        )
-        return "open"
-    return target_state
+def _people(ticket: Ticket) -> dict[int, str]:
+    mapping: dict[int, str] = {}
+    for attr in ("creator", "approver", "subsystem_owner", "defect_registered_by"):
+        person = getattr(ticket, attr, None)
+        if person is not None:
+            mapping[person.id] = person.name
+    return mapping
 
 
-def _ticket_to_brief(t: Ticket, terminal_ops: dict | None = None) -> TicketBrief:
-    archived_by = (terminal_ops or {}).get((t.id, "archived"))
-    cancelled_by = (terminal_ops or {}).get((t.id, "cancelled"))
+def _brief(ticket: Ticket) -> TicketBrief:
+    role = responsible_role(ticket)
+    uid = current_responsible_user_id(ticket)
     return TicketBrief(
-        id=t.id, number=t.number, state=t.state,
-        priority=t.priority, channel=t.channel, customer_type=t.customer_type,
-        customer_name=t.customer_name, customer_phone=t.customer_phone, customer_phone_type=t.customer_phone_type, contact_phone=t.contact_phone,
-        skill_group_id=t.skill_group_id,
-        skill_group_name=t.skill_group.name if t.skill_group else None,
-        owner_id=t.owner_id,
-        owner_name=t.owner.name if t.owner else None,
-        dispatcher_id=t.dispatcher_id,
-        dispatcher_name=t.dispatcher.name if t.dispatcher else None,
-        category_id=t.category_id,
-        category_name=t.category.name if t.category else None,
-        category_l1_id=t.category.parent.id if t.category and t.category.parent else t.category_id,
-        category_l1_name=t.category.parent.name if t.category and t.category.parent else (t.category.name if t.category else None),
-        category_l2_id=t.category.id if t.category and t.category.parent else None,
-        category_l2_name=t.category.name if t.category and t.category.parent else None,
-        region_name=t.region_name,
-        is_duplicate=t.is_duplicate,
-        is_callbacked=t.is_callbacked,
-        is_draft=t.is_draft,
-        sla_solution_breached=t.sla_solution_breached,
-        solution_deadline=t.solution_deadline,
-        urged_at=t.urged_at,
-        urged_by_id=t.urged_by_id,
-        urged_by_name=t.urged_by.name if t.urged_by else None,
-        has_addition=t.has_addition,
-        has_returned=t.has_returned,
-        archived_by_id=archived_by[0] if archived_by else None,
-        archived_by_name=archived_by[1] if archived_by else None,
-        cancelled_by_id=cancelled_by[0] if cancelled_by else None,
-        cancelled_by_name=cancelled_by[1] if cancelled_by else None,
-        created_at=t.created_at, updated_at=t.updated_at,
+        id=ticket.id,
+        number=ticket.number,
+        title=ticket.title,
+        product_line=ticket.product_line,
+        customer_name=ticket.customer_name,
+        priority=ticket.priority,
+        problem_type=ticket.problem_type,
+        state=ticket.state,
+        state_version=ticket.state_version or 1,
+        is_draft=bool(ticket.is_draft),
+        return_to_state=ticket.return_to_state,
+        current_responsible_role=role,
+        current_responsible_user_id=uid,
+        current_responsible_user_name=_people(ticket).get(uid) if uid else None,
+        creator_id=ticket.creator_id,
+        creator_name=ticket.creator.name if ticket.creator else None,
+        creator_department=ticket.creator_department,
+        approver_id=ticket.approver_id,
+        approver_name=ticket.approver.name if ticket.approver else None,
+        skill_group_id=ticket.skill_group_id,
+        skill_group_name=ticket.skill_group.name if ticket.skill_group else None,
+        subsystem_owner_id=ticket.subsystem_owner_id,
+        subsystem_owner_name=ticket.subsystem_owner.name if ticket.subsystem_owner else None,
+        planned_completion_at=ticket.planned_completion_at,
+        actual_completion_at=ticket.actual_completion_at,
+        is_overdue=compute_is_overdue(ticket),
+        verification_status=ticket.verification_status,
+        defect_id=ticket.defect_id,
+        created_at=ticket.created_at,
+        updated_at=ticket.updated_at,
     )
 
 
-def _ticket_to_detail(t: Ticket, terminal_ops: dict | None = None) -> TicketDetail:
-    brief = _ticket_to_brief(t, terminal_ops)
+def _attachment_out(att: TicketAttachment) -> TicketAttachmentOut:
+    return TicketAttachmentOut(
+        id=att.id,
+        ticket_id=att.ticket_id,
+        original_filename=att.original_filename,
+        content_type=att.content_type,
+        size=att.size,
+        stage=att.stage,
+        uploader_id=att.uploader_id,
+        uploader_name=att.uploader.name if att.uploader else None,
+        download_url=f"/api/v1/attachments/{att.id}/download",
+        created_at=att.created_at,
+    )
+
+
+def _log_out(log: TicketStateLog) -> TicketStateLogOut:
+    return TicketStateLogOut(
+        id=log.id,
+        action=log.action,
+        from_state=log.from_state,
+        to_state=log.to_state,
+        operator_id=log.operator_id,
+        operator_name=log.operator.name if log.operator else None,
+        operator_role=log.operator.role if log.operator else None,
+        comment=log.comment,
+        payload=log.payload_snapshot,
+        responsible_role_snapshot=log.responsible_role_snapshot,
+        responsible_user_id_snapshot=log.responsible_user_id_snapshot,
+        responsible_user_name_snapshot=(
+            log.responsible_user_snapshot.name if log.responsible_user_snapshot else None
+        ),
+        state_version=log.state_version,
+        created_at=log.created_at,
+    )
+
+
+def _detail(ticket: Ticket, actor: User) -> TicketDetail:
+    brief = _brief(ticket)
     return TicketDetail(
         **brief.model_dump(),
-        description=t.description,
-        customer_company=t.customer_company,
-        customer_level=t.customer_level,
-        device_sn=t.device_sn,
-        region_id=t.region_id,
-        symptom=t.symptom,
-        creator_id=t.creator_id,
-        creator_name=t.creator.name if t.creator else None,
-        first_owner_id=t.first_owner_id,
-        first_owner_name=t.first_owner.name if t.first_owner else None,
-        is_escalated=t.is_escalated,
-        duplicate_reason=t.duplicate_reason,
-        linked_ticket_id=t.linked_ticket_id,
-        solved_at=t.solved_at,
-        closed_at=t.closed_at,
-        closed_duration_minutes=t.closed_duration_minutes,
-        resolved=t.resolved,
-        resolution=t.resolution,
-        group_id=t.group_id,
-        group_name=t.group.name if t.group else None,
-        returned_to_user_id=t.returned_to_user_id,
-        returned_to_user_name=t.returned_to_user.name if t.returned_to_user else None,
-        callback_required=t.callback_required,
-        callback_details=t.callback_details,
-        archive_notes=t.archive_notes,
-        satisfaction=t.satisfaction,
+        closure_requirement=ticket.closure_requirement,
+        occurred_at=ticket.occurred_at,
+        location=ticket.location,
+        longitude=float(ticket.longitude) if ticket.longitude is not None else None,
+        latitude=float(ticket.latitude) if ticket.latitude is not None else None,
+        device_info=ticket.device_info,
+        description=ticket.description,
+        confirmation_comment=ticket.confirmation_comment,
+        acceptance_comment=ticket.acceptance_comment,
+        temporary_measure=ticket.temporary_measure,
+        long_term_measure=ticket.long_term_measure,
+        plan_confirmation_comment=ticket.plan_confirmation_comment,
+        initial_investigation=ticket.initial_investigation,
+        root_cause=ticket.root_cause,
+        analysis_report=ticket.analysis_report,
+        verification_conclusion=ticket.verification_conclusion,
+        quality_review_result=ticket.quality_review_result,
+        defect_repository_path=ticket.defect_repository_path,
+        defect_registered_at=ticket.defect_registered_at,
+        defect_registered_by_id=ticket.defect_registered_by_id,
+        defect_registered_by_name=(
+            ticket.defect_registered_by.name if ticket.defect_registered_by else None
+        ),
+        closed_at=ticket.closed_at,
+        allowed_actions=allowed_actions(ticket, actor),
+        attachments=[_attachment_out(a) for a in (ticket.attachments or [])],
+        state_logs=[_log_out(log) for log in (ticket.state_logs or [])],
     )
 
 
-async def _calculate_sla_deadline(db: AsyncSession, priority: str, skill_group_id: int | None) -> datetime | None:
-    """Look up SLA policy and compute solution deadline."""
-    # Try group+priority first, then global
-    for sg_id in [skill_group_id, None]:
-        result = await db.execute(
-            select(SLAPolicy).where(
-                SLAPolicy.skill_group_id == sg_id,
-                SLAPolicy.priority == priority,
-            )
-        )
-        policy = result.scalar_one_or_none()
-        if policy:
-            return datetime.now(timezone.utc) + timedelta(minutes=policy.solution_minutes)
-    return None
+async def _load_detail(db: AsyncSession, ticket_id: int) -> Ticket:
+    """按详情需要加载工单。
 
-
-async def _is_dispatcher(db: AsyncSession, user_id: int, skill_group_id: int | None) -> bool:
-    """检查用户是否为某对接部门的部门对接人。"""
-    if not skill_group_id:
-        return False
-    from app.models.group import UserSkillGroup
-    result = await db.execute(
-        select(UserSkillGroup).where(
-            UserSkillGroup.user_id == user_id,
-            UserSkillGroup.skill_group_id == skill_group_id,
-            UserSkillGroup.is_dispatcher == True,
-        )
-    )
-    return result.scalar_one_or_none() is not None
-
-
-async def _is_dispatcher_anywhere(db: AsyncSession, user_id: int) -> bool:
-    """检查用户是否为任意对接部门的部门对接人（用于列表可见性判断）。"""
-    from app.models.group import UserSkillGroup
-    result = await db.execute(
-        select(func.count()).select_from(UserSkillGroup).where(
-            UserSkillGroup.user_id == user_id,
-            UserSkillGroup.is_dispatcher == True,
-        )
-    )
-    return (result.scalar() or 0) > 0
-
-
-async def _get_terminal_operators(
-    db: AsyncSession, ticket_ids: list[int]
-) -> dict[tuple[int, str], tuple[int, str]]:
-    """批量取一组工单"执行 archived / cancelled 流转的人"。
-
-    从 state_logs 取最近一次 to_state IN ('archived','cancelled') 的 operator。
-    一次性 IN 查询，避免每张工单单独查（不引入 N+1）。
-    不落库到 tickets 表——state_log 才是真实来源，避免漂移。
-
-    返回 {(ticket_id, to_state): (operator_id, operator_name)}
+    populate_existing 用于强制刷新同一 session 里已被读取过的实例
+    （动作执行后需要拿到最新的 state_logs / attachments）。
     """
-    if not ticket_ids:
-        return {}
-    rows = await db.execute(
-        select(
-            TicketStateLog.ticket_id,
-            TicketStateLog.to_state,
-            TicketStateLog.operator_id,
-            User.name,
-        )
-        .join(User, User.id == TicketStateLog.operator_id)
-        .where(
-            TicketStateLog.ticket_id.in_(ticket_ids),
-            TicketStateLog.to_state.in_(["archived", "cancelled"]),
-        )
-        .order_by(
-            TicketStateLog.ticket_id,
-            TicketStateLog.to_state,
-            TicketStateLog.created_at.desc(),
-        )
-    )
-    result: dict[tuple[int, str], tuple[int, str]] = {}
-    for tid, to_state, op_id, op_name in rows.all():
-        key = (tid, to_state)
-        if key not in result:  # ORDER BY desc 后第一行就是最近的
-            result[key] = (op_id, op_name)
-    return result
-
-
-async def check_transition_permission(db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None):
-    """校验当前用户是否有权执行该状态变更。
-
-    权限矩阵：
-      pending→open（分派）: 部门对接人 / admin
-      open→resolved / on_hold, on_hold→resolved: 处理人（owner）/ admin
-      pending/open/on_hold/resolved→cancelled（撤销）: 创建者 / 部门对接人 / admin
-      resolved→archived（归档）: 客服团队(agent) / admin
-      退回：
-        pending→returned: 部门对接人 / admin
-        open→pending: 处理人（owner）/ admin
-        on_hold→open: 处理人（owner）/ admin
-        resolved→open/on_hold: 处理人（owner）/ admin
-      returned→pending/cancelled: 创建者 / admin
-    """
-    from app.core.exceptions import ForbiddenError
-    if user.role == "admin":
-        return  # admin 全权限
-
-    from_state = ticket.state
-
-    # 分派：部门对接人
-    if from_state == "pending" and to_state == "open":
-        if not await _is_dispatcher(db, user.id, ticket.skill_group_id):
-            raise ForbiddenError("只有该部门的对接人可分派工单")
-        # 分派时必须指定处理人
-        if not owner_id:
-            raise HTTPException(422, detail="分派时必须指定处理人")
-        return
-
-    # 处理人操作：已处理 / 暂缓 / 确认 / 退回上一状态
-    if (from_state, to_state) in [
-        ("open", "resolved"), ("open", "on_hold"), ("on_hold", "resolved"),
-        ("open", "pending"), ("on_hold", "open"),
-    ]:
-        if ticket.owner_id != user.id:
-            raise ForbiddenError("只有当前处理人可执行此操作")
-        return
-
-    # 已处理状态退回：业务上已回到客服侧，由创建者或客服团队退回
-    if (from_state, to_state) in [("resolved", "open"), ("resolved", "on_hold")]:
-        if ticket.creator_id == user.id:
-            return
-        if user.role == "agent":
-            return
-        raise ForbiddenError("只有创建者或客服团队可退回已处理工单")
-
-    # 撤销：仅创建者（发起人）
-    if to_state == "cancelled" and from_state in ("pending", "open", "on_hold", "returned"):
-        if ticket.creator_id == user.id:
-            return
-        raise ForbiddenError("只有工单发起人可撤销工单")
-
-    # 客服团队操作：归档
-    if (from_state, to_state) in [("resolved", "archived")]:
-        if user.role != "agent":
-            raise ForbiddenError("只有客服团队可执行归档操作")
-        return
-
-    # 待受理退回：部门对接人 → 已退回，处理人给创建者
-    if from_state == "pending" and to_state == "returned":
-        if await _is_dispatcher(db, user.id, ticket.skill_group_id):
-            return
-        raise ForbiddenError("只有部门对接人可退回待受理工单")
-
-    # 已退回工单：创建者可重新提交或撤销
-    if from_state == "returned" and to_state in ("pending", "cancelled"):
-        if ticket.creator_id == user.id:
-            return
-        raise ForbiddenError("只有创建者可处理已退回工单")
-
-    raise ForbiddenError("无权执行此状态变更")
-
-
-@router.get("/tickets")
-async def list_tickets(
-    state: str | None = None,
-    priority: str | None = None,
-    skill_group_id: int | None = None,
-    owner_id: int | None = None,
-    creator_id: int | None = None,
-    group_id: int | None = None,
-    category_id: int | None = None,
-    customer_type: str | None = None,
-    is_duplicate: bool | None = None,
-    is_callbacked: bool | None = None,
-    is_overdue: bool | None = None,
-    keyword: str | None = None,
-    date_from: str | None = Query(None, description="创建时间起始 (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="创建时间结束 (YYYY-MM-DD)"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """List tickets with filters and pagination."""
-    # 默认不过滤草稿
-    query = select(Ticket).options(
-        selectinload(Ticket.owner), selectinload(Ticket.skill_group),
-        selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
-        selectinload(Ticket.dispatcher), selectinload(Ticket.urged_by),
-    ).where(Ticket.is_draft == False)
-    if user.role == "handler":
-        # 对接人：看派给自己的待受理工单(dispatcher_id) + 已分派给自己处理的(owner_id)
-        # 处理人：只看已分派给自己的(owner_id)
-        if await _is_dispatcher_anywhere(db, user.id):
-            query = query.where(
-                (Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id)
-            )
-        else:
-            query = query.where(Ticket.owner_id == user.id)
-    elif user.role == "agent":
-        if not user.is_group_leader:
-            query = query.where(
-                (Ticket.owner_id == user.id) | (Ticket.group_id == user.group_id)
-            )
-
-    if state:
-        query = query.where(Ticket.state == state)
-    if priority:
-        query = query.where(Ticket.priority == priority)
-    if skill_group_id:
-        query = query.where(Ticket.skill_group_id == skill_group_id)
-    if owner_id:
-        query = query.where(Ticket.owner_id == owner_id)
-    if creator_id:
-        query = query.where(Ticket.creator_id == creator_id)
-    if group_id:
-        query = query.where(Ticket.group_id == group_id)
-    if category_id:
-        query = query.where(Ticket.category_id == category_id)
-    if customer_type:
-        query = query.where(Ticket.customer_type == customer_type)
-    if is_duplicate is not None:
-        query = query.where(Ticket.is_duplicate == is_duplicate)
-    if is_callbacked is not None:
-        query = query.where(Ticket.is_callbacked == is_callbacked)
-    if is_overdue:
-        # 进行中状态（非终态）+ SLA 超时
-        query = query.where(
-            Ticket.state.notin_(["archived", "cancelled"]),
-            Ticket.sla_solution_breached == True,
-        )
-    if keyword:
-        query = query.where(
-            Ticket.number.ilike(f"%{keyword}%")
-            | Ticket.customer_name.ilike(f"%{keyword}%")
-            | Ticket.customer_phone.ilike(f"%{keyword}%")
-            | Ticket.contact_phone.ilike(f"%{keyword}%")
-            | Ticket.device_sn.ilike(f"%{keyword}%")
-            | Ticket.customer_company.ilike(f"%{keyword}%")
-            | Ticket.description.ilike(f"%{keyword}%")
-            | Ticket.region_name.ilike(f"%{keyword}%")
-        )
-
-    # 创建时间区间（inclusive 端点）：date_from 00:00:00 ~ date_to 23:59:59.999999
-    if date_from or date_to:
-        from datetime import datetime, time
-        if date_from:
-            try:
-                d = datetime.strptime(date_from, "%Y-%m-%d")
-                query = query.where(Ticket.created_at >= datetime.combine(d, time.min))
-            except ValueError:
-                raise HTTPException(422, detail="date_from 格式错误，应为 YYYY-MM-DD")
-        if date_to:
-            try:
-                d = datetime.strptime(date_to, "%Y-%m-%d")
-                query = query.where(Ticket.created_at <= datetime.combine(d, time.max))
-            except ValueError:
-                raise HTTPException(422, detail="date_to 格式错误，应为 YYYY-MM-DD")
-
-    # Count
-    count_q = select(func.count()).select_from(query.subquery())
-    total = (await db.execute(count_q)).scalar() or 0
-
-    # Paginate
-    # 排序：催办工单全局置顶，再进行中状态的超时工单优先，再按创建时间倒序
-    in_progress_breached = (
-        Ticket.state.notin_(["archived", "cancelled"])
-        & (Ticket.sla_solution_breached == True)
-    )
-    order_clauses = [
-        Ticket.urged_at.desc().nulls_last(),
-        in_progress_breached.desc(),
-        Ticket.created_at.desc(),
-    ]
-    query = query.order_by(*order_clauses).offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(query)
-    tickets = result.scalars().all()
-
-    terminal_ops = await _get_terminal_operators(db, [t.id for t in tickets])
-
-    return {
-        "data": [_ticket_to_brief(t, terminal_ops).model_dump() for t in tickets],
-        "pagination": {
-            "page": page, "page_size": page_size,
-            "total": total, "total_pages": (total + page_size - 1) // page_size,
-        },
-    }
-
-
-@router.get("/tickets/export")
-async def export_tickets(
-    state: str | None = None,
-    priority: str | None = None,
-    skill_group_id: int | None = None,
-    owner_id: int | None = None,
-    creator_id: int | None = None,
-    group_id: int | None = None,
-    category_id: int | None = None,
-    customer_type: str | None = None,
-    is_duplicate: bool | None = None,
-    is_callbacked: bool | None = None,
-    is_overdue: bool | None = None,
-    keyword: str | None = None,
-    date_from: str | None = Query(None, description="创建时间起始 (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="创建时间结束 (YYYY-MM-DD)"),
-    columns: str | None = Query(None, description="逗号分隔的列组：base,customer,category,workflow"),
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """导出工单为 CSV（真实数据，按当前筛选条件）。"""
-    from datetime import datetime, time
-    from app.models.group import Group, SkillGroup
-    from app.models.category import TicketCategory
-    from app.models.user import User as UserModel
-
-    query = (
+    result = await db.execute(
         select(Ticket)
-        .options(
-            selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group),
+        .options(*DETAIL_LOAD_OPTIONS)
+        .where(Ticket.id == ticket_id)
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one()
+
+
+async def _get_ticket_or_404(db: AsyncSession, ticket_id: int, *, lock: bool = False) -> Ticket:
+    stmt = select(Ticket).where(Ticket.id == ticket_id)
+    if lock:
+        stmt = stmt.with_for_update()
+    ticket = (await db.execute(stmt)).scalar_one_or_none()
+    if ticket is None:
+        raise NotFoundError("问题", ticket_id)
+    return ticket
+
+
+# ── 建单辅助 ───────────────────────────────────────────────
+
+
+def _apply_create_fields(ticket: Ticket, body) -> None:
+    for field in (
+        "title",
+        "product_line",
+        "customer_name",
+        "problem_type",
+        "closure_requirement",
+        "occurred_at",
+        "location",
+        "longitude",
+        "latitude",
+        "device_info",
+        "description",
+        "approver_id",
+    ):
+        value = getattr(body, field, None)
+        if value is None:
+            continue
+        if field in ("occurred_at", "planned_completion_at"):
+            value = _aware(value)
+        setattr(ticket, field, value)
+    if getattr(body, "priority", None) is not None:
+        ticket.priority = next_priority(body.priority)
+
+
+def _missing_create_fields(ticket: Ticket) -> list[str]:
+    missing = []
+    for field in CREATE_REQUIRED_FIELDS:
+        value = getattr(ticket, field, None)
+        if value is None or (isinstance(value, str) and not value.strip()):
+            missing.append(field)
+    return missing
+
+
+async def _validate_formal_submit(db: AsyncSession, ticket: Ticket) -> None:
+    missing = _missing_create_fields(ticket)
+    if missing:
+        raise HTTPException(400, detail="缺少业务必填字段：" + "、".join(missing))
+    if ticket.approver_id is None:
+        raise HTTPException(400, detail="缺少业务必填字段：approver_id")
+    approver = await db.get(User, ticket.approver_id)
+    verify_approver(approver)
+
+
+async def _generate_number(db: AsyncSession) -> str:
+    today = datetime.now().strftime("%Y%m%d")
+    max_number = (
+        await db.execute(
+            select(func.max(Ticket.number)).where(Ticket.number.like(f"{today}-%"))
         )
+    ).scalar()
+    seq = int(max_number.split("-")[-1]) + 1 if max_number else 1
+    return f"{today}-{seq:04d}"
+
+
+def _new_ticket(user: User, *, is_draft: bool) -> Ticket:
+    return Ticket(
+        number=None,
+        is_draft=is_draft,
+        state=TicketState.PENDING_APPROVAL.value,
+        state_version=1,
+        priority=Priority.P2_NORMAL.value,
+        description="",
+        creator_id=user.id,
+        creator_department=(user.group.name if getattr(user, "group", None) else None),
+        legacy_state=None,
     )
 
-    # 角色过滤（与 list_tickets 一致）
-    if user.role == "handler":
-        if await _is_dispatcher_anywhere(db, user.id):
-            query = query.where(
-                (Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id)
-            )
-        else:
-            query = query.where(Ticket.owner_id == user.id)
-    elif user.role == "agent":
-        if not user.is_group_leader:
-            query = query.where((Ticket.owner_id == user.id) | (Ticket.group_id == user.group_id))
 
+def _write_initial_log(ticket: Ticket, user: User, comment: str | None = None) -> TicketStateLog:
+    return TicketStateLog(
+        ticket_id=ticket.id,
+        from_state=None,
+        to_state=ticket.state,
+        operator_id=user.id,
+        action=None,
+        comment=comment,
+        reason=comment,
+        payload_snapshot=None,
+        state_version=ticket.state_version,
+        responsible_role_snapshot=responsible_role(ticket),
+        responsible_user_id_snapshot=current_responsible_user_id(ticket),
+    )
+
+
+async def _respond_detail(db: AsyncSession, ticket_id: int, actor: User) -> TicketDetail:
+    return _detail(await _load_detail(db, ticket_id), actor)
+
+
+# ── 基础查询构造 ───────────────────────────────────────────
+
+
+def _base_query(user: User):
+    """POC 工单基础查询：排除草稿与非 POC 历史数据，并套用角色数据范围。"""
+    query = select(Ticket).where(
+        Ticket.is_draft == False,  # noqa: E712
+        Ticket.legacy_state.is_(None),
+    )
+    scope = ticket_scope(user)
+    if scope is not None:
+        query = query.where(scope)
+    return query
+
+
+def _apply_filters(
+    query,
+    *,
+    state: list[TicketState] | None,
+    priority: list[Priority] | None,
+    skill_group_id: int | None,
+    responsible_user_id_filter: int | None,
+    verification_status: VerificationStatus | None,
+    is_overdue: bool | None,
+    keyword: str | None,
+    date_from: str | None,
+    date_to: str | None,
+):
     if state:
-        query = query.where(Ticket.state == state)
+        query = query.where(Ticket.state.in_([s.value for s in state]))
     if priority:
-        query = query.where(Ticket.priority == priority)
+        query = query.where(Ticket.priority.in_([p.value for p in priority]))
     if skill_group_id:
         query = query.where(Ticket.skill_group_id == skill_group_id)
-    if owner_id:
-        query = query.where(Ticket.owner_id == owner_id)
-    if creator_id:
-        query = query.where(Ticket.creator_id == creator_id)
-    if group_id:
-        query = query.where(Ticket.group_id == group_id)
-    if category_id:
-        query = query.where(Ticket.category_id == category_id)
-    if customer_type:
-        query = query.where(Ticket.customer_type == customer_type)
-    if is_duplicate is not None:
-        query = query.where(Ticket.is_duplicate == is_duplicate)
-    if is_callbacked is not None:
-        query = query.where(Ticket.is_callbacked == is_callbacked)
-    if is_overdue:
+    if verification_status:
+        query = query.where(Ticket.verification_status == verification_status.value)
+    if responsible_user_id_filter:
+        uid = responsible_user_id_filter
         query = query.where(
-            Ticket.state.notin_(["archived", "cancelled"]),
-            Ticket.sla_solution_breached == True,
+            or_(
+                (Ticket.state == TicketState.PENDING_APPROVAL.value)
+                & (Ticket.approver_id == uid),
+                (
+                    Ticket.state.in_(
+                        [
+                            TicketState.PENDING_ACCEPTANCE.value,
+                            TicketState.PLANNING.value,
+                            TicketState.PROCESSING.value,
+                        ]
+                    )
+                )
+                & (Ticket.subsystem_owner_id == uid),
+                (Ticket.state == TicketState.PENDING_PLAN_CONFIRMATION.value)
+                & (Ticket.creator_id == uid),
+                (Ticket.state == TicketState.RETURNED.value)
+                & (Ticket.return_to_state == TicketState.PENDING_APPROVAL.value)
+                & (Ticket.creator_id == uid),
+                (Ticket.state == TicketState.RETURNED.value)
+                & (
+                    Ticket.return_to_state.in_(
+                        [TicketState.PLANNING.value, TicketState.PROCESSING.value]
+                    )
+                )
+                & (Ticket.subsystem_owner_id == uid),
+            )
         )
+    if is_overdue is not None:
+        now = now_utc()
+        overdue = (
+            Ticket.planned_completion_at.is_not(None)
+            & (Ticket.planned_completion_at < now)
+            & Ticket.state.notin_(TERMINAL_VALUES)
+        )
+        query = query.where(overdue if is_overdue else ~overdue)
     if keyword:
+        like = f"%{keyword}%"
         query = query.where(
-            Ticket.number.ilike(f"%{keyword}%")
-            | Ticket.customer_name.ilike(f"%{keyword}%")
-            | Ticket.customer_phone.ilike(f"%{keyword}%")
-            | Ticket.contact_phone.ilike(f"%{keyword}%")
-            | Ticket.device_sn.ilike(f"%{keyword}%")
-            | Ticket.customer_company.ilike(f"%{keyword}%")
-            | Ticket.description.ilike(f"%{keyword}%")
-            | Ticket.region_name.ilike(f"%{keyword}%")
+            Ticket.number.ilike(like)
+            | Ticket.title.ilike(like)
+            | Ticket.product_line.ilike(like)
+            | Ticket.customer_name.ilike(like)
+            | Ticket.problem_type.ilike(like)
+            | Ticket.description.ilike(like)
+            | Ticket.defect_id.ilike(like)
         )
-
-    # 创建时间区间（inclusive 端点）：date_from 00:00:00 ~ date_to 23:59:59.999999
-    if date_from or date_to:
-        if date_from:
-            try:
-                d = datetime.strptime(date_from, "%Y-%m-%d")
-                query = query.where(Ticket.created_at >= datetime.combine(d, time.min))
-            except ValueError:
-                raise HTTPException(422, detail="date_from 格式错误，应为 YYYY-MM-DD")
-        if date_to:
-            try:
-                d = datetime.strptime(date_to, "%Y-%m-%d")
-                query = query.where(Ticket.created_at <= datetime.combine(d, time.max))
-            except ValueError:
-                raise HTTPException(422, detail="date_to 格式错误，应为 YYYY-MM-DD")
-
-    query = query.order_by(Ticket.created_at.desc())
-    result = await db.execute(query)
-    tickets = result.scalars().all()
-
-    # 列组：默认全部
-    col_groups = set((columns or "base,customer,category,workflow").split(","))
-
-    # 状态/优先级中文名
-    state_labels = {
-        "pending": "待受理", "open": "处理中", "resolved": "已处理",
-        "on_hold": "暂缓处理", "returned": "退回",
-        "archived": "已归档", "cancelled": "已撤销",
-    }
-    priority_labels = {
-        "p1_urgent": "P1 特别重大事件", "p2_high": "P2 重大事件", "p3_normal": "P3 较大事件", "p4_enterprise": "P4 一般事件",
-    }
-    customer_type_labels = {"personal": "个人", "enterprise": "政企"}
-    channel_labels = {"phone": "电话", "wechat": "微信服务号", "web": "Web", "app": "App"}
-    satisfaction_labels = {"satisfied": "满意", "average": "一般", "dissatisfied": "不满意", "unrated": "未评价"}
-
-    # 列定义：(表头, 取值函数)
-    col_defs: list[tuple[str, any]] = []
-    if "base" in col_groups:
-        col_defs += [
-            ("工单编号", lambda t: t.number),
-            ("创建时间", lambda t: t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else ""),
-            ("结束时间", lambda t: t.closed_at.strftime("%Y-%m-%d %H:%M") if t.closed_at else ""),
-            ("关闭时长(分)", lambda t: t.closed_duration_minutes or ""),
-            ("当前状态", lambda t: state_labels.get(t.state, t.state)),
-            ("工单来源", lambda t: channel_labels.get(t.channel, t.channel)),
-        ]
-    if "customer" in col_groups:
-        col_defs += [
-            ("用户姓名", lambda t: t.customer_name),
-            ("单位名称", lambda t: t.customer_company or ""),
-            ("来电号码", lambda t: t.customer_phone),
-            ("联系号码", lambda t: t.contact_phone or ""),
-            ("设备编号/SN", lambda t: t.device_sn or ""),
-            ("所属区域", lambda t: t.region_name or ""),
-        ]
-    if "category" in col_groups:
-        col_defs += [
-            ("一级分类", lambda t: t.category.parent.name if t.category and t.category.parent else ""),
-            ("二级分类", lambda t: t.category.name if t.category else ""),
-            ("问题详情", lambda t: t.symptom or ""),
-            ("优先级", lambda t: priority_labels.get(t.priority, t.priority)),
-        ]
-    if "workflow" in col_groups:
-        col_defs += [
-            ("工单创建人", lambda t: t.creator.name if t.creator else ""),
-            ("实际对接人", lambda t: t.dispatcher.name if t.dispatcher else ""),
-            ("实际处理人", lambda t: t.owner.name if t.owner else ""),
-            ("解决方案内容", lambda t: t.resolution or ""),
-            ("是否回访", lambda t: "是" if t.is_callbacked else "否"),
-            ("回访时间", lambda t: ""),  # 暂无独立回访时间字段
-            ("客户满意度", lambda t: satisfaction_labels.get(t.satisfaction, "") if t.satisfaction else ""),
-            ("归档说明", lambda t: t.archive_notes or ""),
-            ("SLA是否达标", lambda t: "超时" if t.sla_solution_breached else "达标"),
-        ]
-
-    # 生成 CSV（UTF-8 BOM，Excel 友好）
-    output = io.StringIO()
-    output.write("﻿")
-    writer = csv.writer(output)
-    writer.writerow([c[0] for c in col_defs])
-    for t in tickets:
-        writer.writerow([c[1](t) for c in col_defs])
-
-    output.seek(0)
-    filename = f"tickets_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-    return StreamingResponse(
-        iter([output.getvalue().encode("utf-8")]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    if date_from:
+        try:
+            d = datetime.strptime(date_from, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(422, detail="date_from 格式错误，应为 YYYY-MM-DD")
+        query = query.where(Ticket.created_at >= datetime.combine(d, time.min))
+    if date_to:
+        try:
+            d = datetime.strptime(date_to, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(422, detail="date_to 格式错误，应为 YYYY-MM-DD")
+        query = query.where(Ticket.created_at <= datetime.combine(d, time.max))
+    return query
 
 
-# ---- Draft endpoints (must be before /tickets/{ticket_id}) ----
+# ── 建单 / 草稿 ────────────────────────────────────────────
+
+
+@router.post(
+    "/tickets",
+    response_model=TicketCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_ticket(
+    body: TicketCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(
+        require_role(BusinessRole.PRESALES.value, BusinessRole.ADMIN.value)
+    ),
+):
+    """新建问题；`is_draft=true` 保存草稿，否则直接进入 `pending_approval`。"""
+    ticket = _new_ticket(user, is_draft=body.is_draft)
+    _apply_create_fields(ticket, body)
+
+    warnings = None
+    if body.is_draft:
+        db.add(ticket)
+        await db.flush()
+    else:
+        await _validate_formal_submit(db, ticket)
+        ticket.number = await _generate_number(db)
+        ticket.is_draft = False
+        db.add(ticket)
+        await db.flush()
+        db.add(_write_initial_log(ticket, user, comment="提交审批"))
+
+    await db.commit()
+    detail = await _respond_detail(db, ticket.id, user)
+    return TicketCreateResponse(data=detail, warnings=warnings)
 
 
 @router.get("/tickets/drafts")
@@ -624,90 +462,21 @@ async def list_drafts(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get current user's draft tickets."""
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.warning(f"[DEBUG] list_drafts called by user.id={user.id}, role={user.role}")
+    """当前用户的草稿。"""
     result = await db.execute(
         select(Ticket)
-        .options(
-            selectinload(Ticket.owner), selectinload(Ticket.skill_group),
-            selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
-            selectinload(Ticket.dispatcher), selectinload(Ticket.urged_by),
+        .where(
+            Ticket.is_draft == True,  # noqa: E712
+            Ticket.creator_id == user.id,
+            Ticket.legacy_state.is_(None),
         )
-        .where(Ticket.is_draft == True, Ticket.creator_id == user.id)
         .order_by(Ticket.updated_at.desc())
     )
     tickets = result.scalars().all()
-    logger.warning(f"[DEBUG] list_drafts found {len(tickets)} drafts")
     return {
-        "data": [_ticket_to_brief(t) for t in tickets],
+        "data": [_brief(t).model_dump() for t in tickets],
         "pagination": {"total": len(tickets)},
     }
-
-
-@router.post("/tickets/drafts/{draft_id}/submit", response_model=TicketCreateResponse)
-async def submit_draft(
-    draft_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
-):
-    """Submit a draft ticket as a formal ticket."""
-    ticket = await db.get(Ticket, draft_id)
-    if not ticket or not ticket.is_draft or ticket.creator_id != user.id:
-        raise NotFoundError("草稿", draft_id)
-
-    if not ticket.dispatcher_id:
-        raise HTTPException(422, detail="提交前必须指定部门对接人")
-
-    today = datetime.now().strftime("%Y%m%d")
-    max_q = (
-        select(func.max(Ticket.number))
-        .where(Ticket.number.like(f"{today}-%"))
-    )
-    max_number = (await db.execute(max_q)).scalar()
-    if max_number is None:
-        seq = 1
-    else:
-        seq = int(max_number.split("-")[-1]) + 1
-    ticket.number = f"{today}-{seq:04d}"
-
-    ticket.solution_deadline = await _calculate_sla_deadline(db, ticket.priority, ticket.skill_group_id)
-
-    ticket.is_draft = False
-    await db.flush()
-
-    db.add(TicketStateLog(
-        ticket_id=ticket.id, from_state=None, to_state="pending",
-        operator_id=user.id,
-        **_snapshot_people(ticket, None),
-    ))
-    await db.commit()
-
-    result = await db.execute(
-        select(Ticket).options(
-            selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-            selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group),
-        ).where(Ticket.id == ticket.id)
-    )
-    ticket = result.scalar_one()
-    return TicketCreateResponse(data=_ticket_to_detail(ticket))
-
-
-@router.delete("/tickets/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_draft(
-    draft_id: int,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Delete a draft ticket."""
-    ticket = await db.get(Ticket, draft_id)
-    if not ticket or not ticket.is_draft or ticket.creator_id != user.id:
-        raise NotFoundError("草稿", draft_id)
-    await db.delete(ticket)
-    await db.commit()
 
 
 @router.patch("/tickets/drafts/{draft_id}", response_model=TicketCreateResponse)
@@ -717,48 +486,192 @@ async def update_draft(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Update a draft ticket."""
-    ticket = await db.get(Ticket, draft_id)
-    if not ticket or not ticket.is_draft or ticket.creator_id != user.id:
+    ticket = await _get_ticket_or_404(db, draft_id)
+    if not ticket.is_draft or ticket.creator_id != user.id:
         raise NotFoundError("草稿", draft_id)
+    _apply_create_fields(ticket, body)
+    await db.commit()
+    return TicketCreateResponse(data=await _respond_detail(db, draft_id, user))
 
-    # Update draft fields
-    ticket.description = body.description
-    ticket.priority = body.priority
-    ticket.channel = body.channel
-    ticket.customer_type = body.customer_type
-    ticket.customer_name = body.customer_name
-    ticket.customer_phone = body.customer_phone
-    ticket.customer_phone_type = body.customer_phone_type
-    ticket.contact_phone = body.contact_phone
-    ticket.customer_company = body.customer_company
-    ticket.customer_level = body.customer_level
-    ticket.device_sn = body.device_sn
-    ticket.region_id = body.region_id
-    ticket.region_name = body.region_name
-    ticket.category_id = body.category_id
-    ticket.group_id = body.group_id or user.group_id
-    ticket.skill_group_id = body.skill_group_id
-    ticket.dispatcher_id = body.dispatcher_id
-    ticket.is_duplicate = body.is_duplicate
-    ticket.duplicate_reason = body.duplicate_reason
 
+@router.delete("/tickets/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_draft(
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    ticket = await _get_ticket_or_404(db, draft_id)
+    if not ticket.is_draft or ticket.creator_id != user.id:
+        raise NotFoundError("草稿", draft_id)
+    await db.delete(ticket)
     await db.commit()
 
-    # Reload ticket with relationships
-    result = await db.execute(
-        select(Ticket)
-        .options(
-            selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-            selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group), selectinload(Ticket.urged_by),
-        )
-        .where(Ticket.id == draft_id)
-    )
-    ticket = result.scalar_one()
-    return TicketCreateResponse(data=_ticket_to_detail(ticket))
 
+@router.post("/tickets/drafts/{draft_id}/submit", response_model=TicketCreateResponse)
+async def submit_draft(
+    draft_id: int,
+    body: DraftSubmitRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """草稿正式提交 → 进入 `pending_approval`。"""
+    ticket = await _get_ticket_or_404(db, draft_id)
+    if not ticket.is_draft or ticket.creator_id != user.id:
+        raise NotFoundError("草稿", draft_id)
+
+    if body is not None:
+        _apply_create_fields(ticket, body)
+
+    await _validate_formal_submit(db, ticket)
+    if not ticket.number:
+        ticket.number = await _generate_number(db)
+    ticket.is_draft = False
+    ticket.state = TicketState.PENDING_APPROVAL.value
+    ticket.state_version = (ticket.state_version or 1) + 1
+    await db.flush()
+    db.add(_write_initial_log(ticket, user, comment="提交审批"))
+    await db.commit()
+    return TicketCreateResponse(data=await _respond_detail(db, draft_id, user))
+
+
+# ── 列表 / 导出 ────────────────────────────────────────────
+
+
+@router.get("/tickets")
+async def list_tickets(
+    state: list[TicketState] | None = Query(None),
+    priority: list[Priority] | None = Query(None),
+    skill_group_id: int | None = None,
+    responsible_user_id: int | None = Query(None, description="当前责任人"),
+    verification_status: VerificationStatus | None = None,
+    is_overdue: bool | None = None,
+    keyword: str | None = None,
+    date_from: str | None = Query(None, description="创建时间起始 (YYYY-MM-DD)"),
+    date_to: str | None = Query(None, description="创建时间结束 (YYYY-MM-DD)"),
+    sort: Literal["updated_desc", "created_desc", "planned_asc"] = "updated_desc",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    query = _apply_filters(
+        _base_query(user),
+        state=state,
+        priority=priority,
+        skill_group_id=skill_group_id,
+        responsible_user_id_filter=responsible_user_id,
+        verification_status=verification_status,
+        is_overdue=is_overdue,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    total = (
+        await db.execute(select(func.count()).select_from(query.subquery()))
+    ).scalar() or 0
+
+    order = {
+        "updated_desc": Ticket.updated_at.desc(),
+        "created_desc": Ticket.created_at.desc(),
+        "planned_asc": Ticket.planned_completion_at.asc().nulls_last(),
+    }[sort]
+    rows = (
+        await db.execute(
+            query.order_by(order).offset((page - 1) * page_size).limit(page_size)
+        )
+    ).scalars().all()
+
+    return {
+        "data": [_brief(t).model_dump() for t in rows],
+        "pagination": {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": (total + page_size - 1) // page_size,
+        },
+    }
+
+
+@router.get("/tickets/export")
+async def export_tickets(
+    state: list[TicketState] | None = Query(None),
+    priority: list[Priority] | None = Query(None),
+    skill_group_id: int | None = None,
+    responsible_user_id: int | None = Query(None),
+    verification_status: VerificationStatus | None = None,
+    is_overdue: bool | None = None,
+    keyword: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    sort: Literal["updated_desc", "created_desc", "planned_asc"] = "updated_desc",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """导出 POC 问题跟踪表（CSV）。数据范围与列表完全一致。"""
+    query = _apply_filters(
+        _base_query(user),
+        state=state,
+        priority=priority,
+        skill_group_id=skill_group_id,
+        responsible_user_id_filter=responsible_user_id,
+        verification_status=verification_status,
+        is_overdue=is_overdue,
+        keyword=keyword,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    order = {
+        "updated_desc": Ticket.updated_at.desc(),
+        "created_desc": Ticket.created_at.desc(),
+        "planned_asc": Ticket.planned_completion_at.asc().nulls_last(),
+    }[sort]
+    tickets = (await db.execute(query.order_by(order))).scalars().all()
+
+    def fmt(value: datetime | None) -> str:
+        return value.strftime("%Y-%m-%d %H:%M") if value else ""
+
+    columns = [
+        ("问题编号", lambda t: t.number or ""),
+        ("问题名称", lambda t: t.title or ""),
+        ("客户名称", lambda t: t.customer_name or ""),
+        ("产品线", lambda t: t.product_line or ""),
+        ("问题级别", lambda t: t.priority),
+        ("问题类型", lambda t: t.problem_type or ""),
+        ("发生时间", lambda t: fmt(t.occurred_at)),
+        ("当前阶段", lambda t: t.state),
+        ("当前责任角色", lambda t: responsible_role(t) or ""),
+        (
+            "当前责任人",
+            lambda t: _people(t).get(current_responsible_user_id(t) or -1, ""),
+        ),
+        ("分系统", lambda t: t.skill_group.name if t.skill_group else ""),
+        ("计划完成时间", lambda t: fmt(t.planned_completion_at)),
+        ("是否逾期", lambda t: "是" if compute_is_overdue(t) else "否"),
+        ("验证状态", lambda t: t.verification_status or ""),
+        ("缺陷ID", lambda t: t.defect_id or ""),
+        ("SVN路径", lambda t: t.defect_repository_path or ""),
+        ("创建人", lambda t: t.creator.name if t.creator else ""),
+        ("创建时间", lambda t: fmt(t.created_at)),
+        ("闭环时间", lambda t: fmt(t.closed_at)),
+    ]
+
+    output = io.StringIO()
+    output.write("\ufeff")
+    writer = csv.writer(output)
+    writer.writerow([c[0] for c in columns])
+    for t in tickets:
+        writer.writerow([c[1](t) for c in columns])
+    output.seek(0)
+
+    filename = f"poc_tickets_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue().encode("utf-8")]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# ── 详情 / 编辑 ────────────────────────────────────────────
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)
@@ -767,141 +680,43 @@ async def get_ticket(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get ticket detail."""
-    result = await db.execute(
-        select(Ticket)
-        .options(
-            selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-            selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group), selectinload(Ticket.urged_by),
+    ticket = await _load_detail(db, ticket_id)
+    if ticket.legacy_state is not None:
+        raise NotFoundError("问题", ticket_id)
+    ensure_can_view(ticket, user)
+    return _detail(ticket, user)
+
+
+def _editable_fields(ticket: Ticket, actor: User) -> set[str]:
+    """当前状态 + 当前人员允许 PATCH 的字段集合。"""
+    state = ticket.state
+    if state in TERMINAL_VALUES:
+        return set()
+    if actor.role == BusinessRole.ADMIN:
+        return (
+            set(CREATION_EDITABLE_FIELDS)
+            | set(PLAN_EDITABLE_FIELDS)
+            | set(ANALYSIS_EDITABLE_FIELDS)
         )
-        .where(Ticket.id == ticket_id)
-    )
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise NotFoundError("工单", ticket_id)
-    terminal_ops = await _get_terminal_operators(db, [ticket_id])
-    return _ticket_to_detail(ticket, terminal_ops)
-
-
-@router.post("/tickets", response_model=TicketCreateResponse, status_code=status.HTTP_201_CREATED)
-async def create_ticket(
-    body: TicketCreate,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
-):
-    """Create a new ticket."""
-    warnings = None
-
-    if body.is_draft:
-        # Draft: no number, no SLA, no duplicate check, relaxed validation
-        ticket = Ticket(
-            number=None, description=body.description,
-            priority=body.priority, channel=body.channel,
-            state="pending",
-            customer_type=body.customer_type, customer_name=body.customer_name,
-            customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
-            customer_company=body.customer_company,
-            customer_level=body.customer_level, device_sn=body.device_sn,
-            region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
-            group_id=body.group_id or user.group_id,
-            skill_group_id=body.skill_group_id, owner_id=None,
-            creator_id=user.id, first_owner_id=None,
-            dispatcher_id=body.dispatcher_id,
-            is_duplicate=body.is_duplicate,
-            duplicate_reason=body.duplicate_reason,
-            is_draft=True,
-        )
-    else:
-        # Formal ticket: generate number, SLA, duplicate check
-        # Generate ticket number: YYYYMMDD-XXXX (daily counter from 0001)
-        today = datetime.now().strftime("%Y%m%d")
-        max_q = (
-            select(func.max(Ticket.number))
-            .where(Ticket.number.like(f"{today}-%"))
-        )
-        max_number = (await db.execute(max_q)).scalar()
-        if max_number is None:
-            seq = 1
-        else:
-            seq = int(max_number.split("-")[-1]) + 1
-        number = f"{today}-{seq:04d}"
-
-        # Calculate SLA deadline
-        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id)
-
-        # Check duplicates
-        dup_result = await db.execute(
-            select(Ticket).where(
-                Ticket.customer_phone == body.customer_phone,
-                Ticket.state.in_(["pending", "open", "resolved", "on_hold"]),
-                Ticket.is_draft == False,
-            ).limit(5)
-        )
-        dup_tickets = dup_result.scalars().all()
-        if body.category_id:
-            dup_tickets = [t for t in dup_tickets if t.category_id == body.category_id]
-        if dup_tickets:
-            warnings = {
-                "duplicate_detected": True,
-                "duplicate_tickets": [
-                    {"id": t.id, "number": t.number, "state": t.state, "created_at": t.created_at.isoformat()}
-                    for t in dup_tickets
-                ],
-            }
-
-        # Dispatcher required for formal tickets
-        if not body.dispatcher_id:
-            raise HTTPException(422, detail="建单时必须指定部门对接人")
-
-        ticket = Ticket(
-            number=number, description=body.description,
-            priority=body.priority, channel=body.channel,
-            state="pending",
-            customer_type=body.customer_type, customer_name=body.customer_name,
-            customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
-            customer_company=body.customer_company,
-            customer_level=body.customer_level, device_sn=body.device_sn,
-            region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
-            group_id=body.group_id or user.group_id,
-            skill_group_id=body.skill_group_id, owner_id=None,
-            creator_id=user.id, first_owner_id=None,
-            dispatcher_id=body.dispatcher_id,
-            is_duplicate=body.is_duplicate,
-            duplicate_reason=body.duplicate_reason,
-            solution_deadline=solution_deadline,
-            is_draft=False,
-        )
-
-    db.add(ticket)
-    await db.flush()  # to get ticket.id
-
-    # 初始状态日志：仅正式工单记录（→ pending）
-    if not body.is_draft:
-        db.add(TicketStateLog(
-            ticket_id=ticket.id, from_state=None, to_state="pending",
-            operator_id=user.id,
-            **_snapshot_people(ticket, body),
-        ))
-
-    await db.refresh(ticket)
-
-    # 显式提交，确保工单在返回前已持久化，避免前端立即跳转详情时 404
-    await db.commit()
-
-    # Reload with relationships
-    result = await db.execute(
-        select(Ticket).options(
-            selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-            selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group),
-        ).where(Ticket.id == ticket.id)
-    )
-    ticket = result.scalar_one()
-
-    return TicketCreateResponse(data=_ticket_to_detail(ticket), warnings=warnings)
+    if state == TicketState.PENDING_APPROVAL.value and ticket.creator_id == actor.id:
+        return set(CREATION_EDITABLE_FIELDS)
+    if (
+        state == TicketState.RETURNED.value
+        and ticket.return_to_state == TicketState.PENDING_APPROVAL.value
+        and ticket.creator_id == actor.id
+    ):
+        return set(CREATION_EDITABLE_FIELDS)
+    if (
+        state == TicketState.PLANNING.value
+        and ticket.subsystem_owner_id == actor.id
+    ):
+        return set(PLAN_EDITABLE_FIELDS)
+    if (
+        state == TicketState.PROCESSING.value
+        and ticket.subsystem_owner_id == actor.id
+    ):
+        return set(ANALYSIS_EDITABLE_FIELDS)
+    return set()
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketDetail)
@@ -911,196 +726,64 @@ async def update_ticket(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Update ticket fields (state, priority, owner, etc.)."""
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise NotFoundError("工单", ticket_id)
+    """只修改当前节点允许编辑的业务字段，不承担任何状态流转。"""
+    ticket = await _get_ticket_or_404(db, ticket_id)
+    if ticket.legacy_state is not None:
+        raise NotFoundError("问题", ticket_id)
+    ensure_can_view(ticket, user)
 
-    now = datetime.now(timezone.utc)
+    if ticket.state in TERMINAL_VALUES:
+        raise HTTPException(400, detail="问题已处于终态，不能再修改")
 
-    # State transition
-    if body.state is not None and body.state != ticket.state:
-        # 业务约束：resolved → on_hold 自动改写为 resolved → open
-        # （前端按钮走的是 resolveReturnTarget 算出的目标，此处是兜底，
-        #  防非前端路径误发"把已处理工单退回暂缓"）
-        body = body.model_copy(update={"state": _enforce_business_constraints(ticket, body.state)})
-
-        validate_transition(ticket.state, body.state)
-
-        # 权限校验：不同操作限定不同角色
-        await check_transition_permission(db, ticket, body.state, user, body.owner_id)
-
-        from app.services.state_machine import requires_reason
-        if requires_reason(ticket.state, body.state) and not body.reason:
-            raise HTTPException(400, detail=f"从「{STATE_LABELS.get(ticket.state, ticket.state)}」变更为「{STATE_LABELS.get(body.state, body.state)}」需要填写原因")
-
-        old_state = ticket.state
-
-        # 先把"新状态"的人员字段调整到 ticket 上（owner/dsp 等），再写 state_log 取快照
-        # 注意：state-based 副作用和 body 字段都在这里应用，body 中显式提供的字段优先
-        if body.state == "open":
-            if old_state == "pending":
-                # 分派处理人：pending→open 时由对接人指定 owner_id
-                ticket.first_owner_id = ticket.owner_id or user.id
-            elif old_state == "returned":
-                # 已退回工单重新提交：保持无处理人，等待再次分派
-                ticket.returned_to_user_id = None
-        elif body.state == "pending":
-            # open→pending 退回 或 returned→pending 重新提交：待受理无处理人
-            if old_state in ("open", "returned"):
-                ticket.owner_id = None
-                ticket.returned_to_user_id = None
-        elif body.state == "on_hold":
-            # on_hold←open（暂缓）/ on_hold←resolved（退回）：处理人保持不变
-            # TODO(sla-policy): SLA 策略未定，暂不在进/出 on_hold 时调整 solution_deadline
-            pass
-        elif body.state == "resolved":
-            ticket.solved_at = now
-            ticket.resolved = True
-            if ticket.solution_deadline and now > ticket.solution_deadline:
-                ticket.sla_solution_breached = True
-        elif body.state == "returned":
-            # 仅 pending→returned：分配给创建工单的客服人员
-            if old_state == "pending":
-                ticket.returned_to_user_id = ticket.creator_id
-                ticket.owner_id = ticket.creator_id
-        elif body.state in ("archived", "cancelled"):
-            # 终态：记录结案时间
-            ticket.closed_at = now
-            if ticket.created_at:
-                ticket.closed_duration_minutes = int((now - ticket.created_at).total_seconds() / 60)
-
-        # 应用 body 中显式提供的人员/部门字段（覆盖上面的副作用）
-        if body.owner_id is not None:
-            ticket.owner_id = body.owner_id
-        if body.dispatcher_id is not None:
-            ticket.dispatcher_id = body.dispatcher_id
-
-        # 暂缓：存 hold_until
-        if body.state == "on_hold" and body.hold_until:
-            from datetime import datetime as dt
-            ticket.hold_until = dt.fromisoformat(body.hold_until).replace(tzinfo=timezone.utc)
-
-        # has_returned 跟随"最新一次动作"：本次转换属于 RETURN_TRANSITIONS 才置 true
-        ticket.has_returned = (old_state, body.state) in RETURN_TRANSITIONS
-        ticket.state = body.state
-
-        # Calculate duration in old state
-        last_log = await db.execute(
-            select(TicketStateLog)
-            .where(TicketStateLog.ticket_id == ticket_id)
-            .order_by(TicketStateLog.created_at.desc()).limit(1)
+    provided = {
+        key: value
+        for key, value in body.model_dump(exclude_unset=True).items()
+        if value is not None
+    }
+    editable = _editable_fields(ticket, user)
+    if not editable:
+        raise ForbiddenError("当前状态下你无权修改该问题")
+    illegal = sorted(set(provided) - editable)
+    if illegal:
+        raise HTTPException(
+            400, detail="当前节点不允许修改字段：" + "、".join(illegal)
         )
-        last = last_log.scalar_one_or_none()
-        duration = None
-        if last:
-            duration = int((now - last.created_at).total_seconds() / 60)
 
-        # Record state log（快照此时 ticket 已是"新状态"下的人员值）
-        log = TicketStateLog(
-            ticket_id=ticket.id, from_state=old_state, to_state=body.state,
-            operator_id=user.id, reason=body.reason, duration_minutes=duration,
-            **_snapshot_people(ticket, body),
-        )
-        db.add(log)
-        # 注：has_returned 已在写 state_log 处按 RETURN_TRANSITIONS 同步，此处不再覆盖
-    if body.archive_notes is not None:
-        ticket.archive_notes = body.archive_notes
-    if body.is_callbacked is not None:
-        ticket.is_callbacked = body.is_callbacked
-        # 未回访时清空满意度；避免历史脏数据
-        if body.is_callbacked is False:
-            ticket.satisfaction = None
-    if body.callback_required is not None:
-        ticket.callback_required = body.callback_required
-        if body.callback_required is False:
-            # 无需回访：强制已回访标记为否并清空满意度
-            ticket.is_callbacked = False
-            ticket.satisfaction = None
-    if body.satisfaction is not None:
-        # 校验：satisfaction 仅在 is_callbacked=true 时有意义
-        allowed = {"satisfied", "average", "dissatisfied", "unrated"}
-        if body.satisfaction not in allowed:
-            raise HTTPException(422, detail=f"satisfaction 取值必须是 {sorted(allowed)} 之一")
-        if ticket.is_callbacked is False:
-            raise HTTPException(422, detail="未回访工单不能设置满意度")
-        ticket.satisfaction = body.satisfaction
-    if body.priority is not None:
-        ticket.priority = body.priority
-        # Recalculate SLA deadline (creation → resolved)
-        if ticket.solved_at is None:
-            ticket.solution_deadline = await _calculate_sla_deadline(db, body.priority, ticket.skill_group_id)
-
-    if body.owner_id is not None:
-        ticket.owner_id = body.owner_id
-    if body.group_id is not None:
-        ticket.group_id = body.group_id
-    if body.skill_group_id is not None:
-        ticket.skill_group_id = body.skill_group_id
-    if body.dispatcher_id is not None:
-        ticket.dispatcher_id = body.dispatcher_id
-
-    await db.flush()
-
-    # Reload with relationships
-    result = await db.execute(
-        select(Ticket).options(
-            selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-            selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group),
-        ).where(Ticket.id == ticket.id)
-    )
-    ticket = result.scalar_one()
-    return _ticket_to_detail(ticket)
+    for field, value in provided.items():
+        if field in ("occurred_at", "planned_completion_at"):
+            value = _aware(value)
+        setattr(ticket, field, value)
+    ticket.updated_at = now_utc()
+    await db.commit()
+    return await _respond_detail(db, ticket_id, user)
 
 
-@router.post("/tickets/batch-update")
-async def batch_update_tickets(
-    body: TicketBatchUpdate,
+# ── 统一动作入口 ───────────────────────────────────────────
+
+
+@router.post("/tickets/{ticket_id}/actions", response_model=TicketDetail)
+async def execute_ticket_action(
+    ticket_id: int,
+    body: TicketActionRequest,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(get_current_user),
 ):
-    """Batch update tickets."""
-    result = await db.execute(
-        select(Ticket).where(Ticket.id.in_(body.ticket_ids))
+    """所有状态动作的唯一入口。成功返回完整 TicketDetail。"""
+    ticket = await _get_ticket_or_404(db, ticket_id, lock=True)
+    if ticket.legacy_state is not None:
+        raise NotFoundError("问题", ticket_id)
+    ensure_can_view(ticket, user)
+
+    await execute_action(
+        db,
+        ticket,
+        user,
+        body.action,
+        payload=body.payload,
+        comment=body.comment,
+        expected_version=body.expected_version,
     )
-    tickets = result.scalars().all()
-    updated = 0
-    for ticket in tickets:
-        # 先应用非 state 字段（owner/dsp/group/skill_group/priority），这样 state_log
-        # 写快照时 ticket 已携带新值
-        if body.updates.priority is not None:
-            ticket.priority = body.updates.priority
-        if body.updates.group_id is not None:
-            ticket.group_id = body.updates.group_id
-        if body.updates.skill_group_id is not None:
-            ticket.skill_group_id = body.updates.skill_group_id
-        if body.updates.owner_id is not None:
-            ticket.owner_id = body.updates.owner_id
-        if body.updates.dispatcher_id is not None:
-            ticket.dispatcher_id = body.updates.dispatcher_id
-        if body.updates.state is not None and body.updates.state != ticket.state:
-            # 业务约束：resolved → on_hold 改写为 resolved → open（与 update_ticket 一致）
-            to_state = _enforce_business_constraints(ticket, body.updates.state)
-            try:
-                validate_transition(ticket.state, to_state)
-                from_state = ticket.state
-                log = TicketStateLog(
-                    ticket_id=ticket.id, from_state=from_state, to_state=to_state,
-                    operator_id=user.id, reason=body.updates.reason,
-                    **_snapshot_people(ticket, body.updates),
-                )
-                db.add(log)
-                ticket.state = to_state
-                # has_returned 跟随"最新一次动作"同步
-                ticket.has_returned = (from_state, to_state) in RETURN_TRANSITIONS
-            except StateTransitionError:
-                continue  # skip invalid transitions
-        updated += 1
-    await db.flush()
-    return {"data": {"updated": updated}}
+    return await _respond_detail(db, ticket_id, user)
 
 
 @router.get("/tickets/{ticket_id}/state-logs")
@@ -1109,50 +792,9 @@ async def get_state_logs(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get ticket state transition logs."""
-    result = await db.execute(
-        select(TicketStateLog)
-        .where(TicketStateLog.ticket_id == ticket_id)
-        .order_by(TicketStateLog.created_at.asc())
-    )
-    logs = result.scalars().all()
-    if not logs:
-        return {"data": []}
-
-    # 一次拉出所有相关 user，避免 N+1
-    user_ids: set[int] = set()
-    for log in logs:
-        if log.operator_id:
-            user_ids.add(log.operator_id)
-        if log.creator_id_snapshot:
-            user_ids.add(log.creator_id_snapshot)
-        if log.dispatcher_id_snapshot:
-            user_ids.add(log.dispatcher_id_snapshot)
-        if log.owner_id_snapshot:
-            user_ids.add(log.owner_id_snapshot)
-
-    user_map: dict[int, str] = {}
-    if user_ids:
-        ures = await db.execute(select(User.id, User.name).where(User.id.in_(user_ids)))
-        user_map = {row[0]: row[1] for row in ures.all()}
-
-    def _name(uid):
-        return user_map.get(uid) if uid else None
-
-    data = []
-    for log in logs:
-        data.append({
-            "id": log.id, "from_state": log.from_state, "to_state": log.to_state,
-            "operator_id": log.operator_id,
-            "operator_name": _name(log.operator_id),
-            # 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人
-            "creator_id_snapshot": log.creator_id_snapshot,
-            "creator_name_snapshot": _name(log.creator_id_snapshot),
-            "dispatcher_id_snapshot": log.dispatcher_id_snapshot,
-            "dispatcher_name_snapshot": _name(log.dispatcher_id_snapshot),
-            "owner_id_snapshot": log.owner_id_snapshot,
-            "owner_name_snapshot": _name(log.owner_id_snapshot),
-            "reason": log.reason, "duration_minutes": log.duration_minutes,
-            "created_at": log.created_at.isoformat() if log.created_at else None,
-        })
-    return {"data": data}
+    """流程时间线。"""
+    ticket = await _load_detail(db, ticket_id)
+    if ticket.legacy_state is not None:
+        raise NotFoundError("问题", ticket_id)
+    ensure_can_view(ticket, user)
+    return {"data": [_log_out(log).model_dump() for log in (ticket.state_logs or [])]}

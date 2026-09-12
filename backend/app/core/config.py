@@ -36,11 +36,6 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
-    # SLA
-    SLA_WARNING_RATIO: float = 0.2  # 剩余时间 ≤20% 时预警
-    SLA_FIRST_RESPONSE_WARNING_MINUTES: int = 30  # 首次响应剩余30分钟发钉钉
-    SLA_SOLUTION_WARNING_MINUTES: int = 60  # 解决剩余60分钟发钉钉
-
     # DingTalk
     DINGTALK_APP_KEY: str = ""
     DINGTALK_APP_SECRET: str = ""
@@ -53,8 +48,8 @@ class Settings(BaseSettings):
     # Uploads / Attachments
     # 本地开发默认写到 backend/uploads；Docker 中通过 .env 覆盖为 /app/uploads
     UPLOAD_DIR: str = _DEFAULT_UPLOAD_DIR
-    PUBLIC_UPLOAD_URL: str = "/uploads"
-    UPLOAD_MAX_SIZE: int = 10 * 1024 * 1024  # 10 MB
+    #: 下载一律走鉴权接口 /api/v1/attachments/{id}/download，不对内公开存储目录
+    UPLOAD_MAX_SIZE: int = 20 * 1024 * 1024  # 20 MB
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 

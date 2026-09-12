@@ -8,13 +8,11 @@ from contextvars import ContextVar
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.core.config import settings
 from app.core.exceptions import AppException, app_exception_handler
 from app.core.logging_config import setup_logging, trace_id_var
-from app.services.sla_scanner import start_sla_scanner, stop_sla_scanner
 
 # Apply structured JSON logging before anything else logs.
 setup_logging(settings.LOG_LEVEL)
@@ -27,10 +25,8 @@ logger = logging.getLogger("skdy.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动/停止 SLA 扫描后台任务。"""
-    start_sla_scanner()
+    """应用生命周期。POC 流程不需要后台 SLA 扫描任务。"""
     yield
-    stop_sla_scanner()
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -97,22 +93,16 @@ app.add_middleware(
 # Exception handlers
 app.add_exception_handler(AppException, app_exception_handler)
 
-# Static files for uploaded attachments
-app.mount(settings.PUBLIC_UPLOAD_URL, StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
-
 
 # ── Routers ───────────────────────────────────────────────
-from app.api.v1 import auth, articles, tickets, common
+from app.api.v1 import attachments, auth, common, tickets
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(tickets.router, prefix="/api/v1")
-app.include_router(articles.router, prefix="/api/v1")
+app.include_router(attachments.router, prefix="/api/v1")
 app.include_router(common.users_router, prefix="/api/v1")
-app.include_router(common.groups_router, prefix="/api/v1")
 app.include_router(common.skill_groups_router, prefix="/api/v1")
-app.include_router(common.categories_router, prefix="/api/v1")
-app.include_router(common.regions_router, prefix="/api/v1")
-app.include_router(common.sla_router, prefix="/api/v1")
+app.include_router(common.meta_router, prefix="/api/v1")
 app.include_router(common.stats_router, prefix="/api/v1")
 
 

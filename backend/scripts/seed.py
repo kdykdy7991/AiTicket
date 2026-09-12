@@ -1,212 +1,109 @@
-"""Idempotent seed data for fresh deployments.
+"""POC 质量问题闭环：幂等种子数据。
 
-Run after `alembic upgrade head` to populate default regions and test users.
-Safe to run multiple times (uses ON CONFLICT DO NOTHING).
+在 `alembic upgrade head` 之后执行，写入：
+- 五个分系统（skill_groups）
+- 六个角色（含隐藏管理员）的联调账号
+- subsystem 用户与分系统的关联
+
+可重复执行：按 username / name 做 upsert，不会产生重复数据，也不会改动已有工单。
 """
 
 import asyncio
 import os
-from datetime import datetime, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://skdy:skdy123@localhost:5433/skdy_ticket")
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL", "postgresql+asyncpg://skdy:skdy123@localhost:5433/skdy_ticket"
+)
 
 engine = create_async_engine(DATABASE_URL, future=True)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 REGIONS = [
     # 一级：省/直辖市
-    (110000, None, '北京市', 1, '110000', 1),
-    (120000, None, '天津市', 1, '120000', 2),
-    (310000, None, '上海市', 1, '310000', 3),
-    (440000, None, '广东省', 1, '440000', 4),
-    (320000, None, '江苏省', 1, '320000', 5),
-    (330000, None, '浙江省', 1, '330000', 6),
+    (110000, None, "北京市", 1, "110000", 1),
+    (120000, None, "天津市", 1, "120000", 2),
+    (310000, None, "上海市", 1, "310000", 3),
+    (440000, None, "广东省", 1, "440000", 4),
+    (320000, None, "江苏省", 1, "320000", 5),
+    (330000, None, "浙江省", 1, "330000", 6),
     # 二级：市
-    (110100, 110000, '北京市', 2, '110100', 1),
-    (120100, 120000, '天津市', 2, '120100', 2),
-    (310100, 310000, '上海市', 2, '310100', 3),
-    (440100, 440000, '广州市', 2, '440100', 4),
-    (440300, 440000, '深圳市', 2, '440300', 5),
-    (320100, 320000, '南京市', 2, '320100', 6),
-    (320500, 320000, '苏州市', 2, '320500', 7),
-    (330100, 330000, '杭州市', 2, '330100', 8),
-    (330200, 330000, '宁波市', 2, '330200', 9),
-    # 三级：区县
-    (110105, 110100, '朝阳区', 3, '110105', 1),
-    (110108, 110100, '海淀区', 3, '110108', 2),
-    (110101, 110100, '东城区', 3, '110101', 3),
-    (120101, 120100, '和平区', 3, '120101', 4),
-    (310104, 310100, '徐汇区', 3, '310104', 5),
-    (310115, 310100, '浦东新区', 3, '310115', 6),
-    (440106, 440100, '天河区', 3, '440106', 7),
-    (440105, 440100, '海珠区', 3, '440105', 8),
-    (440305, 440300, '南山区', 3, '440305', 9),
-    (440304, 440300, '福田区', 3, '440304', 10),
-    (320102, 320100, '玄武区', 3, '320102', 11),
-    (320505, 320500, '虎丘区', 3, '320505', 12),
-    (330102, 330100, '上城区', 3, '330102', 13),
-    (330106, 330100, '西湖区', 3, '330106', 14),
-    (330203, 330200, '海曙区', 3, '330203', 15),
+    (110100, 110000, "北京市", 2, "110100", 1),
+    (310100, 310000, "上海市", 2, "310100", 3),
+    (440100, 440000, "广州市", 2, "440100", 4),
+    (440300, 440000, "深圳市", 2, "440300", 5),
+    (320100, 320000, "南京市", 2, "320100", 6),
+    (330100, 330000, "杭州市", 2, "330100", 8),
 ]
 
-GROUPS = [
-    (1, '默认组'),
-]
+# 默认组（用户归属，不参与 POC 业务流转）
+GROUPS = [(1, "默认组")]
 
+# 五个分系统（前端展示为“分系统”）
 SKILL_GROUPS = [
-    (1, '品牌公关传播'),
-    (2, '市场生态部'),
-    (3, '产品中心'),
-    (4, '网运部'),
-    (5, '售后'),
-    (6, '客服组'),
-    (7, '星座营销中心'),
-    (8, '星空智联行销部'),
+    "系统总体",
+    "卫星平台",
+    "终端系统",
+    "应用平台",
+    "测运控平台",
 ]
 
-# 默认密码：admin 为 admin123，其余为 skdy123
-_ADMIN_HASH = '$2b$12$Oxx10M2ohHR2zd3ekD5WLOll.icytUsKAjpzeoeTu3ZaYvpq0aRKW'
-_SKDY_HASH = '$2b$12$PlEUsC1JRHiZVoUdSUj4y.H/kzyqXWQ4jwfOkMMM3o2sb8.Bcnl/O'
+# 默认密码：admin 为 admin123，其余业务账号为 skdy123
+_ADMIN_HASH = "$2b$12$Oxx10M2ohHR2zd3ekD5WLOll.icytUsKAjpzeoeTu3ZaYvpq0aRKW"
+_SKDY_HASH = "$2b$12$PlEUsC1JRHiZVoUdSUj4y.H/kzyqXWQ4jwfOkMMM3o2sb8.Bcnl/O"
 
+# (username, name, role, skill_group_name | None)
 USERS = [
-    (1, 'admin', '系统管理员', 'admin', 1, False, _ADMIN_HASH),
-    # 对接人
-    (10, 'zhongmengxi', '钟梦茜', 'handler', 1, False, _SKDY_HASH),
-    (11, 'xiezhipeng', '谢志鹏', 'handler', 1, False, _SKDY_HASH),
-    (12, 'zhangzhaojuan', '张朝娟', 'handler', 1, False, _SKDY_HASH),
-    (13, 'lianlu', '练露', 'handler', 1, False, _SKDY_HASH),
-    (14, 'zhanghua', '张华', 'handler', 1, False, _SKDY_HASH),
-    (15, 'qiuwenwei', '丘文伟', 'handler', 1, False, _SKDY_HASH),
-    # 处理人
-    (17, 'jinxin', '金鑫', 'handler', 1, False, _SKDY_HASH),
-    (18, 'dingxian', '丁晛', 'handler', 1, False, _SKDY_HASH),
-    (19, 'zhangjingxi', '张景熙', 'handler', 1, False, _SKDY_HASH),
-    (20, 'xuting', '徐挺', 'handler', 1, False, _SKDY_HASH),
-    (21, 'wangyan', '王颜', 'handler', 1, False, _SKDY_HASH),
-    (22, 'jiangchaoyi', '蒋超毅', 'handler', 1, False, _SKDY_HASH),
-    (23, 'jinjun', '金军', 'handler', 1, False, _SKDY_HASH),
-    (24, 'jiangweiye', '姜伟业', 'handler', 1, False, _SKDY_HASH),
-    (25, 'chenwenbing', '陈文兵', 'handler', 1, False, _SKDY_HASH),
-    # 对接人（V0.7 新增）
-    (26, 'wangyaozong', '王耀宗', 'handler', 1, False, _SKDY_HASH),
-    (31, 'wangjunhua', '汪军华', 'handler', 1, False, _SKDY_HASH),
-    (35, 'yangbing', '杨冰', 'handler', 1, False, _SKDY_HASH),
-    (37, 'caoxin', '曹欣', 'handler', 1, False, _SKDY_HASH),
-    # 处理人（V0.7 新增）
-    (27, 'zhengkaixin', '郑恺心', 'handler', 1, False, _SKDY_HASH),
-    (28, 'chengwei', '程伟', 'handler', 1, False, _SKDY_HASH),
-    (29, 'dongming', '董明', 'handler', 1, False, _SKDY_HASH),
-    (30, 'qiaoyongliang', '乔永亮', 'handler', 1, False, _SKDY_HASH),
-    (32, 'zhangguanghan', '张广瀚', 'handler', 1, False, _SKDY_HASH),
-    (33, 'wuxiaohan', '吴小涵', 'handler', 1, False, _SKDY_HASH),
-    (34, 'qiaoxingda', '乔兴达', 'handler', 1, False, _SKDY_HASH),
-    (36, 'louhaoli', '楼豪丽', 'handler', 1, False, _SKDY_HASH),
+    ("admin", "系统管理员", "admin", None),
+    ("presales01", "售前-张伟", "presales", None),
+    ("presales02", "售前-李娜", "presales", None),
+    ("approver01", "邱总", "approver", None),
+    ("taskforce01", "陈毅君", "taskforce", None),
+    ("subsystem01", "邓雪群", "subsystem", "系统总体"),
+    ("subsystem02", "卢翔", "subsystem", "卫星平台"),
+    ("subsystem03", "余华伟", "subsystem", "终端系统"),
+    ("subsystem04", "邱庆举", "subsystem", "应用平台"),
+    ("subsystem05", "倪汉华", "subsystem", "测运控平台"),
+    ("quality01", "金凯", "quality", None),
+    ("quality02", "马祥艺", "quality", None),
+    ("quality03", "巫雪峰", "quality", None),
 ]
 
-# (user_id, skill_group_id, is_dispatcher)
-USER_SKILL_GROUPS = [
-    # 对接人
-    (10, 1, True),   # 钟梦茜 -> 品牌公关传播
-    (11, 2, True),   # 谢志鹏 -> 市场生态部
-    (12, 3, True),   # 张朝娟 -> 产品中心
-    (13, 4, True),   # 练露 -> 网运部
-    (14, 5, True),   # 张华 -> 售后
-    (15, 4, True),   # 丘文伟 -> 网运部
-    (26, 6, True),   # 王耀宗 -> 客服组
-    (31, 7, True),   # 汪军华 -> 星座营销中心
-    (37, 8, True),   # 曹欣 -> 星空智联行销部
-    # 处理人
-    (17, 1, False),  # 金鑫 -> 品牌公关传播
-    (18, 1, False),  # 丁晛 -> 品牌公关传播
-    (19, 1, False),  # 张景熙 -> 品牌公关传播
-    (27, 1, False),  # 郑恺心 -> 品牌公关传播
-    (20, 2, False),  # 徐挺 -> 市场生态部
-    (21, 2, False),  # 王颜 -> 市场生态部
-    (22, 3, False),  # 蒋超毅 -> 产品中心
-    (28, 3, False),  # 程伟 -> 产品中心
-    (29, 3, False),  # 董明 -> 产品中心
-    (23, 4, False),  # 金军 -> 网运部
-    (24, 5, False),  # 姜伟业 -> 售后
-    (25, 5, False),  # 陈文兵 -> 售后
-    (32, 7, False),  # 张广瀚 -> 星座营销中心
-    (33, 7, False),  # 吴小涵 -> 星座营销中心
-    (34, 7, False),  # 乔兴达 -> 星座营销中心
-]
 
-CATEGORIES = [
-    # 一级分类 (id, parent_id, name, level, sort_order)
-    (1, None, '咨询类', 1, 1),
-    (2, None, '业务类', 1, 2),
-    (3, None, '故障类', 1, 3),
-    (4, None, '投诉类', 1, 4),
-    (5, None, '其他', 1, 5),
-    (6, None, '错号', 1, 6),
-    (7, None, '广告推销', 1, 7),
-    # 二级分类：咨询类
-    (101, 1, '品牌咨询', 2, 1),
-    (102, 1, '渠道/代理规则咨询', 2, 2),
-    (103, 1, '资费套餐（定义和类型）', 2, 3),
-    (104, 1, '产品&参数咨询', 2, 4),
-    (105, 1, '操作使用咨询', 2, 5),
-    (106, 1, '其他', 2, 6),
-    # 二级分类：业务类
-    (201, 2, '渠道/代理合同&合作洽谈', 2, 1),
-    (202, 2, '业务办理', 2, 2),
-    (203, 2, '发票办理', 2, 3),
-    (204, 2, '账单&缴费异议', 2, 4),
-    (205, 2, '资费异议', 2, 5),
-    (206, 2, '其他', 2, 6),
-    # 二级分类：故障类
-    (301, 3, '终端硬件故障', 2, 1),
-    (302, 3, 'SIM卡故障', 2, 2),
-    (303, 3, '外设&配套故障', 2, 3),
-    (304, 3, '数据传输故障', 2, 4),
-    (305, 3, '网络&星座链路故障', 2, 5),
-    (306, 3, '平台故障', 2, 6),
-    (307, 3, '其他', 2, 7),
-    # 二级分类：投诉类
-    (401, 4, '服务态度投诉', 2, 1),
-    (402, 4, '服务时效投诉', 2, 2),
-    (403, 4, '服务质量', 2, 3),
-    (404, 4, '综合意见&建议投诉', 2, 4),
-    (405, 4, '群体性&应急投诉', 2, 5),
-    (406, 4, '履约投诉', 2, 6),
-    (407, 4, '其他', 2, 7),
-    # 二级分类：其他
-    (501, 5, '其他', 2, 1),
-    (502, 5, '北斗终端', 2, 2),
-    (503, 5, '车载', 2, 3),
-    (504, 5, '海外业务', 2, 4),
-    (505, 5, '卫星业务', 2, 5),
-]
+async def _resync_sequences(db: AsyncSession) -> None:
+    """把自增序列对齐到当前最大 id。
+
+    老库里的数据是用显式 id 插入的，序列可能落后，导致新插入主键冲突。
+    """
+    for table in ("regions", "groups", "skill_groups", "users", "ticket_categories"):
+        await db.execute(
+            text(
+                f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), "
+                f"COALESCE((SELECT MAX(id) FROM {table}), 1))"
+            )
+        )
 
 
 async def seed() -> None:
-    now = datetime.now(timezone.utc)
     async with async_session() as db:
-        # 只在 users 表为空时灌入数据，避免重复执行
-        result = await db.execute(select(text("1")).select_from(text("users")).limit(1))
-        if result.scalar_one_or_none() is not None:
-            print("Seed skipped: users table already populated.")
-            return
+        # 先对齐序列，避免显式 id 历史数据导致新插入主键冲突
+        await _resync_sequences(db)
 
         print("Seeding regions...")
         await db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO regions (id, parent_id, name, level, code, sort_order, is_active, created_at, updated_at)
-                VALUES (:id, :parent_id, :name, :level, :code, :sort_order, :is_active, :created_at, :updated_at)
+                VALUES (:id, :parent_id, :name, :level, :code, :sort_order, true, now(), now())
                 ON CONFLICT (id) DO NOTHING
-            """),
+                """
+            ),
             [
                 {
                     "id": r[0], "parent_id": r[1], "name": r[2],
                     "level": r[3], "code": r[4], "sort_order": r[5],
-                    "is_active": True,
-                    "created_at": now,
-                    "updated_at": now,
                 }
                 for r in REGIONS
             ],
@@ -214,99 +111,85 @@ async def seed() -> None:
 
         print("Seeding groups...")
         await db.execute(
-            text("""
+            text(
+                """
                 INSERT INTO groups (id, name, created_at, updated_at)
-                VALUES (:id, :name, :created_at, :updated_at)
+                VALUES (:id, :name, now(), now())
                 ON CONFLICT (id) DO NOTHING
-            """),
-            [
-                {
-                    "id": g[0], "name": g[1],
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for g in GROUPS
-            ],
+                """
+            ),
+            [{"id": g[0], "name": g[1]} for g in GROUPS],
         )
 
-        print("Seeding skill_groups...")
+        print("Seeding skill groups (分系统)...")
         await db.execute(
-            text("""
-                INSERT INTO skill_groups (id, name, created_at, updated_at)
-                VALUES (:id, :name, :created_at, :updated_at)
-                ON CONFLICT (id) DO NOTHING
-            """),
-            [
-                {
-                    "id": sg[0], "name": sg[1],
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for sg in SKILL_GROUPS
-            ],
+            text(
+                """
+                INSERT INTO skill_groups (name, created_at, updated_at)
+                VALUES (:name, now(), now())
+                ON CONFLICT (name) DO NOTHING
+                """
+            ),
+            [{"name": name} for name in SKILL_GROUPS],
         )
 
-        print("Seeding users...")
-        await db.execute(
-            text("""
-                INSERT INTO users (id, username, name, role, group_id, is_group_leader, password_hash, is_active, created_at, updated_at)
-                VALUES (:id, :username, :name, :role, :group_id, :is_group_leader, :password_hash, :is_active, :created_at, :updated_at)
-                ON CONFLICT (id) DO NOTHING
-            """),
-            [
-                {
-                    "id": u[0], "username": u[1], "name": u[2], "role": u[3],
-                    "group_id": u[4], "is_group_leader": u[5], "password_hash": u[6],
-                    "is_active": True,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for u in USERS
-            ],
-        )
-
-        print("Seeding user_skill_groups...")
-        await db.execute(
-            text("""
-                INSERT INTO user_skill_groups (user_id, skill_group_id, is_dispatcher)
-                VALUES (:user_id, :skill_group_id, :is_dispatcher)
-                ON CONFLICT DO NOTHING
-            """),
-            [
-                {"user_id": usg[0], "skill_group_id": usg[1], "is_dispatcher": usg[2]}
-                for usg in USER_SKILL_GROUPS
-            ],
-        )
-
-        print("Seeding categories...")
-        await db.execute(
-            text("""
-                INSERT INTO ticket_categories (id, parent_id, name, level, sort_order, is_active, created_at, updated_at)
-                VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active, :created_at, :updated_at)
-                ON CONFLICT (id) DO NOTHING
-            """),
-            [
-                {
-                    "id": c[0], "parent_id": c[1], "name": c[2],
-                    "level": c[3], "sort_order": c[4],
-                    "is_active": True,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-                for c in CATEGORIES
-            ],
-        )
-
-        # 显式 id 插入后必须重置序列，否则后续自增会冲突
-        for table in ["regions", "groups", "skill_groups", "users", "ticket_categories"]:
+        print("Upserting POC users...")
+        for username, name, role, _sg in USERS:
+            password_hash = _ADMIN_HASH if username == "admin" else _SKDY_HASH
             await db.execute(
-                text(f"""
-                    SELECT setval('{table}_id_seq', COALESCE((SELECT MAX(id) FROM {table}), 1))
-                """)
+                text(
+                    """
+                    INSERT INTO users
+                        (username, name, role, group_id, is_group_leader, password_hash,
+                         is_active, token_version, created_at, updated_at)
+                    VALUES
+                        (:username, :name, :role, 1, false, :password_hash, true, 0, now(), now())
+                    ON CONFLICT (username) DO UPDATE
+                       SET name = EXCLUDED.name,
+                           role = EXCLUDED.role,
+                           password_hash = EXCLUDED.password_hash,
+                           is_active = true,
+                           updated_at = now()
+                    """
+                ),
+                {
+                    "username": username,
+                    "name": name,
+                    "role": role,
+                    "password_hash": password_hash,
+                },
             )
 
+        print("Upserting subsystem memberships...")
+        for username, _name, role, skill_group in USERS:
+            if role != "subsystem" or not skill_group:
+                continue
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO user_skill_groups (user_id, skill_group_id, is_dispatcher)
+                    SELECT u.id, s.id, false
+                      FROM users u, skill_groups s
+                     WHERE u.username = :username AND s.name = :skill_group
+                    ON CONFLICT DO NOTHING
+                    """
+                ),
+                {"username": username, "skill_group": skill_group},
+            )
+
+        # 插入后再次对齐序列
+        await _resync_sequences(db)
+
         await db.commit()
-        print("Seed completed.")
+
+        rows = (
+            await db.execute(
+                text("SELECT username, name, role FROM users ORDER BY id")
+            )
+        ).all()
+        print("Seed completed. Accounts:")
+        for username, name, role in rows:
+            print(f"  - {username:14s} {name:8s} {role}")
 
 
 if __name__ == "__main__":

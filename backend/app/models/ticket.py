@@ -1,191 +1,191 @@
-"""Ticket, Article, TicketStateLog, Reminder models."""
+"""POC 工单、附件、流程日志模型。
+
+本模块只保留 POC 质量问题闭环需要的字段。
+旧客服工单列（channel / customer_phone / owner_id / dispatcher_id / callback_* /
+satisfaction / sla_* 等）仍在数据库中，但已从 ORM 移除，属于 migration-only 历史列，
+任何业务代码都不得再读写。
+"""
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    func,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
 
 class Ticket(Base):
+    """POC 质量问题工单。"""
+
     __tablename__ = "tickets"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     number: Mapped[str | None] = mapped_column(String(20), unique=True)
-    title: Mapped[str | None] = mapped_column(String(500), default="工单")
-    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-
-    # 状态与优先级
-    state: Mapped[str] = mapped_column(String(30), nullable=False, default="pending")
-    priority: Mapped[str] = mapped_column(String(20), nullable=False, default="p4_enterprise")
-    channel: Mapped[str] = mapped_column(String(20), nullable=False, default="phone")
-
-    # 客户信息
-    customer_type: Mapped[str] = mapped_column(String(20), nullable=False, default="personal")
-    customer_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    customer_phone: Mapped[str] = mapped_column(String(20), nullable=False)
-    customer_phone_type: Mapped[str | None] = mapped_column(String(20), nullable=True)  # 来电号码类型: mobile / landline
-    contact_phone: Mapped[str | None] = mapped_column(String(20))
-    customer_company: Mapped[str | None] = mapped_column(String(200))
-    customer_level: Mapped[str | None] = mapped_column(String(20), default="normal")
-    device_sn: Mapped[str | None] = mapped_column(String(100))
-    region_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("regions.id", ondelete="SET NULL"))
-    region_name: Mapped[str | None] = mapped_column(String(200))
-    symptom: Mapped[str | None] = mapped_column(Text)
-
-    # 分类与归属
-    category_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("ticket_categories.id", ondelete="SET NULL"))
-    group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("groups.id", ondelete="SET NULL"))
-    skill_group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("skill_groups.id", ondelete="SET NULL"))
-    owner_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
-    creator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    first_owner_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
-    dispatcher_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))  # 部门对接人
-
-    # 重复/升级
     is_draft: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    is_duplicate: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    is_escalated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    duplicate_reason: Mapped[str | None] = mapped_column(Text)
-    linked_ticket_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("tickets.id", ondelete="SET NULL"))
 
-    # SLA
-    first_response_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    solution_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    first_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    solved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    sla_first_response_breached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    sla_solution_breached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # ── 创建阶段字段 ──────────────────────────────────────
+    title: Mapped[str | None] = mapped_column(String(500))
+    product_line: Mapped[str | None] = mapped_column(String(100))
+    customer_name: Mapped[str | None] = mapped_column(String(100))
+    problem_type: Mapped[str | None] = mapped_column(String(100))
+    closure_requirement: Mapped[str | None] = mapped_column(Text)
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, default="p2_normal")
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    location: Mapped[str | None] = mapped_column(String(300))
+    longitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    latitude: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    device_info: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    approver_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    creator_department: Mapped[str | None] = mapped_column(String(100))
 
-    # 暂缓
-    hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 暂缓到的时间（选填）
+    # ── 后续阶段字段 ──────────────────────────────────────
+    confirmation_comment: Mapped[str | None] = mapped_column(Text)
+    subsystem_owner_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
+    acceptance_comment: Mapped[str | None] = mapped_column(Text)
+    temporary_measure: Mapped[str | None] = mapped_column(Text)
+    long_term_measure: Mapped[str | None] = mapped_column(Text)
+    planned_completion_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    plan_confirmation_comment: Mapped[str | None] = mapped_column(Text)
+    initial_investigation: Mapped[str | None] = mapped_column(Text)
+    root_cause: Mapped[str | None] = mapped_column(Text)
+    analysis_report: Mapped[str | None] = mapped_column(Text)
+    actual_completion_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verification_status: Mapped[str | None] = mapped_column(String(30))
+    verification_conclusion: Mapped[str | None] = mapped_column(Text)
+    quality_review_result: Mapped[str | None] = mapped_column(Text)
+    defect_id: Mapped[str | None] = mapped_column(String(100))
+    defect_repository_path: Mapped[str | None] = mapped_column(String(1000))
+    defect_registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    defect_registered_by_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
 
-    # 结案
+    # ── 流程控制 ──────────────────────────────────────────
+    state: Mapped[str] = mapped_column(String(30), nullable=False)
+    state_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    return_to_state: Mapped[str | None] = mapped_column(String(40))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    closed_duration_minutes: Mapped[int | None] = mapped_column(Integer)
 
-    # 解决信息
-    resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    resolution: Mapped[str | None] = mapped_column(Text)
+    # ── 归属 ──────────────────────────────────────────────
+    skill_group_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("skill_groups.id", ondelete="SET NULL")
+    )
+    creator_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
 
-    # 退回：记录应退回给哪位处理人（pending/open 退回给 dispatcher，resolved 退回给 owner）
-    returned_to_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    #: migration-only：非空表示这是迁移前的旧客服工单，业务代码必须过滤掉
+    legacy_state: Mapped[str | None] = mapped_column(String(30))
 
-    # 回访 / 归档
-    callback_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    callback_details: Mapped[str | None] = mapped_column(Text)
-    archive_notes: Mapped[str | None] = mapped_column(Text)
-    is_callbacked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-    # 催办
-    urged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    urged_by_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
-
-    # 追加信息
-    has_addition: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-    # 退回历史标记
-    has_returned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-    # 回访满意度：仅当 is_callbacked=true 时填写
-    # 值：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，未回访时为 null
-    satisfaction: Mapped[str | None] = mapped_column(String(20), nullable=True)
-
-    # 时间戳
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now()
+    )
 
     # relationships
-    articles = relationship("Article", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
-    state_logs = relationship("TicketStateLog", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
-    reminders = relationship("Reminder", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
-    owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
     creator = relationship("User", foreign_keys=[creator_id], lazy="selectin")
-    dispatcher = relationship("User", foreign_keys=[dispatcher_id], lazy="selectin")
-    first_owner = relationship("User", foreign_keys=[first_owner_id], lazy="selectin")
-    returned_to_user = relationship("User", foreign_keys=[returned_to_user_id], lazy="selectin")
-    urged_by = relationship("User", foreign_keys=[urged_by_id], lazy="selectin")
-    category = relationship("TicketCategory", lazy="selectin")
-    group = relationship("Group", lazy="selectin")
+    approver = relationship("User", foreign_keys=[approver_id], lazy="selectin")
+    subsystem_owner = relationship("User", foreign_keys=[subsystem_owner_id], lazy="selectin")
+    defect_registered_by = relationship(
+        "User", foreign_keys=[defect_registered_by_id], lazy="selectin"
+    )
     skill_group = relationship("SkillGroup", lazy="selectin")
-
-
-class Article(Base):
-    __tablename__ = "articles"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ticket_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
-    type: Mapped[str] = mapped_column(String(20), nullable=False, default="reply")
-    sender_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    subject: Mapped[str | None] = mapped_column(String(500))
-    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    state_key: Mapped[str | None] = mapped_column(String(30))
-    append_reason: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
-
-    ticket = relationship("Ticket", back_populates="articles")
-    sender = relationship("User", lazy="selectin")
-    attachments = relationship(
-        "ArticleAttachment",
-        back_populates="article",
-        lazy="selectin",
+    state_logs = relationship(
+        "TicketStateLog",
+        back_populates="ticket",
+        lazy="noload",
         cascade="all, delete-orphan",
+        order_by="TicketStateLog.id",
+    )
+    attachments = relationship(
+        "TicketAttachment",
+        back_populates="ticket",
+        lazy="noload",
+        cascade="all, delete-orphan",
+        order_by="TicketAttachment.id",
     )
 
 
-class ArticleAttachment(Base):
+class TicketAttachment(Base):
+    """POC 工单附件（复用 article_attachments 表，表内 article_id 为 migration-only 历史列）。"""
+
     __tablename__ = "article_attachments"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    article_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("articles.id", ondelete="CASCADE"), nullable=False
+    # 注：表中的 article_id 是旧客服沟通记录列，已从 ORM 移除（migration-only），
+    # POC 附件一律挂 ticket_id。
+    ticket_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE")
     )
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     original_filename: Mapped[str] = mapped_column(String(500), nullable=False)
     content_type: Mapped[str] = mapped_column(String(100), nullable=False)
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    stage: Mapped[str | None] = mapped_column(String(40))
+    uploader_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=func.now()
     )
 
-    article = relationship("Article", back_populates="attachments")
+    ticket = relationship("Ticket", back_populates="attachments")
+    uploader = relationship("User", lazy="selectin")
 
 
 class TicketStateLog(Base):
+    """不可变流程日志：记录谁在什么时候把工单从哪个状态推到哪个状态。"""
+
     __tablename__ = "ticket_state_logs"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ticket_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
+    ticket_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False
+    )
     from_state: Mapped[str | None] = mapped_column(String(30))
     to_state: Mapped[str] = mapped_column(String(30), nullable=False)
-    operator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    operator_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    action: Mapped[str | None] = mapped_column(String(40))
+    comment: Mapped[str | None] = mapped_column(Text)
     reason: Mapped[str | None] = mapped_column(Text)
+    payload_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+    state_version: Mapped[int | None] = mapped_column(Integer)
+    responsible_role_snapshot: Mapped[str | None] = mapped_column(String(20))
+    responsible_user_id_snapshot: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL")
+    )
     duration_minutes: Mapped[int | None] = mapped_column(Integer)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
-    # 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人。
-    # 旧数据回填时是 best-effort（tickets 当前值），新建的 state_log 由 _snapshot_people() 正确填充。
-    creator_id_snapshot: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
-    dispatcher_id_snapshot: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
-    owner_id_snapshot: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=func.now()
+    )
 
+    # migration-only 旧快照列：保留在数据库，ORM 不再使用
     ticket = relationship("Ticket", back_populates="state_logs")
     operator = relationship("User", foreign_keys=[operator_id], lazy="selectin")
-    creator_snapshot = relationship("User", foreign_keys=[creator_id_snapshot], lazy="selectin")
-    dispatcher_snapshot = relationship("User", foreign_keys=[dispatcher_id_snapshot], lazy="selectin")
-    owner_snapshot = relationship("User", foreign_keys=[owner_id_snapshot], lazy="selectin")
-
-
-class Reminder(Base):
-    __tablename__ = "reminders"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ticket_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
-    sender_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
-
-    ticket = relationship("Ticket", back_populates="reminders")
-    sender = relationship("User", lazy="selectin")
+    responsible_user_snapshot = relationship(
+        "User", foreign_keys=[responsible_user_id_snapshot], lazy="selectin"
+    )

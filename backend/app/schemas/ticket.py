@@ -1,136 +1,221 @@
-"""Pydantic schemas for tickets."""
+"""Pydantic schemas for POC tickets.
+
+枚举与字段严格遵循 docs/poc/00_poc_workflow_development_contract.md。
+请求模型一律 `extra="forbid"`：旧客服字段（customer_phone / dispatcher_id /
+satisfaction / callback_* 等）会被直接拒绝为 422。
+"""
 
 from datetime import datetime
+from decimal import Decimal
+from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.domain.poc_workflow import Priority, TicketAction
+
+#: 正式提交时必须填写的创建阶段字段（草稿不受限）
+CREATE_REQUIRED_FIELDS: tuple[str, ...] = (
+    "title",
+    "product_line",
+    "customer_name",
+    "priority",
+    "problem_type",
+    "closure_requirement",
+    "occurred_at",
+    "location",
+    "device_info",
+    "description",
+    "approver_id",
+)
 
 
-class TicketCreate(BaseModel):
-    description: str = Field(default="", max_length=10000)
-    priority: str = Field(default="p4_enterprise")
-    channel: str = Field(default="phone")
-    customer_type: str = Field(default="personal")
-    customer_name: str | None = Field(default=None, max_length=100)
-    customer_phone: str = Field(..., min_length=1, max_length=20)
-    customer_phone_type: str | None = Field(default=None, max_length=20)  # 来电号码类型: mobile / landline
-    contact_phone: str | None = None
-    customer_company: str | None = None
-    customer_level: str | None = "normal"
-    device_sn: str | None = None
-    region_id: int | None = None
-    region_name: str | None = None
-    category_id: int | None = None
-    group_id: int | None = None
-    skill_group_id: int | None = None
-    dispatcher_id: int | None = None  # 部门对接人（正式提交必填）
-    is_duplicate: bool = False
-    duplicate_reason: str | None = None
+class PocRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class TicketCreate(PocRequest):
+    """新建或保存草稿。草稿允许字段为空，正式提交由服务端校验必填。"""
+
     is_draft: bool = False
+    title: str | None = Field(default=None, max_length=500)
+    product_line: str | None = Field(default=None, max_length=100)
+    customer_name: str | None = Field(default=None, max_length=100)
+    priority: Priority = Priority.P2_NORMAL
+    problem_type: str | None = Field(default=None, max_length=100)
+    closure_requirement: str | None = None
+    occurred_at: datetime | None = None
+    location: str | None = Field(default=None, max_length=300)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    device_info: str | None = None
+    description: str | None = None
+    approver_id: int | None = None
 
 
-class TicketUpdate(BaseModel):
-    state: str | None = None
-    priority: str | None = None
-    owner_id: int | None = None
-    group_id: int | None = None
-    skill_group_id: int | None = None
-    dispatcher_id: int | None = None
-    reason: str | None = None  # for state transitions requiring a reason
-    hold_until: str | None = None  # 暂缓到的时间（ISO date），暂缓时填写
-    callback_details: str | None = None  # 回访详情
-    archive_notes: str | None = None  # 归档备注
-    is_callbacked: bool | None = None  # 是否已回访
-    callback_required: bool | None = None  # 是否需要回访（false=无需回访）
-    satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，仅当 is_callbacked=true 时填写
+#: 创建阶段可编辑字段（PATCH）
+CREATION_EDITABLE_FIELDS: tuple[str, ...] = (
+    "title",
+    "product_line",
+    "customer_name",
+    "priority",
+    "problem_type",
+    "closure_requirement",
+    "occurred_at",
+    "location",
+    "longitude",
+    "latitude",
+    "device_info",
+    "description",
+)
+
+#: 闭环计划节点可编辑字段
+PLAN_EDITABLE_FIELDS: tuple[str, ...] = (
+    "temporary_measure",
+    "long_term_measure",
+    "planned_completion_at",
+)
+
+#: 分析验证节点可编辑字段
+ANALYSIS_EDITABLE_FIELDS: tuple[str, ...] = (
+    "initial_investigation",
+    "root_cause",
+    "analysis_report",
+)
 
 
-class TicketBatchUpdate(BaseModel):
-    ticket_ids: list[int] = Field(..., min_length=1, max_length=100)
-    updates: TicketUpdate
+class TicketUpdate(PocRequest):
+    """只允许修改当前节点规定字段。
+
+    显式不提供 state / skill_group_id / subsystem_owner_id / approver_id，
+    这些字段只能通过 `POST /tickets/{id}/actions` 变更。
+    """
+
+    title: str | None = Field(default=None, max_length=500)
+    product_line: str | None = Field(default=None, max_length=100)
+    customer_name: str | None = Field(default=None, max_length=100)
+    priority: Priority | None = None
+    problem_type: str | None = Field(default=None, max_length=100)
+    closure_requirement: str | None = None
+    occurred_at: datetime | None = None
+    location: str | None = Field(default=None, max_length=300)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    device_info: str | None = None
+    description: str | None = None
+
+    temporary_measure: str | None = None
+    long_term_measure: str | None = None
+    planned_completion_at: datetime | None = None
+
+    initial_investigation: str | None = None
+    root_cause: str | None = None
+    analysis_report: str | None = None
 
 
-class TicketCancel(BaseModel):
-    reason: str | None = None
+class TicketActionRequest(PocRequest):
+    """统一动作请求体。"""
+
+    action: TicketAction
+    comment: str | None = Field(default=None, max_length=4000)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    expected_version: int = Field(..., ge=1, description="详情返回的 state_version")
+
+
+class TicketAttachmentOut(BaseModel):
+    id: int
+    ticket_id: int | None = None
+    original_filename: str
+    content_type: str
+    size: int
+    stage: str | None = None
+    uploader_id: int | None = None
+    uploader_name: str | None = None
+    download_url: str
+    created_at: datetime
+
+
+class TicketStateLogOut(BaseModel):
+    id: int
+    action: str | None = None
+    from_state: str | None = None
+    to_state: str
+    operator_id: int | None = None
+    operator_name: str | None = None
+    operator_role: str | None = None
+    comment: str | None = None
+    payload: dict[str, Any] | None = None
+    responsible_role_snapshot: str | None = None
+    responsible_user_id_snapshot: int | None = None
+    responsible_user_name_snapshot: str | None = None
+    state_version: int | None = None
+    created_at: datetime
 
 
 class TicketBrief(BaseModel):
     id: int
     number: str | None = None
-    state: str
-    priority: str
-    channel: str
-    customer_type: str
+    title: str | None = None
+    product_line: str | None = None
     customer_name: str | None = None
-    customer_phone: str
-    customer_phone_type: str | None = None
-    contact_phone: str | None = None
+    priority: str
+    problem_type: str | None = None
+    state: str
+    state_version: int
+    is_draft: bool = False
+    return_to_state: str | None = None
+
+    current_responsible_role: str | None = None
+    current_responsible_user_id: int | None = None
+    current_responsible_user_name: str | None = None
+
+    creator_id: int | None = None
+    creator_name: str | None = None
+    creator_department: str | None = None
+    approver_id: int | None = None
+    approver_name: str | None = None
     skill_group_id: int | None = None
     skill_group_name: str | None = None
-    owner_id: int | None = None
-    owner_name: str | None = None
-    dispatcher_id: int | None = None
-    dispatcher_name: str | None = None
-    category_id: int | None = None
-    category_name: str | None = None
-    category_l1_id: int | None = None
-    category_l1_name: str | None = None
-    category_l2_id: int | None = None
-    category_l2_name: str | None = None
-    region_name: str | None = None
-    is_duplicate: bool = False
-    is_draft: bool = False
-    is_callbacked: bool = False
-    sla_solution_breached: bool = False
-    solution_deadline: datetime | None = None
-    urged_at: datetime | None = None
-    urged_by_id: int | None = None
-    urged_by_name: str | None = None
-    has_addition: bool = False
-    has_returned: bool = False
-    # 终态操作人：哪个用户执行了 resolved→archived 或 *→cancelled 流转
-    # 从 state_logs 查询得到，不落库到 tickets 表（避免与 state_log 漂移）
-    archived_by_id: int | None = None
-    archived_by_name: str | None = None
-    cancelled_by_id: int | None = None
-    cancelled_by_name: str | None = None
+    subsystem_owner_id: int | None = None
+    subsystem_owner_name: str | None = None
+
+    planned_completion_at: datetime | None = None
+    actual_completion_at: datetime | None = None
+    is_overdue: bool = False
+    verification_status: str | None = None
+    defect_id: str | None = None
+
     created_at: datetime
     updated_at: datetime
 
-    model_config = {"from_attributes": True}
-
 
 class TicketDetail(TicketBrief):
-    description: str
-    customer_company: str | None = None
-    customer_level: str | None = None
-    device_sn: str | None = None
-    region_id: int | None = None
-    region_name: str | None = None
-    symptom: str | None = None
-    creator_id: int | None = None
-    creator_name: str | None = None
-    first_owner_id: int | None = None
-    first_owner_name: str | None = None
-    is_escalated: bool = False
-    duplicate_reason: str | None = None
-    linked_ticket_id: int | None = None
-    solved_at: datetime | None = None
-    hold_until: datetime | None = None
-    closed_at: datetime | None = None
-    closed_duration_minutes: int | None = None
-    resolved: bool = False
-    resolution: str | None = None
-    group_id: int | None = None
-    group_name: str | None = None
-    returned_to_user_id: int | None = None
-    returned_to_user_name: str | None = None
-    callback_required: bool = True
-    callback_details: str | None = None
-    archive_notes: str | None = None
-    satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'
-    is_callbacked: bool = False
+    closure_requirement: str | None = None
+    occurred_at: datetime | None = None
+    location: str | None = None
+    longitude: float | None = None
+    latitude: float | None = None
+    device_info: str | None = None
+    description: str | None = None
 
-    model_config = {"from_attributes": True}
+    confirmation_comment: str | None = None
+    acceptance_comment: str | None = None
+    temporary_measure: str | None = None
+    long_term_measure: str | None = None
+    plan_confirmation_comment: str | None = None
+    initial_investigation: str | None = None
+    root_cause: str | None = None
+    analysis_report: str | None = None
+    verification_conclusion: str | None = None
+    quality_review_result: str | None = None
+    defect_repository_path: str | None = None
+    defect_registered_at: datetime | None = None
+    defect_registered_by_id: int | None = None
+    defect_registered_by_name: str | None = None
+    closed_at: datetime | None = None
+
+    allowed_actions: list[str] = Field(default_factory=list)
+    attachments: list[TicketAttachmentOut] = Field(default_factory=list)
+    state_logs: list[TicketStateLogOut] = Field(default_factory=list)
 
 
 class PaginatedTickets(BaseModel):
@@ -140,9 +225,27 @@ class PaginatedTickets(BaseModel):
 
 class DuplicateWarning(BaseModel):
     duplicate_detected: bool = False
-    duplicate_tickets: list[dict] = []
+    duplicate_tickets: list[dict] = Field(default_factory=list)
 
 
 class TicketCreateResponse(BaseModel):
     data: TicketDetail
     warnings: DuplicateWarning | None = None
+
+
+class DraftSubmitRequest(PocRequest):
+    """草稿正式提交。允许提交时补齐创建阶段字段。"""
+
+    title: str | None = Field(default=None, max_length=500)
+    product_line: str | None = Field(default=None, max_length=100)
+    customer_name: str | None = Field(default=None, max_length=100)
+    priority: Priority | None = None
+    problem_type: str | None = Field(default=None, max_length=100)
+    closure_requirement: str | None = None
+    occurred_at: datetime | None = None
+    location: str | None = Field(default=None, max_length=300)
+    longitude: Decimal | None = Field(default=None, ge=-180, le=180)
+    latitude: Decimal | None = Field(default=None, ge=-90, le=90)
+    device_info: str | None = None
+    description: str | None = None
+    approver_id: int | None = None
