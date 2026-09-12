@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.poc_workflow import Priority, TicketAction
+from app.domain.poc_workflow import CREATION_FIELDS, Priority, TicketAction
 
 #: 正式提交时必须填写的创建阶段字段（草稿不受限）
 CREATE_REQUIRED_FIELDS: tuple[str, ...] = (
@@ -58,23 +58,8 @@ class TicketCreate(PocRequest):
     approver_id: int | None = None
 
 
-#: 创建阶段可编辑字段（PATCH）
-CREATION_EDITABLE_FIELDS: tuple[str, ...] = (
-    "title",
-    "proposer",
-    "proposer_department",
-    "product_line",
-    "customer_name",
-    "priority",
-    "problem_type",
-    "closure_requirement",
-    "occurred_at",
-    "location",
-    "longitude",
-    "latitude",
-    "device_info",
-    "description",
-)
+#: 创建阶段可编辑字段（PATCH）；退回售前重新提交时同样只接受这些字段
+CREATION_EDITABLE_FIELDS: tuple[str, ...] = CREATION_FIELDS
 
 #: 闭环计划节点可编辑字段
 PLAN_EDITABLE_FIELDS: tuple[str, ...] = (

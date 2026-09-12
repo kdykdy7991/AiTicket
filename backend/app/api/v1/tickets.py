@@ -55,6 +55,7 @@ from app.services.poc_workflow import (
     now_utc,
     responsible_role,
     responsible_user_id as current_responsible_user_id,
+    state_label,
     ticket_scope,
     verify_approver,
 )
@@ -639,7 +640,7 @@ async def export_tickets(
         ("问题级别", lambda t: t.priority),
         ("问题类型", lambda t: t.problem_type or ""),
         ("发生时间", lambda t: fmt(t.occurred_at)),
-        ("当前阶段", lambda t: t.state),
+        ("当前阶段", lambda t: state_label(t.state)),
         ("当前责任角色", lambda t: responsible_role(t) or ""),
         (
             "当前责任人",

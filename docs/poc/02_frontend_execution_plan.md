@@ -250,6 +250,7 @@ components/poc/actions/DefectRegistrationForm.vue
 | `pass_review` | 验证状态、验证结论、质量评审结果 |
 | `approve_closure` | 复核意见可选；「批准闭环」按钮；驳回需填原因（退回质量评审） |
 | `return` | 退回原因必填，目标由当前节点固定决定；在 `pending_routing` 上按钮文案为「驳回」 |
+| `returned` 态 | 按 `return_to_state` 显示对应节点的表单（创建字段 / 闭环计划 / 分析验证 / 评审结论），按钮文案「修订并…」，打开时用工单当前值预填 |
 | `resubmit` | 展示被退回原因，修改后重新提交 |
 | `cancel` | 撤销原因必填 |
 

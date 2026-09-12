@@ -91,14 +91,26 @@
 ### 3.2 退回和撤销
 
 - 审批人可以执行 `reject`，填写原因后进入 `returned`，`return_to_state=pending_approval`，由创建人修改后重新提交。
-- 专项小组、售前、质量可以执行 `return`，必须填写原因，并明确 `return_to_state`。
+- 专项小组、售前、质量、批准人可以执行 `return`，必须填写原因，并明确 `return_to_state`。
   - 专项小组在 `pending_routing` 判定不通过时即执行 `return`（界面文案「驳回」）。
+  - 批准人在 `pending_final_approval` 复核不通过时即执行 `return`（界面文案「驳回」）。
 - 第一阶段限定退回目标：
   - 待确认流转驳回 → `pending_approval`
   - 计划确认退回 → `planning`
   - 质量评审退回 → `processing`
-  - 批准人复核驳回 → `pending_quality_review`（界面文案「驳回」）
-- `returned` 只是动作展示状态；创建人或对应责任人重新提交后进入 `return_to_state`。
+  - 批准人复核驳回 → `pending_quality_review`
+- **退回后一步修订**：`returned` 状态下只放行与 `return_to_state` 匹配的处置动作，
+  由该节点的责任人在同一次提交里修订字段并回到流程，不需要先“重新提交”再执行节点动作；
+  界面文案统一为「修订并…」。
+
+  | 退回目标 | 责任人 | 退回态动作 | 可修订字段 | 结果状态 |
+  | --- | --- | --- | --- | --- |
+  | `pending_approval` | 创建人（`presales`） | `resubmit` | 创建阶段字段 | `pending_approval` |
+  | `planning` | 该分系统负责人 | `submit_plan` | 闭环计划字段 | `pending_plan_confirmation` |
+  | `processing` | 该分系统负责人 | `submit_analysis` | 分析验证字段 | `pending_quality_review` |
+  | `pending_quality_review` | `quality` | `pass_review` | 评审字段 | `pending_final_approval` |
+
+- 携带与当前退回目标无关的字段一律 `422`；`returned` 只是动作展示状态。
 - 创建人可在 `pending_approval` 或 `returned` 执行 `cancel`；管理员可兜底撤销未闭环问题。
 - `closed`、`cancelled` 为终态。
 
@@ -270,6 +282,7 @@
 | 2026-09-12 | 建立 POC 契约（单角色） | 初版 |
 | 2026-09-12 | 创建阶段新增必填字段 `proposer`（提出人）、`proposer_department`（提出部门） | 售前改用公用账号后需手填真实提出人与部门；列表/详情/导出与「POC 问题反馈表」一致。 |
 | 2026-09-12 | 「普通用户只能拥有一个业务角色」→ 支持一人多角色 | `users.role` 单值列改为 `user_roles` 关联表；人员/登录/时间线接口的 `role` 改为 `roles: string[]`；数据范围与 `allowed_actions` 按角色并集计算；`GET /users?role=x` 语义改为「拥有该角色」。前后端同时改造。 |
+| 2026-09-12 | 退回后改为「一步修订」 | `returned` 状态下按 `return_to_state` 放行对应节点的动作（`resubmit` / `submit_plan` / `submit_analysis` / `pass_review`），责任人可在同一次提交里修订字段并回到流程；此前必须先 `resubmit` 再执行节点动作，且退回态没有任何可改内容。 |
 | 2026-09-12 | 删除「待缺陷入库」节点，质量评审后新增「待批准人复核」 | 删除状态 `pending_defect_registration` 与动作 `register_defect`：缺陷入库在 SVN 侧完成，不作为工单系统内的流转节点，工单也不再记录缺陷 ID / SVN 路径（数据库列一并删除）。`pass_review` 目标改为 `pending_final_approval`；新增 `approve_closure`（批准闭环，角色 `approver`、人员范围为该问题的 `approver_id`），批准即 `closed`；批准人可执行 `return` 驳回并退回 `pending_quality_review`。 |
 | 2026-09-12 | 「待问题确认 / 待流转 / 待分系统接收」三步合并为一步 | 删除状态 `pending_confirmation`、`pending_acceptance` 与动作 `confirm_problem`、`accept`；`approve` 目标改为 `pending_routing`（展示名「待确认流转」）；专项小组用 `route` 一次完成确认与流转，目标改为 `planning`，可选填 `confirmation_comment`；专项小组不通过时执行 `return`（界面显示「驳回」）回 `pending_approval`；`acceptance_comment` 不再产生。主流程由 10 步变为 8 步。 |
 | 2026-09-12 | `taskforce` 数据范围由「全部未闭环问题」收紧为「批准人批准之后的未闭环问题」 | 待审批阶段问题归售前与批准人，专项小组不再可见（列表、详情、附件、导出、统计一致生效）；`pending_routing` 起可见。被批准人驳回退回售前（`returned` + 退回目标 `pending_approval`）的问题同样不可见。 |

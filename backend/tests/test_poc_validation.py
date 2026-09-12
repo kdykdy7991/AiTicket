@@ -227,15 +227,12 @@ async def test_final_approval_reject_returns_to_quality_review(api):
     assert detail["return_to_state"] == "pending_quality_review"
     assert detail["current_responsible_role"] == "quality"
 
-    # 质量重新提交后回到评审节点，再次评审通过则回到批准人复核
+    # 退回态直接修订评审结论并重新提交（不需要先「重新提交」再「通过质量评审」）
     api.as_("quality01")
-    resent = await api.acted(ticket_id, "resubmit", comment="已补充验证证据")
-    assert resent["state"] == "pending_quality_review"
-
     back = await api.acted(
         ticket_id,
         "pass_review",
-        comment="补充证据后确认通过",
+        comment="已补充验证证据",
         payload={
             "verification_status": "resolved",
             "verification_conclusion": "补充证据后确认已解决",
@@ -243,6 +240,7 @@ async def test_final_approval_reject_returns_to_quality_review(api):
         },
     )
     assert back["state"] == "pending_final_approval"
+    assert back["verification_conclusion"] == "补充证据后确认已解决"
 
     # 批准人复核通过 → 闭环
     api.as_("approver01")
@@ -290,16 +288,39 @@ async def test_reject_then_resubmit_returns_to_pending_approval(api):
     assert detail["current_responsible_user_id"] == creator_id
 
     api.as_("presales01")
-    assert "resubmit" in (await api.detail(ticket_id))["allowed_actions"]
-    patched = await api.c.patch(
-        f"/api/v1/tickets/{ticket_id}", json={"description": "补充后的现象描述"}
-    )
-    assert patched.status_code == 200, patched.text
+    returned = await api.detail(ticket_id)
+    # 退回售前时可以就地修订创建阶段字段（不需要先 PATCH 再重新提交）
+    assert returned["allowed_actions"] == ["resubmit", "cancel"]
 
-    detail = await api.acted(ticket_id, "resubmit")
+    detail = await api.acted(
+        ticket_id,
+        "resubmit",
+        comment="已补充现象描述与复现步骤",
+        payload={
+            "description": "补充后的现象描述与复现步骤",
+            "proposer": "李四",
+            "priority": "p1_critical",
+        },
+    )
     assert detail["state"] == "pending_approval"
     assert detail["return_to_state"] is None
+    assert detail["description"] == "补充后的现象描述与复现步骤"
+    assert detail["proposer"] == "李四"
+    assert detail["priority"] == "p1_critical"
 
+    # 重新提交时不允许携带与退回目标无关的字段（失败不影响工单状态）
+    api.as_("approver01")
+    await api.action(ticket_id, "reject", comment="仍然不够")
+    api.as_("presales01")
+    await api.action(
+        ticket_id,
+        "resubmit",
+        payload={"long_term_measure": "越权字段"},
+        expect=422,
+    )
+    assert (await api.detail(ticket_id))["state"] == "returned"
+
+    await api.action(ticket_id, "resubmit", comment="这次补全了")
     api.as_("approver01")
     detail = await api.acted(ticket_id, "approve", comment="补充完整，同意")
     assert detail["state"] == "pending_routing"
@@ -350,9 +371,10 @@ async def test_return_path_plan_confirmation_to_planning(api):
     assert detail["current_responsible_role"] == "subsystem"
     assert detail["current_responsible_user_id"] == api.uid("subsystem01")
 
+    # 退回态直接修订并提交闭环计划（不需要先「重新提交」再提交计划）
     api.as_("subsystem01")
-    detail = await api.acted(ticket_id, "resubmit")
-    assert detail["state"] == "planning"
+    returned = await api.detail(ticket_id)
+    assert returned["allowed_actions"] == ["submit_plan"]
 
     detail = await api.acted(
         ticket_id,
@@ -378,9 +400,10 @@ async def test_return_path_quality_review_to_processing(api):
     assert detail["current_responsible_role"] == "subsystem"
     assert detail["current_responsible_user_id"] == api.uid("subsystem01")
 
+    # 退回态直接修订并提交分析验证
     api.as_("subsystem01")
-    detail = await api.acted(ticket_id, "resubmit")
-    assert detail["state"] == "processing"
+    returned = await api.detail(ticket_id)
+    assert returned["allowed_actions"] == ["submit_analysis"]
 
     detail = await api.acted(
         ticket_id,

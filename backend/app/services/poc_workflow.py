@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from fastapi import HTTPException
@@ -20,6 +21,7 @@ from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from app.domain.poc_workflow import (
     ACTION_ORDER,
     ACTION_RULES,
+    CREATION_FIELDS,
     ActionRule,
     ActorScope,
     BusinessRole,
@@ -33,6 +35,7 @@ from app.domain.poc_workflow import (
     is_terminal,
     responsible_role_for,
     responsible_user_field_for,
+    state_label,
     taskforce_visible,
 )
 from app.models.ticket import Ticket
@@ -183,6 +186,15 @@ def _return_target_matches(ticket: Any, actor: Any) -> bool:
     return False
 
 
+def _return_target_allows(rule: ActionRule, ticket: Any) -> bool:
+    """退回态按节点处置：动作必须与当前 return_to_state 匹配。"""
+    if not rule.only_when_return_target:
+        return True
+    if ticket.state != TicketState.RETURNED.value:
+        return False
+    return ticket.return_to_state in {t.value for t in rule.only_when_return_target}
+
+
 def _scope_matches(rule: ActionRule, ticket: Any, actor: Any) -> bool:
     if rule.scope is ActorScope.ROLE:
         return True
@@ -199,6 +211,8 @@ def _scope_matches(rule: ActionRule, ticket: Any, actor: Any) -> bool:
 
 def _rule_permits(rule: ActionRule, ticket: Any, actor: Any) -> bool:
     """多角色：拥有动作要求的任一角色 + 满足人员范围即可。"""
+    if not _return_target_allows(rule, ticket):
+        return False
     if actor_has_role(actor, BusinessRole.ADMIN):
         return True  # 管理员兜底
     if not (actor_roles(actor) & {r.value for r in rule.roles}):
@@ -405,6 +419,11 @@ async def execute_action(
             roles=frozenset({BusinessRole.ADMIN}),
             comment_required=True,
         )
+    elif not _return_target_allows(rule, ticket):
+        target = state_label(ticket.return_to_state)
+        raise HTTPException(
+            400, detail=f"当前退回目标为「{target}」，不能执行动作 {action.value}"
+        )
 
     # 4/5. 角色与人员范围（多角色：任一角色满足即可）
     if not actor_has_role(actor, BusinessRole.ADMIN):
@@ -473,6 +492,7 @@ async def execute_action(
         # 先进入 returned 展示状态，退回目标写入 return_to_state
         return_target = _resolve_return_target(ticket, rule, payload)
     elif action is TicketAction.RESUBMIT:
+        _apply_creation_fields(ticket, payload)
         target_state = _resubmit_target(ticket)
     elif action is TicketAction.CANCEL:
         target_state = TicketState.CANCELLED
@@ -549,6 +569,36 @@ async def execute_action(
     return ticket
 
 
+def _apply_creation_fields(ticket: Any, payload: dict) -> None:
+    """退回售前重新提交时，同一次请求里写入修订后的创建阶段字段。"""
+    for field in CREATION_FIELDS:
+        if field not in payload:
+            continue
+        value = payload[field]
+        if field == "priority":
+            try:
+                value = Priority(value).value
+            except ValueError:
+                raise HTTPException(
+                    422,
+                    detail="priority 取值必须是 "
+                    + "/".join(p.value for p in Priority),
+                )
+        elif field == "occurred_at":
+            value = _parse_datetime(value, "occurred_at")
+        elif field in ("longitude", "latitude"):
+            if value is None:
+                setattr(ticket, field, None)
+                continue
+            try:
+                value = Decimal(str(value))
+            except (InvalidOperation, ValueError):
+                raise HTTPException(422, detail=f"{field} 必须是数字")
+        elif value is not None:
+            value = str(value).strip() or None
+        setattr(ticket, field, value)
+
+
 def _resubmit_target(ticket: Any) -> TicketState:
     if not _has_text(ticket.return_to_state):
         raise HTTPException(400, detail="工单缺少 return_to_state，无法重新提交")
@@ -556,12 +606,7 @@ def _resubmit_target(ticket: Any) -> TicketState:
         target = TicketState(ticket.return_to_state)
     except ValueError:
         raise HTTPException(400, detail="return_to_state 取值非法")
-    allowed = {
-        TicketState.PENDING_APPROVAL,
-        TicketState.PENDING_QUALITY_REVIEW,
-        TicketState.PLANNING,
-        TicketState.PROCESSING,
-    }
+    allowed = {TicketState.PENDING_APPROVAL}
     if target not in allowed:
         raise HTTPException(400, detail=f"不允许重新提交到 {target.value}")
     return target

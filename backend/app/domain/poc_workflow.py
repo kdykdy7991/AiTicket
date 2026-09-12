@@ -81,6 +81,20 @@ TERMINAL_STATES: frozenset[TicketState] = frozenset(
     {TicketState.CLOSED, TicketState.CANCELLED}
 )
 
+#: 状态展示名称（契约 §3 表格同源）
+STATE_LABELS: dict[TicketState, str] = {
+    TicketState.PENDING_APPROVAL: "待审批",
+    TicketState.PENDING_ROUTING: "待确认流转",
+    TicketState.PLANNING: "闭环计划制定中",
+    TicketState.PENDING_PLAN_CONFIRMATION: "待计划确认",
+    TicketState.PROCESSING: "分析验证中",
+    TicketState.PENDING_QUALITY_REVIEW: "待质量评审",
+    TicketState.PENDING_FINAL_APPROVAL: "待批准人复核",
+    TicketState.CLOSED: "已闭环",
+    TicketState.RETURNED: "已退回",
+    TicketState.CANCELLED: "已撤销",
+}
+
 #: 已闭环/已撤销之外的状态集合，用于“未闭环”查询与逾期判断
 OPEN_STATES: frozenset[TicketState] = frozenset(STATE_ORDER) - TERMINAL_STATES
 
@@ -122,6 +136,43 @@ class VerificationStatus(StrEnum):
 
 VERIFICATION_STATUS_VALUES: frozenset[str] = frozenset(
     v.value for v in VerificationStatus
+)
+
+
+# ── 字段分组（PATCH / 动作 payload 共用）───────────────────
+
+#: 创建阶段可编辑字段（PATCH 与退回后重新提交共用）
+CREATION_FIELDS: tuple[str, ...] = (
+    "title",
+    "proposer",
+    "proposer_department",
+    "product_line",
+    "customer_name",
+    "priority",
+    "problem_type",
+    "closure_requirement",
+    "occurred_at",
+    "location",
+    "longitude",
+    "latitude",
+    "device_info",
+    "description",
+)
+
+#: 退回售前重新提交时仍必须非空的业务必填字段（approver_id 不允许改）
+CREATE_REQUIRED_BUSINESS_FIELDS: tuple[str, ...] = (
+    "title",
+    "proposer",
+    "proposer_department",
+    "product_line",
+    "customer_name",
+    "priority",
+    "problem_type",
+    "closure_requirement",
+    "occurred_at",
+    "location",
+    "device_info",
+    "description",
 )
 
 
@@ -205,6 +256,9 @@ class ActionRule:
     return_targets: frozenset[TicketState] = frozenset()
     #: 退回后固定写入的目标（reject 固定回 pending_approval）
     fixed_return_to: TicketState | None = None
+    #: 该动作仅在工单处于 returned 且 return_to_state 命中此集合时可用
+    #: （退回后由对应责任人一步完成修订与流转）
+    only_when_return_target: frozenset[TicketState] = frozenset()
 
 
 _R = ActionRule
@@ -304,13 +358,50 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         payload_fields=("return_to_state",),
         return_targets=frozenset({TicketState.PENDING_QUALITY_REVIEW}),
     ),
-    # 退回后重新提交：目标由 return_to_state 决定
+    # 退回后处置：对应责任人在退回节点上一步完成「修订 + 流转」
+    # 退回到售前（创建阶段）时售前携带创建字段重新提交，回到待审批
     (TicketState.RETURNED, TicketAction.RESUBMIT): _R(
-        target_state=None,
-        roles=frozenset(
-            {BusinessRole.PRESALES, BusinessRole.SUBSYSTEM, BusinessRole.QUALITY}
-        ),
+        target_state=TicketState.PENDING_APPROVAL,
+        roles=frozenset({BusinessRole.PRESALES}),
         scope=ActorScope.RETURN_TARGET,
+        required_fields=CREATE_REQUIRED_BUSINESS_FIELDS,
+        payload_fields=CREATION_FIELDS,
+        only_when_return_target=frozenset({TicketState.PENDING_APPROVAL}),
+    ),
+    # 退回到闭环计划：分系统负责人直接修订并提交闭环计划
+    (TicketState.RETURNED, TicketAction.SUBMIT_PLAN): _R(
+        target_state=TicketState.PENDING_PLAN_CONFIRMATION,
+        roles=frozenset({BusinessRole.SUBSYSTEM}),
+        scope=ActorScope.RETURN_TARGET,
+        required_fields=("long_term_measure", "planned_completion_at"),
+        payload_fields=("temporary_measure", "long_term_measure", "planned_completion_at"),
+        only_when_return_target=frozenset({TicketState.PLANNING}),
+    ),
+    # 退回到分析验证：分系统负责人直接修订并提交分析验证
+    (TicketState.RETURNED, TicketAction.SUBMIT_ANALYSIS): _R(
+        target_state=TicketState.PENDING_QUALITY_REVIEW,
+        roles=frozenset({BusinessRole.SUBSYSTEM}),
+        scope=ActorScope.RETURN_TARGET,
+        required_fields=("initial_investigation", "root_cause", "analysis_report"),
+        payload_fields=("initial_investigation", "root_cause", "analysis_report"),
+        only_when_return_target=frozenset({TicketState.PROCESSING}),
+    ),
+    # 退回到质量评审：质量直接修订评审结论并重新提交
+    (TicketState.RETURNED, TicketAction.PASS_REVIEW): _R(
+        target_state=TicketState.PENDING_FINAL_APPROVAL,
+        roles=frozenset({BusinessRole.QUALITY}),
+        scope=ActorScope.RETURN_TARGET,
+        required_fields=(
+            "verification_status",
+            "verification_conclusion",
+            "quality_review_result",
+        ),
+        payload_fields=(
+            "verification_status",
+            "verification_conclusion",
+            "quality_review_result",
+        ),
+        only_when_return_target=frozenset({TicketState.PENDING_QUALITY_REVIEW}),
     ),
     # 撤销
     (TicketState.PENDING_APPROVAL, TicketAction.CANCEL): _R(
@@ -334,13 +425,7 @@ for _state in STATE_ORDER:
     for (_frm, _act), _rule in ACTION_RULES.items():
         if _frm is _state and _rule.target_state is not None:
             _targets.add(_rule.target_state)
-    if _state is TicketState.RETURNED:
-        _targets |= {
-            TicketState.PENDING_APPROVAL,
-            TicketState.PENDING_QUALITY_REVIEW,
-            TicketState.PLANNING,
-            TicketState.PROCESSING,
-        }
+    # returned 的退回目标由各自责任的处置动作覆盖（见上方 returned 规则）
     TRANSITIONS[_state] = frozenset(_targets)
 
 #: 动作 -> 业务必填字段（供文档/测试遍历）
@@ -383,6 +468,16 @@ RESPONSIBLE_USER_FIELD_BY_STATE: dict[TicketState, str | None] = {
     TicketState.PENDING_PLAN_CONFIRMATION: "creator_id",
     TicketState.PROCESSING: "subsystem_owner_id",
 }
+
+
+def state_label(state: TicketState | str | None) -> str:
+    """状态展示名称；未知/空值原样返回。"""
+    if state is None:
+        return ""
+    try:
+        return STATE_LABELS[_as_state(state)]
+    except ValueError:
+        return str(state)
 
 
 def is_terminal(state: TicketState | str) -> bool:
