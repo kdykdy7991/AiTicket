@@ -11,7 +11,7 @@
         </svg>
       </div>
       <Transition name="fade">
-        <span v-show="!collapsed" class="logo-text">Skdy Ticket</span>
+        <span v-show="!collapsed" class="logo-text">POC 问题闭环</span>
       </Transition>
     </div>
 
@@ -80,28 +80,24 @@ const uiStore = useUIStore()
 
 const collapsed = computed(() => uiStore.sidebarCollapsed)
 
-const iconDashboard = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'
 const iconReport = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 5-5"/></svg>'
 const iconTickets = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"/><polyline points="14,3 14,8 21,8"/></svg>'
 const iconNew = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
 const iconDraft = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>'
 const iconUsers = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
 const iconGroup = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
-const iconTrigger = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg>'
-const iconSLA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>'
-const iconMail = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,7 12,13 2,7"/></svg>'
-const iconCategory = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>'
 
 const mainMenu = computed(() => {
   const items = [
-    { path: '/tickets', label: '工单', icon: iconTickets },
+    { path: '/tickets', label: 'POC 问题', icon: iconTickets },
   ]
-  // 统计报表 / 我的草稿 / 新建工单仅客服和管理员可见
-  if (authStore.isAgent) {
+  if (authStore.canViewReport) {
+    items.push({ path: '/report', label: '质量跟踪', icon: iconReport })
+  }
+  if (authStore.canCreateTicket) {
     items.push(
-      { path: '/report', label: '统计报表', icon: iconReport },
       { path: '/tickets/drafts', label: '我的草稿', icon: iconDraft },
-      { path: '/tickets/new', label: '新建工单', icon: iconNew },
+      { path: '/tickets/new', label: '新建 POC 问题', icon: iconNew },
     )
   }
   return items
@@ -109,11 +105,7 @@ const mainMenu = computed(() => {
 
 const adminMenu = [
   { path: '/admin/users', label: '用户管理', icon: iconUsers },
-  { path: '/admin/groups', label: '组管理', icon: iconGroup },
-  { path: '/admin/categories', label: '问题分类', icon: iconCategory },
-  { path: '/admin/triggers', label: '触发器', icon: iconTrigger },
-  { path: '/admin/sla', label: 'SLA 策略', icon: iconSLA },
-  { path: '/admin/channels', label: '邮件渠道', icon: iconMail },
+  { path: '/admin/groups', label: '分系统管理', icon: iconGroup },
 ]
 
 function isActive(path: string): boolean {

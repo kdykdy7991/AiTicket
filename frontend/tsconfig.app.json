@@ -15,5 +15,12 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"],
+  "exclude": [
+    "src/mock/**/*", "src/api/tickets.ts", "src/api/overviews.ts", "src/stores/ticket.ts", "src/stores/overview.ts",
+    "src/components/ticket/**/*",
+    "src/views/TicketCreateView.vue", "src/views/TicketDetailView.vue", "src/views/TicketDraftsView.vue",
+    "src/views/TicketListView.vue", "src/views/ReportView.vue", "src/views/DashboardView.vue", "src/views/SearchView.vue",
+    "src/views/admin/UsersView.vue", "src/views/admin/GroupsView.vue", "src/views/admin/SLAView.vue", "src/views/admin/CategoriesView.vue"
+  ]
 }

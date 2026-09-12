@@ -23,49 +23,45 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/report',
     name: 'Report',
-    component: () => import('@/views/ReportView.vue'),
-    meta: { title: '统计报表', requiresAgent: true },
+    component: () => import('@/views/PocTicketListView.vue'),
+    meta: { title: '质量跟踪', requiresAgent: true },
   },
   {
     path: '/tickets',
     name: 'TicketList',
-    component: () => import('@/views/TicketListView.vue'),
-    meta: { title: '工单列表' },
+    component: () => import('@/views/PocTicketListView.vue'),
+    meta: { title: 'POC 问题' },
   },
   {
     path: '/tickets/new',
     name: 'TicketCreate',
-    component: () => import('@/views/TicketCreateView.vue'),
-    meta: { title: '新建工单' },
+    component: () => import('@/views/PocTicketCreateView.vue'),
+    meta: { title: '新建 POC 问题' },
   },
   {
     path: '/tickets/drafts',
     name: 'TicketDrafts',
-    component: () => import('@/views/TicketDraftsView.vue'),
+    component: () => import('@/views/PocTicketDraftsView.vue'),
     meta: { title: '我的草稿' },
   },
   {
     path: '/tickets/:id',
     name: 'TicketDetail',
-    component: () => import('@/views/TicketDetailView.vue'),
-    meta: { title: '工单详情' },
+    component: () => import('@/views/PocTicketDetailView.vue'),
+    meta: { title: 'POC 问题详情' },
   },
   {
     path: '/search',
     name: 'Search',
-    component: () => import('@/views/SearchView.vue'),
+    component: () => import('@/views/PocTicketListView.vue'),
     meta: { title: '搜索' },
   },
   {
     path: '/admin',
     meta: { requiresAdmin: true },
     children: [
-      { path: 'users', name: 'AdminUsers', component: () => import('@/views/admin/UsersView.vue'), meta: { title: '用户管理' } },
-      { path: 'groups', name: 'AdminGroups', component: () => import('@/views/admin/GroupsView.vue'), meta: { title: '组管理' } },
-      { path: 'triggers', name: 'AdminTriggers', component: () => import('@/views/admin/PlaceholderView.vue'), meta: { title: '触发器' } },
-      { path: 'sla', name: 'AdminSLA', component: () => import('@/views/admin/SLAView.vue'), meta: { title: 'SLA 策略' } },
-      { path: 'channels', name: 'AdminChannels', component: () => import('@/views/admin/PlaceholderView.vue'), meta: { title: '邮件渠道' } },
-      { path: 'categories', name: 'AdminCategories', component: () => import('@/views/admin/CategoriesView.vue'), meta: { title: '问题分类' } },
+      { path: 'users', name: 'AdminUsers', component: () => import('@/views/admin/PocUsersView.vue'), meta: { title: '用户管理' } },
+      { path: 'groups', name: 'AdminGroups', component: () => import('@/views/admin/PocSubsystemsView.vue'), meta: { title: '分系统管理' } },
     ],
   },
 ]
@@ -88,13 +84,13 @@ router.beforeEach((to) => {
     return { name: 'TicketList' }
   }
 
-  // 统计报表仅客服和管理员可访问
-  if (to.meta.requiresAgent && !auth.isAgent) {
+  // POC 跟踪报表仅质量和系统管理员可访问
+  if (to.meta.requiresAgent && !auth.canViewReport) {
     return { name: 'TicketList' }
   }
 
-  // 我的草稿 / 新建工单仅客服和管理员可访问
-  if ((to.path === '/tickets/new' || to.path === '/tickets/drafts') && !auth.isAgent) {
+  // 我的草稿 / 新建问题仅售前和系统管理员可访问
+  if ((to.path === '/tickets/new' || to.path === '/tickets/drafts') && !auth.canCreateTicket) {
     return { name: 'TicketList' }
   }
 
