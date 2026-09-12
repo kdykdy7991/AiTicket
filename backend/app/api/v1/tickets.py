@@ -205,7 +205,7 @@ def _detail(ticket: Ticket, actor: User) -> TicketDetail:
 
 
 async def _load_detail(db: AsyncSession, ticket_id: int) -> Ticket:
-    """按详情需要加载工单。
+    """按详情需要加载工单；不存在时返回 404（不能抛 NoResultFound 变成 500）。
 
     populate_existing 用于强制刷新同一 session 里已被读取过的实例
     （动作执行后需要拿到最新的 state_logs / attachments）。
@@ -216,7 +216,10 @@ async def _load_detail(db: AsyncSession, ticket_id: int) -> Ticket:
         .where(Ticket.id == ticket_id)
         .execution_options(populate_existing=True)
     )
-    return result.scalar_one()
+    ticket = result.scalar_one_or_none()
+    if ticket is None:
+        raise NotFoundError("问题", ticket_id)
+    return ticket
 
 
 async def _get_ticket_or_404(db: AsyncSession, ticket_id: int, *, lock: bool = False) -> Ticket:

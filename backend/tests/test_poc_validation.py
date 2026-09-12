@@ -412,3 +412,54 @@ async def test_patch_field_scope_by_node(api):
     api.as_("taskforce01")
     resp = await api.c.patch(f"/api/v1/tickets/{ticket_id}", json={"title": "改标题"})
     assert resp.status_code == 403, resp.text
+
+
+# ── 不存在的问题必须 404 而不是 500 ────────────────────────
+
+
+async def test_missing_ticket_returns_404_not_500(api):
+    """回归：_load_detail 曾用 scalar_one()，删库后访问详情会 500。"""
+    api.as_("quality01")
+    missing = 999999
+
+    resp = await api.c.get(f"/api/v1/tickets/{missing}")
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["error"]["code"] == "问题_NOT_FOUND"
+
+    resp = await api.c.get(f"/api/v1/tickets/{missing}/state-logs")
+    assert resp.status_code == 404, resp.text
+
+    resp = await api.c.patch(f"/api/v1/tickets/{missing}", json={"title": "x"})
+    assert resp.status_code == 404, resp.text
+
+    resp = await api.c.post(
+        f"/api/v1/tickets/{missing}/actions",
+        json={"action": "approve", "expected_version": 1},
+    )
+    assert resp.status_code == 404, resp.text
+
+    resp = await api.c.post(
+        f"/api/v1/tickets/{missing}/attachments",
+        files={"files": ("证据.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+    )
+    assert resp.status_code == 404, resp.text
+
+
+async def test_deleted_ticket_detail_returns_404(api):
+    """建单后删除（如清库），详情与草稿接口都应 404 而不是 500。"""
+    from sqlalchemy import delete  # noqa: PLC0415
+
+    from app.models.ticket import Ticket  # noqa: PLC0415
+
+    api.as_("presales01")
+    draft_id = (await api.create_ticket(draft=True)).json()["data"]["id"]
+    assert (await api.c.get(f"/api/v1/tickets/{draft_id}")).status_code == 200
+
+    async with api.session() as s:
+        await s.execute(delete(Ticket).where(Ticket.id == draft_id))
+        await s.commit()
+
+    assert (await api.c.get(f"/api/v1/tickets/{draft_id}")).status_code == 404
+    assert (
+        await api.c.post(f"/api/v1/tickets/drafts/{draft_id}/submit")
+    ).status_code == 404
