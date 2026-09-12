@@ -68,51 +68,74 @@ def actor_skill_group_ids(actor: Any) -> list[int]:
     return [g.id for g in groups if g is not None]
 
 
+def actor_roles(actor: Any) -> set[str]:
+    """操作人拥有的全部业务角色编码（多角色）。"""
+    roles = getattr(actor, "roles", None)
+    if roles is None:
+        # 兜底：极端情况下传入的是轻量对象
+        return set()
+    return set(roles)
+
+
+def actor_has_role(actor: Any, *roles: BusinessRole | str) -> bool:
+    owned = actor_roles(actor)
+    return any(
+        (role.value if isinstance(role, BusinessRole) else role) in owned
+        for role in roles
+    )
+
+
 # ── 数据范围 ───────────────────────────────────────────────
 
 
 def ticket_scope(actor: Any) -> ColumnElement | None:
     """角色数据范围条件。返回 None 表示不受限（admin/quality）。
 
+    多角色用户取各角色数据范围的**并集**。
     列表、详情、附件下载、导出必须复用同一条件。
     """
-    role = actor.role
-    if role in (BusinessRole.ADMIN, BusinessRole.QUALITY):
+    roles = actor_roles(actor)
+    if not roles:
+        return false()
+    if roles & {BusinessRole.ADMIN.value, BusinessRole.QUALITY.value}:
         return None
-    if role == BusinessRole.TASKFORCE:
+
+    conditions: list[ColumnElement] = []
+    if BusinessRole.TASKFORCE.value in roles:
         # 专项小组：全部未闭环问题，用于判断涉及分系统
-        return Ticket.state.notin_(TERMINAL_VALUES)
-    if role == BusinessRole.PRESALES:
-        return Ticket.creator_id == actor.id
-    if role == BusinessRole.APPROVER:
-        return Ticket.approver_id == actor.id
-    if role == BusinessRole.SUBSYSTEM:
-        conditions = [Ticket.subsystem_owner_id == actor.id]
+        conditions.append(Ticket.state.notin_(TERMINAL_VALUES))
+    if BusinessRole.PRESALES.value in roles:
+        conditions.append(Ticket.creator_id == actor.id)
+    if BusinessRole.APPROVER.value in roles:
+        conditions.append(Ticket.approver_id == actor.id)
+    if BusinessRole.SUBSYSTEM.value in roles:
+        conditions.append(Ticket.subsystem_owner_id == actor.id)
         skill_group_ids = actor_skill_group_ids(actor)
         if skill_group_ids:
             conditions.append(Ticket.skill_group_id.in_(skill_group_ids))
-        return or_(*conditions)
-    # 未知角色（含历史遗留）：不可见任何数据
-    return false()
+    if not conditions:
+        return false()
+    return or_(*conditions)
 
 
 def can_view(ticket: Any, actor: Any) -> bool:
-    """单条可见性判断，规则与 ticket_scope() 保持一致。"""
+    """单条可见性判断，规则与 ticket_scope() 保持一致（多角色取并集）。"""
+    roles = actor_roles(actor)
     if getattr(ticket, "is_draft", False):
-        return ticket.creator_id == actor.id or actor.role == BusinessRole.ADMIN
-    role = actor.role
-    if role in (BusinessRole.ADMIN, BusinessRole.QUALITY):
+        return ticket.creator_id == actor.id or BusinessRole.ADMIN.value in roles
+    if roles & {BusinessRole.ADMIN.value, BusinessRole.QUALITY.value}:
         return True
-    if role == BusinessRole.TASKFORCE:
-        return ticket.state not in TERMINAL_VALUES
-    if role == BusinessRole.PRESALES:
-        return ticket.creator_id == actor.id
-    if role == BusinessRole.APPROVER:
-        return ticket.approver_id == actor.id
-    if role == BusinessRole.SUBSYSTEM:
+    if BusinessRole.TASKFORCE.value in roles and ticket.state not in TERMINAL_VALUES:
+        return True
+    if BusinessRole.PRESALES.value in roles and ticket.creator_id == actor.id:
+        return True
+    if BusinessRole.APPROVER.value in roles and ticket.approver_id == actor.id:
+        return True
+    if BusinessRole.SUBSYSTEM.value in roles:
         if ticket.subsystem_owner_id == actor.id:
             return True
-        return ticket.skill_group_id in actor_skill_group_ids(actor)
+        if ticket.skill_group_id in actor_skill_group_ids(actor):
+            return True
     return False
 
 
@@ -127,9 +150,12 @@ def ensure_can_view(ticket: Any, actor: Any) -> None:
 def _return_target_matches(ticket: Any, actor: Any) -> bool:
     target = ticket.return_to_state
     if target == TicketState.PENDING_APPROVAL.value:
-        return actor.role == BusinessRole.PRESALES and ticket.creator_id == actor.id
+        return actor_has_role(actor, BusinessRole.PRESALES) and ticket.creator_id == actor.id
     if target in (TicketState.PLANNING.value, TicketState.PROCESSING.value):
-        return actor.role == BusinessRole.SUBSYSTEM and ticket.subsystem_owner_id == actor.id
+        return (
+            actor_has_role(actor, BusinessRole.SUBSYSTEM)
+            and ticket.subsystem_owner_id == actor.id
+        )
     return False
 
 
@@ -148,9 +174,10 @@ def _scope_matches(rule: ActionRule, ticket: Any, actor: Any) -> bool:
 
 
 def _rule_permits(rule: ActionRule, ticket: Any, actor: Any) -> bool:
-    if actor.role == BusinessRole.ADMIN:
+    """多角色：拥有动作要求的任一角色 + 满足人员范围即可。"""
+    if actor_has_role(actor, BusinessRole.ADMIN):
         return True  # 管理员兜底
-    if actor.role not in {r.value for r in rule.roles}:
+    if not (actor_roles(actor) & {r.value for r in rule.roles}):
         return False
     return _scope_matches(rule, ticket, actor)
 
@@ -167,7 +194,7 @@ def allowed_actions(ticket: Any, actor: Any) -> list[str]:
         return []
 
     candidates: list[TicketAction] = list(actions_for_state(state))
-    if actor.role == BusinessRole.ADMIN and TicketAction.CANCEL not in candidates:
+    if actor_has_role(actor, BusinessRole.ADMIN) and TicketAction.CANCEL not in candidates:
         candidates.append(TicketAction.CANCEL)
 
     permitted = [
@@ -180,14 +207,11 @@ def allowed_actions(ticket: Any, actor: Any) -> list[str]:
 
 def _rule_permits_for_action(action: TicketAction, ticket: Any, actor: Any) -> bool:
     rule = ACTION_RULES.get((TicketState(ticket.state), action))
+    is_admin = actor_has_role(actor, BusinessRole.ADMIN)
     if rule is None:
         # 管理员兜底撤销：任意非终态
-        return (
-            action is TicketAction.CANCEL
-            and actor.role == BusinessRole.ADMIN
-            and not is_terminal(ticket.state)
-        )
-    if action is TicketAction.CANCEL and actor.role == BusinessRole.ADMIN:
+        return action is TicketAction.CANCEL and is_admin and not is_terminal(ticket.state)
+    if action is TicketAction.CANCEL and is_admin:
         return True
     return _rule_permits(rule, ticket, actor)
 
@@ -267,7 +291,7 @@ async def _apply_route(db: AsyncSession, ticket: Any, payload: dict) -> None:
     owner = await db.get(User, owner_id)
     if owner is None or not owner.is_active:
         raise NotFoundError("用户", owner_id)
-    if owner.role != BusinessRole.SUBSYSTEM:
+    if not owner.has_role(BusinessRole.SUBSYSTEM):
         raise HTTPException(400, detail="分系统负责人必须拥有 subsystem 角色")
 
     membership = await db.execute(
@@ -345,7 +369,7 @@ async def execute_action(
     admin_cancel = (
         rule is None
         and action is TicketAction.CANCEL
-        and actor.role == BusinessRole.ADMIN
+        and actor_has_role(actor, BusinessRole.ADMIN)
     )
     if rule is None and not admin_cancel:
         raise HTTPException(
@@ -358,11 +382,11 @@ async def execute_action(
             comment_required=True,
         )
 
-    # 4/5. 角色与人员范围
-    if actor.role != BusinessRole.ADMIN:
-        if actor.role not in {r.value for r in rule.roles}:
+    # 4/5. 角色与人员范围（多角色：任一角色满足即可）
+    if not actor_has_role(actor, BusinessRole.ADMIN):
+        if not (actor_roles(actor) & {r.value for r in rule.roles}):
             raise ForbiddenError(
-                f"角色 {actor.role} 无权执行动作 {action.value}"
+                f"角色 {'/'.join(sorted(actor_roles(actor))) or '未知'} 无权执行动作 {action.value}"
             )
         if not _scope_matches(rule, ticket, actor):
             raise ForbiddenError("你不是该问题当前节点的指定责任人")
@@ -531,7 +555,7 @@ def verify_approver(user: Any) -> None:
     """校验用户是有效批准人。"""
     if user is None or not user.is_active:
         raise NotFoundError("批准人")
-    if user.role != BusinessRole.APPROVER:
+    if not user.has_role(BusinessRole.APPROVER):
         raise HTTPException(400, detail="approver_id 必须指向拥有 approver 角色的用户")
 
 

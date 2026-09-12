@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_role
+from app.core.deps import get_current_user, require_any_role
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.domain.poc_workflow import (
     BusinessRole,
@@ -157,7 +157,7 @@ def _log_out(log: TicketStateLog) -> TicketStateLogOut:
         to_state=log.to_state,
         operator_id=log.operator_id,
         operator_name=log.operator.name if log.operator else None,
-        operator_role=log.operator.role if log.operator else None,
+        operator_roles=log.operator.roles if log.operator else [],
         comment=log.comment,
         payload=log.payload_snapshot,
         responsible_role_snapshot=log.responsible_role_snapshot,
@@ -433,7 +433,7 @@ async def create_ticket(
     body: TicketCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(
-        require_role(BusinessRole.PRESALES.value, BusinessRole.ADMIN.value)
+        require_any_role(BusinessRole.PRESALES.value, BusinessRole.ADMIN.value)
     ),
 ):
     """新建问题；`is_draft=true` 保存草稿，否则直接进入 `pending_approval`。"""
@@ -692,27 +692,32 @@ def _editable_fields(ticket: Ticket, actor: User) -> set[str]:
     state = ticket.state
     if state in TERMINAL_VALUES:
         return set()
-    if actor.role == BusinessRole.ADMIN:
+    if actor.has_role(BusinessRole.ADMIN):
         return (
             set(CREATION_EDITABLE_FIELDS)
             | set(PLAN_EDITABLE_FIELDS)
             | set(ANALYSIS_EDITABLE_FIELDS)
         )
-    if state == TicketState.PENDING_APPROVAL.value and ticket.creator_id == actor.id:
+    is_presales = actor.has_role(BusinessRole.PRESALES)
+    is_subsystem = actor.has_role(BusinessRole.SUBSYSTEM)
+    if state == TicketState.PENDING_APPROVAL.value and is_presales and ticket.creator_id == actor.id:
         return set(CREATION_EDITABLE_FIELDS)
     if (
         state == TicketState.RETURNED.value
         and ticket.return_to_state == TicketState.PENDING_APPROVAL.value
+        and is_presales
         and ticket.creator_id == actor.id
     ):
         return set(CREATION_EDITABLE_FIELDS)
     if (
         state == TicketState.PLANNING.value
+        and is_subsystem
         and ticket.subsystem_owner_id == actor.id
     ):
         return set(PLAN_EDITABLE_FIELDS)
     if (
         state == TicketState.PROCESSING.value
+        and is_subsystem
         and ticket.subsystem_owner_id == actor.id
     ):
         return set(ANALYSIS_EDITABLE_FIELDS)

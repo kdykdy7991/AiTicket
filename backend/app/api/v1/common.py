@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_role
+from app.core.deps import get_current_user, require_any_role
 from app.core.exceptions import NotFoundError
 from app.core.security import hash_password
 from app.domain.poc_workflow import (
@@ -24,7 +24,7 @@ from app.domain.poc_workflow import (
 )
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.ticket import Ticket
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.common import (
     SkillGroupCreate,
     UserCreate,
@@ -37,7 +37,7 @@ from app.services.poc_workflow import TERMINAL_VALUES, ticket_scope
 
 users_router = APIRouter(tags=["users"])
 
-ADMIN_ONLY = require_role(BusinessRole.ADMIN.value)
+ADMIN_ONLY = require_any_role(BusinessRole.ADMIN.value)
 
 
 def _user_skill_groups(user: User) -> list[dict]:
@@ -49,7 +49,7 @@ def _user_payload(user: User, *, full: bool) -> dict:
         "id": user.id,
         "username": user.username,
         "name": user.name,
-        "role": user.role,
+        "roles": user.roles,
         "skill_groups": _user_skill_groups(user),
         "is_active": user.is_active,
     }
@@ -65,6 +65,31 @@ def _user_payload(user: User, *, full: bool) -> dict:
     return data
 
 
+async def _active_admin_count(db: AsyncSession, user_id_expr=None) -> int:
+    """启用状态的管理员人数（可选地按 user_id 表达式过滤）。"""
+    query = (
+        select(func.count(func.distinct(UserRole.user_id)))
+        .select_from(UserRole)
+        .join(User, User.id == UserRole.user_id)
+        .where(UserRole.role == BusinessRole.ADMIN.value, User.is_active == True)  # noqa: E712
+    )
+    if user_id_expr is not None:
+        query = query.where(UserRole.user_id == user_id_expr)
+    return (await db.execute(query)).scalar() or 0
+
+
+def _sync_skill_groups(db: AsyncSession, user_id: int, memberships) -> None:
+    """写入分系统关联（调用方负责先清空旧关联）。"""
+    for membership in memberships:
+        db.add(
+            UserSkillGroup(
+                user_id=user_id,
+                skill_group_id=membership.skill_group_id,
+                is_dispatcher=False,  # migration-only 列，POC 不再使用
+            )
+        )
+
+
 @users_router.get("/users")
 async def list_users(
     role: BusinessRole | None = None,
@@ -77,19 +102,26 @@ async def list_users(
     """人员列表。
 
     - 管理员：返回完整字段，可按任意角色筛选。
-    - 其他人：只返回流程需要的最小字段（id/name/role/skill_groups），
-      用于选择批准人和分系统负责人；管理员账号不出现在业务人员列表中。
+    - 其他人：只返回流程需要的最小字段（id/name/roles/skill_groups），
+      用于选择批准人和分系统负责人；拥有管理员角色的账号不出现在业务人员列表中。
+    - `role=x` 的含义是「拥有角色 x 的用户」（多角色）。
     """
-    is_admin = user.role == BusinessRole.ADMIN
+    is_admin = user.has_role(BusinessRole.ADMIN)
 
     query = select(User)
     if not include_inactive or not is_admin:
         query = query.where(User.is_active == True)  # noqa: E712
     if not is_admin:
         # 业务人员选择器不展示隐藏管理员
-        query = query.where(User.role != BusinessRole.ADMIN.value)
+        query = query.where(
+            ~User.id.in_(
+                select(UserRole.user_id).where(UserRole.role == BusinessRole.ADMIN.value)
+            )
+        )
     if role is not None:
-        query = query.where(User.role == role.value)
+        query = query.where(
+            User.id.in_(select(UserRole.user_id).where(UserRole.role == role.value))
+        )
     if skill_group_id is not None:
         query = query.join(
             UserSkillGroup, UserSkillGroup.user_id == User.id
@@ -118,21 +150,25 @@ async def create_user(
         name=body.name,
         phone=body.phone,
         password_hash=hash_password(body.password),
-        role=body.role.value,
         dingtalk_id=body.dingtalk_id,
     )
+    # 角色必须在 flush 前设置：新建对象尚未持久化，集合为空不会触发懒加载，
+    # flush 之后再访问未加载的集合会在异步会话里抛 MissingGreenlet。
+    new_user.set_roles([role.value for role in body.roles])
     db.add(new_user)
     await db.flush()
-    for membership in body.skill_groups:
-        db.add(
-            UserSkillGroup(
-                user_id=new_user.id,
-                skill_group_id=membership.skill_group_id,
-                is_dispatcher=False,  # migration-only 列，POC 不再使用
-            )
-        )
+
+    if new_user.has_role(BusinessRole.SUBSYSTEM):
+        _sync_skill_groups(db, new_user.id, body.skill_groups)
+
     await db.commit()
-    return {"data": {"id": new_user.id, "username": new_user.username, "role": new_user.role}}
+    return {
+        "data": {
+            "id": new_user.id,
+            "username": new_user.username,
+            "roles": new_user.roles,
+        }
+    }
 
 
 @users_router.patch("/users/{user_id}")
@@ -147,20 +183,14 @@ async def update_user(
     if target is None:
         raise NotFoundError("用户", user_id)
 
+    new_roles = [role.value for role in body.roles] if body.roles is not None else None
     if (
-        body.role is not None
-        and body.role.value != BusinessRole.ADMIN.value
-        and target.role == BusinessRole.ADMIN.value
+        new_roles is not None
+        and target.has_role(BusinessRole.ADMIN)
+        and BusinessRole.ADMIN.value not in new_roles
     ):
-        admin_count = (
-            await db.execute(
-                select(func.count())
-                .select_from(User)
-                .where(User.role == BusinessRole.ADMIN.value, User.is_active == True)  # noqa: E712
-            )
-        ).scalar() or 0
-        if admin_count <= 1:
-            raise HTTPException(400, detail="不能降级最后一个管理员")
+        if await _active_admin_count(db, target.id) <= 1:
+            raise HTTPException(400, detail="不能移除最后一个管理员的 admin 角色")
 
     if body.name is not None:
         target.name = body.name
@@ -168,28 +198,32 @@ async def update_user(
         target.phone = body.phone
     if body.password:
         target.password_hash = hash_password(body.password)
-    if body.role is not None:
-        target.role = body.role.value
     if body.dingtalk_id is not None:
         target.dingtalk_id = body.dingtalk_id
     if body.is_active is not None:
         target.is_active = body.is_active
+    if new_roles is not None:
+        target.set_roles(new_roles)
 
-    if body.skill_groups is not None:
+    # 分系统关联：只有拥有 subsystem 角色的用户才保留
+    has_subsystem = target.has_role(BusinessRole.SUBSYSTEM) if new_roles is None else (
+        BusinessRole.SUBSYSTEM.value in new_roles
+    )
+    if body.skill_groups is not None or new_roles is not None:
         await db.execute(
             UserSkillGroup.__table__.delete().where(UserSkillGroup.user_id == user_id)
         )
-        for membership in body.skill_groups:
-            db.add(
-                UserSkillGroup(
-                    user_id=user_id,
-                    skill_group_id=membership.skill_group_id,
-                    is_dispatcher=False,
-                )
-            )
+        if has_subsystem:
+            _sync_skill_groups(db, user_id, body.skill_groups or [])
 
     await db.commit()
-    return {"data": {"id": target.id, "username": target.username, "role": target.role}}
+    return {
+        "data": {
+            "id": target.id,
+            "username": target.username,
+            "roles": target.roles,
+        }
+    }
 
 
 @users_router.post("/users/{user_id}/activate")
@@ -215,15 +249,8 @@ async def deactivate_user(
     target = await db.get(User, user_id)
     if target is None:
         raise NotFoundError("用户", user_id)
-    if target.role == BusinessRole.ADMIN.value and target.is_active:
-        admin_count = (
-            await db.execute(
-                select(func.count())
-                .select_from(User)
-                .where(User.role == BusinessRole.ADMIN.value, User.is_active == True)  # noqa: E712
-            )
-        ).scalar() or 0
-        if admin_count <= 1:
+    if target.has_role(BusinessRole.ADMIN) and target.is_active:
+        if await _active_admin_count(db, target.id) <= 1:
             raise HTTPException(400, detail="不能禁用最后一个管理员")
     target.is_active = False
     await db.commit()

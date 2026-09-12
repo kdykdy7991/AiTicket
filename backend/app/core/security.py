@@ -16,15 +16,25 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    """Verify a password against a bcrypt hash."""
-    return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    """Verify a password against a bcrypt hash.
+
+    哈希字段损坏或格式非法时视为校验失败，不抛异常（避免登录接口 500）。
+    """
+    try:
+        return bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
 
 
 # ── JWT ───────────────────────────────────────────────────
 
-def create_access_token(user_id: int, role: str, token_version: int = 0) -> str:
+def create_access_token(user_id: int, roles: list[str], token_version: int = 0) -> str:
+    """签发访问令牌。
+
+    令牌里的 `roles` 只作调试用途；鉴权一律以数据库中的 user_roles 为准。
+    """
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    payload = {"sub": str(user_id), "role": role, "exp": expire, "type": "access", "ver": token_version}
+    payload = {"sub": str(user_id), "roles": list(roles), "exp": expire, "type": "access", "ver": token_version}
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 

@@ -46,7 +46,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     token_version = result.scalar_one()
     await db.commit()
 
-    access_token = create_access_token(user.id, user.role, token_version)
+    access_token = create_access_token(user.id, user.roles, token_version)
     refresh_token = create_refresh_token(user.id, token_version)
 
     return LoginResponse(
@@ -85,7 +85,7 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
             detail="该账号已在其他设备登录，请重新登录",
         )
 
-    access_token = create_access_token(user.id, user.role, user.token_version)
+    access_token = create_access_token(user.id, user.roles, user.token_version)
     refresh_token = create_refresh_token(user.id, user.token_version)
 
     return LoginResponse(

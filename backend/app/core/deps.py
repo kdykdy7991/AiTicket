@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import decode_token
+from app.domain.poc_workflow import BusinessRole
 from app.models.user import User
 
 bearer_scheme = HTTPBearer()
@@ -38,10 +39,10 @@ async def get_current_user(
     return user
 
 
-def require_role(*roles: str):
-    """Dependency factory: restrict access to specified roles."""
+def require_any_role(*roles: str | BusinessRole):
+    """Dependency factory: 需要拥有其中任一业务角色（多角色）。"""
     async def _check(user: User = Depends(get_current_user)):
-        if user.role not in roles:
+        if not user.has_role(*roles):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
         return user
     return _check

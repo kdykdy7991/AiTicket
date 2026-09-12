@@ -25,7 +25,8 @@ class UserInfo(BaseModel):
     id: int
     username: str
     name: str
-    role: str
+    #: 一个用户可拥有多个业务角色（多角色）
+    roles: list[str] = Field(default_factory=list)
     skill_groups: list[SkillGroupRef] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

@@ -53,9 +53,9 @@ def can_attach(ticket: Ticket, actor: User) -> bool:
     """当前节点是否允许该用户上传材料。"""
     if ticket.state in TERMINAL_VALUES:
         return False
-    if actor.role == BusinessRole.ADMIN:
+    if actor.has_role(BusinessRole.ADMIN):
         return True
-    if ticket.creator_id == actor.id:
+    if actor.has_role(BusinessRole.PRESALES) and ticket.creator_id == actor.id:
         # 创建人可以在待审批/退回阶段补充现场材料（含草稿）
         return True
     uid = responsible_user_id(ticket)
@@ -63,7 +63,7 @@ def can_attach(ticket: Ticket, actor: User) -> bool:
         return actor.id == uid
     role = responsible_role(ticket)
     if role is not None:
-        return actor.role == role
+        return actor.has_role(role)
     return False
 
 
@@ -174,7 +174,7 @@ async def download_attachment(
 
     if attachment.ticket_id is None:
         # 历史客服附件没有工单归属，仅管理员可取
-        if user.role != BusinessRole.ADMIN:
+        if not user.has_role(BusinessRole.ADMIN):
             raise ForbiddenError("无权下载该附件")
     else:
         ticket = await db.get(Ticket, attachment.ticket_id)

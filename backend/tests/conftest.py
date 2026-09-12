@@ -38,7 +38,7 @@ from app.models import (  # noqa: E402,F401  注册所有表到 Base.metadata
     user,
 )
 from app.models.group import SkillGroup, UserSkillGroup  # noqa: E402
-from app.models.user import User  # noqa: E402
+from app.models.user import User, UserRole  # noqa: E402
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -50,22 +50,28 @@ _ADMIN_DSN = TEST_DATABASE_URL.replace("/skdy_ticket_test", "/postgres").replace
     "postgresql+asyncpg://", "postgresql://"
 )
 
+#: 联调测试账号统一密码，对应下面的 bcrypt 哈希
+FIXTURE_PASSWORD = "skdy123"
+_FIXTURE_HASH = "$2b$12$PlEUsC1JRHiZVoUdSUj4y.H/kzyqXWQ4jwfOkMMM3o2sb8.Bcnl/O"
+
 #: 五个分系统
 SKILL_GROUP_NAMES = ("系统总体", "卫星平台", "终端系统", "应用平台", "测运控平台")
 
-#: (username, name, role, 分系统名 | None)
+#: (username, name, roles, 分系统名 | None)；一个用户可以有多个业务角色
 FIXTURE_USERS = [
-    ("admin", "系统管理员", "admin", None),
-    ("presales01", "售前-张伟", "presales", None),
-    ("presales02", "售前-李娜", "presales", None),
-    ("approver01", "邱庆举", "approver", None),
-    ("approver02", "备用批准人", "approver", None),
-    ("taskforce01", "陈毅君", "taskforce", None),
-    ("subsystem01", "邓雪群", "subsystem", "系统总体"),
-    ("subsystem06", "系统总体-同事", "subsystem", "系统总体"),
-    ("subsystem02", "卢翔", "subsystem", "卫星平台"),
-    ("subsystem03", "余华伟", "subsystem", "终端系统"),
-    ("quality01", "金凯", "quality", None),
+    ("admin", "系统管理员", ["admin"], None),
+    ("presales01", "售前-张伟", ["presales"], None),
+    ("presales02", "售前-李娜", ["presales"], None),
+    ("approver01", "邱庆举", ["approver"], None),
+    ("approver02", "备用批准人", ["approver"], None),
+    ("taskforce01", "陈毅君", ["taskforce"], None),
+    ("subsystem01", "邓雪群", ["subsystem"], "系统总体"),
+    ("subsystem06", "系统总体-同事", ["subsystem"], "系统总体"),
+    ("subsystem02", "卢翔", ["subsystem"], "卫星平台"),
+    ("subsystem03", "余华伟", ["subsystem"], "终端系统"),
+    ("quality01", "金凯", ["quality"], None),
+    # 多角色用户：既是批准人，又是系统总体负责人
+    ("multi01", "多角色-邱庆举", ["approver", "subsystem"], "系统总体"),
 ]
 
 
@@ -199,11 +205,13 @@ async def api(tmp_path_factory, monkeypatch):
 
         users: dict[str, int] = {}
         memberships: list[tuple[str, str]] = []
-        for username, name, role, sg_name in FIXTURE_USERS:
-            u = User(username=username, name=name, password_hash="x", role=role, is_active=True)
+        for username, name, roles, sg_name in FIXTURE_USERS:
+            u = User(username=username, name=name, password_hash=_FIXTURE_HASH, is_active=True)
             s.add(u)
             await s.flush()
             users[username] = u.id
+            for role in roles:
+                s.add(UserRole(user_id=u.id, role=role))
             if sg_name:
                 memberships.append((username, sg_name))
         for username, sg_name in memberships:

@@ -88,11 +88,11 @@ async def test_admin_has_fallback_power(api):
     assert updated["state_logs"][-1]["operator_name"] == "系统管理员"
 
     admin_view = (await api.c.get("/api/v1/users", params={"role": "approver"})).json()["data"]
-    assert admin_view and all(u["role"] == "approver" for u in admin_view)
+    assert admin_view and all("approver" in u["roles"] for u in admin_view)
 
     api.as_("presales01")
     users = (await api.c.get("/api/v1/users")).json()["data"]
-    assert users and all(u["role"] != "admin" for u in users)
+    assert users and all("admin" not in u["roles"] for u in users)
 
     roles = (await api.c.get("/api/v1/meta/poc-workflow")).json()["data"]
     assert "admin" not in roles["selectable_roles"]

@@ -54,21 +54,22 @@ SKILL_GROUPS = [
 _ADMIN_HASH = "$2b$12$Oxx10M2ohHR2zd3ekD5WLOll.icytUsKAjpzeoeTu3ZaYvpq0aRKW"
 _SKDY_HASH = "$2b$12$PlEUsC1JRHiZVoUdSUj4y.H/kzyqXWQ4jwfOkMMM3o2sb8.Bcnl/O"
 
-# (username, name, role, skill_group_name | None)
+# (username, name, roles, skill_group_name | None)
+# 一个用户可以拥有多个业务角色；roles 为全量集合，重复执行会覆盖。
 USERS = [
-    ("admin", "系统管理员", "admin", None),
-    ("presales01", "售前-张伟", "presales", None),
-    ("presales02", "售前-李娜", "presales", None),
-    ("approver01", "邱庆举", "approver", None),
-    ("taskforce01", "陈毅君", "taskforce", None),
-    ("subsystem01", "邓雪群", "subsystem", "系统总体"),
-    ("subsystem02", "卢翔", "subsystem", "卫星平台"),
-    ("subsystem03", "余华伟", "subsystem", "终端系统"),
-    ("subsystem04", "邱庆举（应用平台）", "subsystem", "应用平台"),
-    ("subsystem05", "倪汉华", "subsystem", "测运控平台"),
-    ("quality01", "金凯", "quality", None),
-    ("quality02", "马祥艺", "quality", None),
-    ("quality03", "巫雪峰", "quality", None),
+    ("admin", "系统管理员", ["admin"], None),
+    ("presales01", "售前-张伟", ["presales"], None),
+    ("presales02", "售前-李娜", ["presales"], None),
+    # 邱庆举同时是批准人和应用平台负责人：一人多角色，只用一个账号
+    ("approver01", "邱庆举", ["approver", "subsystem"], "应用平台"),
+    ("taskforce01", "陈毅君", ["taskforce"], None),
+    ("subsystem01", "邓雪群", ["subsystem"], "系统总体"),
+    ("subsystem02", "卢翔", ["subsystem"], "卫星平台"),
+    ("subsystem03", "余华伟", ["subsystem"], "终端系统"),
+    ("subsystem05", "倪汉华", ["subsystem"], "测运控平台"),
+    ("quality01", "金凯", ["quality"], None),
+    ("quality02", "马祥艺", ["quality"], None),
+    ("quality03", "巫雪峰", ["quality"], None),
 ]
 
 
@@ -134,19 +135,18 @@ async def seed() -> None:
         )
 
         print("Upserting POC users...")
-        for username, name, role, _sg in USERS:
+        for username, name, roles, _sg in USERS:
             password_hash = _ADMIN_HASH if username == "admin" else _SKDY_HASH
             await db.execute(
                 text(
                     """
                     INSERT INTO users
-                        (username, name, role, group_id, is_group_leader, password_hash,
+                        (username, name, group_id, is_group_leader, password_hash,
                          is_active, token_version, created_at, updated_at)
                     VALUES
-                        (:username, :name, :role, 1, false, :password_hash, true, 0, now(), now())
+                        (:username, :name, 1, false, :password_hash, true, 0, now(), now())
                     ON CONFLICT (username) DO UPDATE
                        SET name = EXCLUDED.name,
-                           role = EXCLUDED.role,
                            password_hash = EXCLUDED.password_hash,
                            is_active = true,
                            updated_at = now()
@@ -155,14 +155,44 @@ async def seed() -> None:
                 {
                     "username": username,
                     "name": name,
-                    "role": role,
                     "password_hash": password_hash,
                 },
             )
+            # 角色全量替换（多角色）
+            await db.execute(
+                text(
+                    """
+                    DELETE FROM user_roles
+                     WHERE user_id = (SELECT id FROM users WHERE username = :username)
+                    """
+                ),
+                {"username": username},
+            )
+            for role in roles:
+                await db.execute(
+                    text(
+                        """
+                        INSERT INTO user_roles (user_id, role)
+                        SELECT id, :role FROM users WHERE username = :username
+                        ON CONFLICT DO NOTHING
+                        """
+                    ),
+                    {"username": username, "role": role},
+                )
 
         print("Upserting subsystem memberships...")
-        for username, _name, role, skill_group in USERS:
-            if role != "subsystem" or not skill_group:
+        for username, _name, roles, skill_group in USERS:
+            # 只有拥有 subsystem 角色的账号才保留分系统关联
+            if "subsystem" not in roles or not skill_group:
+                await db.execute(
+                    text(
+                        """
+                        DELETE FROM user_skill_groups
+                         WHERE user_id = (SELECT id FROM users WHERE username = :username)
+                        """
+                    ),
+                    {"username": username},
+                )
                 continue
             await db.execute(
                 text(
@@ -184,12 +214,27 @@ async def seed() -> None:
 
         rows = (
             await db.execute(
-                text("SELECT username, name, role FROM users ORDER BY id")
+                text(
+                    """
+                    SELECT u.username, u.name,
+                           coalesce(string_agg(DISTINCT r.role, '/' ORDER BY r.role), '') AS roles,
+                           coalesce(string_agg(DISTINCT s.name, '/' ORDER BY s.name), '') AS skill_groups
+                      FROM users u
+                      LEFT JOIN user_roles r ON r.user_id = u.id
+                      LEFT JOIN user_skill_groups m ON m.user_id = u.id
+                      LEFT JOIN skill_groups s ON s.id = m.skill_group_id
+                     WHERE u.username = ANY(:usernames)
+                     GROUP BY u.id, u.username, u.name
+                     ORDER BY u.username
+                    """
+                ),
+                {"usernames": [u[0] for u in USERS]},
             )
         ).all()
-        print("Seed completed. Accounts:")
-        for username, name, role in rows:
-            print(f"  - {username:14s} {name:8s} {role}")
+        print(f"Seed completed. {len(rows)} POC accounts:")
+        for username, name, roles, skill_groups in rows:
+            suffix = f"  [{skill_groups}]" if skill_groups else ""
+            print(f"  - {username:14s} {name:8s} {roles}{suffix}")
 
 
 if __name__ == "__main__":

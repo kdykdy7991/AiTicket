@@ -91,7 +91,12 @@ def build_action_message(ticket, action, actor, to_state: str) -> str:
             if person is not None and person.id == uid:
                 assignee = f"（{person.name}）"
                 break
-    actor_label = "系统管理员代操作" if actor.role == "admin" else f"{actor.name}（{actor.role}）"
+    actor_roles = "/".join(actor.roles) if getattr(actor, "roles", None) else "未知角色"
+    actor_label = (
+        "系统管理员代操作"
+        if getattr(actor, "is_admin", False)
+        else f"{actor.name}（{actor_roles}）"
+    )
     return (
         "【POC 质量问题流转】\n"
         f"问题编号：{ticket.number or ticket.id}\n"

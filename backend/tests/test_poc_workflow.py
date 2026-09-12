@@ -142,7 +142,7 @@ async def test_full_main_flow_from_presales_to_closed(api):
 
     approve_log = final["state_logs"][1]
     assert approve_log["operator_name"] == "邱庆举"
-    assert approve_log["operator_role"] == "approver"
+    assert approve_log["operator_roles"] == ["approver"]
     assert approve_log["comment"] == "同意，转专项小组确认"
     assert approve_log["from_state"] == "pending_approval"
     assert approve_log["to_state"] == "pending_confirmation"
@@ -168,7 +168,7 @@ async def test_state_logs_endpoint_matches_detail(api):
     assert resp.status_code == 200, resp.text
     logs = resp.json()["data"]
     assert [log["to_state"] for log in logs] == ["pending_approval", "pending_confirmation"]
-    assert logs[-1]["operator_role"] == "approver"
+    assert logs[-1]["operator_roles"] == ["approver"]
 
 
 async def test_patch_cannot_change_state_or_responsible_people(api):

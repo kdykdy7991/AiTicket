@@ -141,7 +141,7 @@ class TicketStateLogOut(BaseModel):
     to_state: str
     operator_id: int | None = None
     operator_name: str | None = None
-    operator_role: str | None = None
+    operator_roles: list[str] = Field(default_factory=list)
     comment: str | None = None
     payload: dict[str, Any] | None = None
     responsible_role_snapshot: str | None = None

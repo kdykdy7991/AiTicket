@@ -11,7 +11,7 @@ from app.domain.poc_workflow import BusinessRole
 
 
 class SkillGroupMembership(BaseModel):
-    """subsystem 用户与分系统的关联。"""
+    """拥有 subsystem 角色的用户与分系统的关联。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -25,7 +25,8 @@ class UserCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     phone: str | None = None
     password: str = Field(..., min_length=6)
-    role: BusinessRole
+    #: 一个用户可以拥有多个业务角色，至少一个
+    roles: list[BusinessRole] = Field(..., min_length=1)
     skill_groups: list[SkillGroupMembership] = Field(default_factory=list)
     dingtalk_id: str | None = None
 
@@ -36,7 +37,8 @@ class UserUpdate(BaseModel):
     name: str | None = None
     phone: str | None = None
     password: str | None = None
-    role: BusinessRole | None = None
+    #: 全量替换角色集合；None 表示不改
+    roles: list[BusinessRole] | None = Field(default=None, min_length=1)
     skill_groups: list[SkillGroupMembership] | None = None
     dingtalk_id: str | None = None
     is_active: bool | None = None
@@ -54,7 +56,7 @@ class UserOut(BaseModel):
     username: str
     name: str
     phone: str | None = None
-    role: str
+    roles: list[str] = Field(default_factory=list)
     is_active: bool = True
     dingtalk_id: str | None = None
     skill_groups: list[SkillGroupRef] = Field(default_factory=list)
@@ -91,7 +93,7 @@ class StateLogOut(BaseModel):
     to_state: str
     operator_id: int
     operator_name: str | None = None
-    operator_role: str | None = None
+    operator_roles: list[str] = Field(default_factory=list)
     comment: str | None = None
     payload: dict | None = None
     responsible_role_snapshot: str | None = None
