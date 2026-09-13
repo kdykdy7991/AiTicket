@@ -22,7 +22,7 @@ from app.domain.poc_workflow import BusinessRole, TERMINAL_STATES
 from app.models.ticket import Ticket, TicketAttachment
 from app.models.user import User
 from app.schemas.ticket import TicketAttachmentOut
-from app.services.poc_workflow import can_view, ensure_can_view, responsible_role, responsible_user_id
+from app.services.poc_workflow import can_view, ensure_can_view
 
 router = APIRouter(tags=["attachments"])
 
@@ -50,21 +50,10 @@ WILDCARD_MIME = "application/octet-stream"
 
 
 def can_attach(ticket: Ticket, actor: User) -> bool:
-    """当前节点是否允许该用户上传材料。"""
+    """仅创建问题的售前人员可在非终态上传材料。"""
     if ticket.state in TERMINAL_VALUES:
         return False
-    if actor.has_role(BusinessRole.ADMIN):
-        return True
-    if actor.has_role(BusinessRole.PRESALES) and ticket.creator_id == actor.id:
-        # 创建人可以在待审批/退回阶段补充现场材料（含草稿）
-        return True
-    uid = responsible_user_id(ticket)
-    if uid is not None:
-        return actor.id == uid
-    role = responsible_role(ticket)
-    if role is not None:
-        return actor.has_role(role)
-    return False
+    return actor.has_role(BusinessRole.PRESALES) and ticket.creator_id == actor.id
 
 
 def _validate_file(upload: UploadFile, content: bytes) -> str:
@@ -124,7 +113,7 @@ async def upload_attachments(
         raise NotFoundError("问题", ticket_id)
     ensure_can_view(ticket, user)
     if not can_attach(ticket, user):
-        raise ForbiddenError("当前节点你无权上传附件")
+        raise ForbiddenError("仅问题创建人（售前）可上传附件")
     if stage is not None and stage != ticket.state:
         raise HTTPException(422, detail="stage 必须与工单当前状态一致")
 

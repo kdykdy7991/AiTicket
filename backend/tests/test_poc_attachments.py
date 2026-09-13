@@ -58,7 +58,7 @@ async def test_download_respects_ticket_scope(api):
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
     await run_steps(api, ticket_id, 2)  # planning：已流转到系统总体
 
-    api.as_("subsystem01")
+    api.as_("presales01")
     uploaded = await _upload(api, ticket_id)
     assert uploaded.status_code == 201, uploaded.text
     url = uploaded.json()["data"][0]["download_url"]
@@ -93,7 +93,7 @@ async def test_upload_requires_node_permission(api):
     assert resp.status_code == 403, resp.text
 
 
-async def test_quality_can_upload_at_review_stage(api):
+async def test_non_presales_cannot_upload_even_at_responsible_stage(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]
     await run_steps(api, ticket_id, 5)  # pending_quality_review
@@ -102,8 +102,8 @@ async def test_quality_can_upload_at_review_stage(api):
     resp = await _upload(
         api, ticket_id, files=_file("评审记录.pdf", b"%PDF-1.4 review", "application/pdf")
     )
-    assert resp.status_code == 201, resp.text
-    assert resp.json()["data"][0]["stage"] == "pending_quality_review"
+    assert resp.status_code == 403, resp.text
+    assert "售前" in resp.text
 
 
 async def test_terminal_ticket_rejects_upload(api):

@@ -71,7 +71,7 @@
         </div>
       </el-card>
 
-      <el-card shadow="never" class="form-card">
+      <el-card v-if="authStore.isPresales" shadow="never" class="form-card">
         <template #header><strong>现场材料</strong></template>
         <div class="material-row">
           <label class="material-button">
@@ -105,12 +105,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { pocTicketApi } from '@/api/pocTickets'
 import { userApi, type UserItem } from '@/api/users'
+import { useAuthStore } from '@/stores/auth'
 import PocAttachmentList from '@/components/poc/PocAttachmentList.vue'
 import { POC_PRIORITY_OPTIONS, stateLabel } from '@/domain/pocWorkflow'
 import type { PocAttachment, PocAttachmentItem, PocTicketForm } from '@/types/poc'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const formRef = ref<FormInstance>()
 const approvers = ref<UserItem[]>([])
 const approversLoading = ref(false)

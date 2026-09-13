@@ -56,7 +56,7 @@
               <tr><th>质量评审结果</th><td class="long-value">{{ ticket.quality_review_result || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
-          <el-card shadow="never" class="section attachment-section"><template #header><div class="section-header"><strong>相关材料</strong><label class="upload-button"><input type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.log,.zip" @change="uploadFiles"/>{{ uploading ? '上传中…' : '上传附件' }}</label></div></template><PocAttachmentList :items="attachmentItems" empty-text="暂无附件"/></el-card>
+          <el-card shadow="never" class="section attachment-section"><template #header><div class="section-header"><strong>相关材料</strong><label v-if="authStore.isPresales" class="upload-button"><input type="file" multiple accept=".jpg,.jpeg,.png,.webp,.pdf,.doc,.docx,.xls,.xlsx,.txt,.log,.zip" @change="uploadFiles"/>{{ uploading ? '上传中…' : '上传附件' }}</label></div></template><PocAttachmentList :items="attachmentItems" empty-text="暂无附件"/></el-card>
         </main>
         <aside class="timeline-column">
           <el-card shadow="never" class="section"><template #header><strong>流程记录</strong></template><PocStateTimeline :logs="ticket.state_logs" :current-state="ticket.state" :skill-groups="skillGroups" :subsystem-name="ticket.skill_group_name"/></el-card>
@@ -100,6 +100,7 @@ import { Calendar, CircleCheck, DataAnalysis, Document } from '@element-plus/ico
 import { pocTicketApi } from '@/api/pocTickets'
 import { userApi, type UserItem } from '@/api/users'
 import { pocMetaApi } from '@/api/pocMeta'
+import { useAuthStore } from '@/stores/auth'
 import PocAttachmentList from '@/components/poc/PocAttachmentList.vue'
 import PocStateTimeline from '@/components/poc/PocStateTimeline.vue'
 import { MAIN_FLOW_STATES, POC_PRIORITY_OPTIONS, VERIFICATION_STATUS_OPTIONS, actionLabel, priorityLabel, stateLabel, stateType, type PocState, type TicketAction } from '@/domain/pocWorkflow'
@@ -107,6 +108,7 @@ import type { PocAttachmentItem, PocTicketDetail } from '@/types/poc'
 import type { Group } from '@/types'
 
 const route=useRoute(), router=useRouter(); const loading=ref(false), submitting=ref(false), uploading=ref(false), dialogVisible=ref(false)
+const authStore=useAuthStore()
 const ticket=ref<PocTicketDetail|null>(null); const currentAction=ref<TicketAction>('approve'); const comment=ref(''); const actionPayload=reactive<Record<string, any>>({}); const skillGroups=ref<Group[]>([]); const subsystemUsers=ref<UserItem[]>([])
 const hasPlan=computed(()=>!!(ticket.value?.initial_investigation||ticket.value?.long_term_measure||ticket.value?.planned_completion_at)); const hasAnalysis=computed(()=>!!(ticket.value?.root_cause||ticket.value?.analysis_report)); const hasReview=computed(()=>!!(ticket.value?.verification_status||ticket.value?.quality_review_result));
 const workflowState=computed<PocState>(()=>ticket.value?.state==='returned'&&ticket.value.return_to_state?ticket.value.return_to_state:ticket.value?.state||'pending_approval')
