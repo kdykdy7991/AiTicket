@@ -16,6 +16,8 @@ set -euo pipefail
 COMPOSE_FILE="docker-compose.prod.yml"
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BACKUP_DIR="${PROJECT_DIR}/backups"
+# POC 必须使用独立 Compose 项目，严禁复用同机主系统的 skdy_prod 容器和数据卷。
+export COMPOSE_PROJECT_NAME="skdy-poc"
 INIT_MODE=false
 TAG=""
 
