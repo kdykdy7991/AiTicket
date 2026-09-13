@@ -65,6 +65,7 @@ async def test_one_account_covers_two_roles_in_same_ticket(api):
         ticket_id,
         "submit_plan",
         payload={
+            "initial_investigation": "初步排查结论",
             "long_term_measure": "修复固件",
             "planned_completion_at": "2026-12-31T18:00:00+08:00",
         },
@@ -79,7 +80,6 @@ async def test_one_account_covers_two_roles_in_same_ticket(api):
         ticket_id,
         "submit_analysis",
         payload={
-            "initial_investigation": "初步排查",
             "root_cause": "根因",
             "analysis_report": "报告",
         },

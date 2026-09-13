@@ -38,15 +38,15 @@
           <el-card v-if="hasPlan" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><Calendar /></el-icon><strong>闭环计划</strong></div></template>
             <div class="detail-table"><table><tbody>
               <tr><th>计划完成时间</th><td>{{ formatTime(ticket.planned_completion_at) }}</td><th>售前确认意见</th><td>{{ ticket.plan_confirmation_comment || '—' }}</td></tr>
+              <tr><th>初步排查结论</th><td colspan="3" class="long-value">{{ ticket.initial_investigation || '—' }}</td></tr>
               <tr><th>临时处置措施</th><td colspan="3" class="long-value">{{ ticket.temporary_measure || '—' }}</td></tr>
               <tr><th>长期整改措施</th><td colspan="3" class="long-value">{{ ticket.long_term_measure || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
           <el-card v-if="hasAnalysis" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><DataAnalysis /></el-icon><strong>分析验证</strong></div></template>
             <div class="detail-table"><table><tbody>
-              <tr><th>初步排查结论</th><td class="long-value">{{ ticket.initial_investigation || '—' }}</td></tr>
               <tr><th>根本原因分析</th><td class="long-value">{{ ticket.root_cause || '—' }}</td></tr>
-              <tr><th>质量问题分析报告</th><td class="long-value">{{ ticket.analysis_report || '—' }}</td></tr>
+              <tr><th>举一反三</th><td class="long-value">{{ ticket.analysis_report || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
           <el-card v-if="hasReview" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><CircleCheck /></el-icon><strong>质量评审</strong></div></template>
@@ -68,8 +68,8 @@
     <el-dialog v-model="dialogVisible" :title="buttonLabel(currentAction)" width="600px" :close-on-click-modal="false">
       <el-form label-position="top">
         <template v-if="currentAction === 'route'"><el-form-item label="分系统" required><el-select v-model="actionPayload.skill_group_id" style="width:100%" @change="loadSubsystemUsers"><el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id"/></el-select></el-form-item><el-form-item label="分系统负责人" required><el-select v-model="actionPayload.subsystem_owner_id" style="width:100%"><el-option v-for="u in subsystemUsers" :key="u.id" :label="u.name" :value="u.id"/></el-select></el-form-item></template>
-        <template v-if="currentAction === 'submit_plan'"><el-form-item label="临时处置措施"><el-input v-model="actionPayload.temporary_measure" type="textarea" :rows="3"/></el-form-item><el-form-item label="长期整改措施" required><el-input v-model="actionPayload.long_term_measure" type="textarea" :rows="4"/></el-form-item><el-form-item label="计划完成时间" required><el-date-picker v-model="actionPayload.planned_completion_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%"/></el-form-item></template>
-        <template v-if="currentAction === 'submit_analysis'"><el-form-item label="初步排查结论" required><el-input v-model="actionPayload.initial_investigation" type="textarea" :rows="3"/></el-form-item><el-form-item label="根本原因分析" required><el-input v-model="actionPayload.root_cause" type="textarea" :rows="3"/></el-form-item><el-form-item label="质量问题分析报告" required><el-input v-model="actionPayload.analysis_report" type="textarea" :rows="5"/></el-form-item></template>
+        <template v-if="currentAction === 'submit_plan'"><el-form-item label="初步排查结论" required><el-input v-model="actionPayload.initial_investigation" type="textarea" :rows="3"/></el-form-item><el-form-item label="临时处置措施"><el-input v-model="actionPayload.temporary_measure" type="textarea" :rows="3"/></el-form-item><el-form-item label="长期整改措施" required><el-input v-model="actionPayload.long_term_measure" type="textarea" :rows="4"/></el-form-item><el-form-item label="计划完成时间" required><el-date-picker v-model="actionPayload.planned_completion_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%"/></el-form-item></template>
+        <template v-if="currentAction === 'submit_analysis'"><el-form-item label="根本原因分析" required><el-input v-model="actionPayload.root_cause" type="textarea" :rows="3"/></el-form-item><el-form-item label="举一反三" required><el-input v-model="actionPayload.analysis_report" type="textarea" :rows="5"/></el-form-item></template>
         <template v-if="currentAction === 'pass_review'"><el-form-item label="验证状态" required><el-radio-group v-model="actionPayload.verification_status"><el-radio v-for="v in VERIFICATION_STATUS_OPTIONS" :key="v.value" :value="v.value">{{ v.label }}</el-radio></el-radio-group></el-form-item><el-form-item label="验证结论" required><el-input v-model="actionPayload.verification_conclusion" type="textarea" :rows="4"/></el-form-item><el-form-item label="质量评审结果" required><el-input v-model="actionPayload.quality_review_result" type="textarea" :rows="4"/></el-form-item></template>
         <template v-if="currentAction === 'resubmit'">
           <el-alert type="warning" :closable="false" title="问题已被退回，请修订下列内容后重新提交审批" class="resubmit-alert"/>
@@ -108,7 +108,7 @@ import type { Group } from '@/types'
 
 const route=useRoute(), router=useRouter(); const loading=ref(false), submitting=ref(false), uploading=ref(false), dialogVisible=ref(false)
 const ticket=ref<PocTicketDetail|null>(null); const currentAction=ref<TicketAction>('approve'); const comment=ref(''); const actionPayload=reactive<Record<string, any>>({}); const skillGroups=ref<Group[]>([]); const subsystemUsers=ref<UserItem[]>([])
-const hasPlan=computed(()=>!!(ticket.value?.long_term_measure||ticket.value?.planned_completion_at)); const hasAnalysis=computed(()=>!!(ticket.value?.root_cause||ticket.value?.analysis_report)); const hasReview=computed(()=>!!(ticket.value?.verification_status||ticket.value?.quality_review_result));
+const hasPlan=computed(()=>!!(ticket.value?.initial_investigation||ticket.value?.long_term_measure||ticket.value?.planned_completion_at)); const hasAnalysis=computed(()=>!!(ticket.value?.root_cause||ticket.value?.analysis_report)); const hasReview=computed(()=>!!(ticket.value?.verification_status||ticket.value?.quality_review_result));
 const workflowState=computed<PocState>(()=>ticket.value?.state==='returned'&&ticket.value.return_to_state?ticket.value.return_to_state:ticket.value?.state||'pending_approval')
 const coordinates=computed(()=>ticket.value?.longitude!=null&&ticket.value?.latitude!=null?`${ticket.value.longitude}, ${ticket.value.latitude}`:'—'); const verificationLabel=computed(()=>VERIFICATION_STATUS_OPTIONS.find(v=>v.value===ticket.value?.verification_status)?.label||'—')
 function buttonType(a:TicketAction){return ['reject','return','cancel'].includes(a)?'danger':'primary'} const RETURNED_ACTION_LABELS:Partial<Record<TicketAction,string>>={submit_plan:'修订并提交计划',submit_analysis:'修订并提交分析',pass_review:'修订并重新评审',resubmit:'修订并重新提交'}
@@ -117,7 +117,7 @@ function buttonLabel(a:TicketAction){const state=ticket.value?.state
   if(state==='returned'&&a!=='cancel')return RETURNED_ACTION_LABELS[a]||actionLabel(a)
   return actionLabel(a)} function formatTime(v:string|null){return v?dayjs(v).format('YYYY-MM-DD HH:mm'):'—'} function stateIndex(s:PocState){return MAIN_FLOW_STATES.indexOf(s)}
 const submitLabel=computed(()=>currentAction.value==='resubmit'?'修订并重新提交':'确认'); const commentRequired=computed(()=>['reject','return','cancel'].includes(currentAction.value)); const showComment=computed(()=>!['submit_plan','submit_analysis','pass_review','resubmit'].includes(currentAction.value)); const commentLabel=computed(()=>currentAction.value==='route'?'确认说明（可选）':commentRequired.value?'原因':'意见');
-const canSubmit=computed(()=>{const p=actionPayload,a=currentAction.value;if(commentRequired.value&&!comment.value.trim())return false;if(a==='resubmit')return !!p.title?.trim()&&!!p.description?.trim()&&!!p.proposer?.trim()&&!!p.proposer_department?.trim();if(a==='route')return !!p.skill_group_id&&!!p.subsystem_owner_id;if(a==='submit_plan')return !!p.long_term_measure?.trim()&&!!p.planned_completion_at;if(a==='submit_analysis')return !!p.initial_investigation?.trim()&&!!p.root_cause?.trim()&&!!p.analysis_report?.trim();if(a==='pass_review')return !!p.verification_status&&!!p.verification_conclusion?.trim()&&!!p.quality_review_result?.trim();return true})
+const canSubmit=computed(()=>{const p=actionPayload,a=currentAction.value;if(commentRequired.value&&!comment.value.trim())return false;if(a==='resubmit')return !!p.title?.trim()&&!!p.description?.trim()&&!!p.proposer?.trim()&&!!p.proposer_department?.trim();if(a==='route')return !!p.skill_group_id&&!!p.subsystem_owner_id;if(a==='submit_plan')return !!p.initial_investigation?.trim()&&!!p.long_term_measure?.trim()&&!!p.planned_completion_at;if(a==='submit_analysis')return !!p.root_cause?.trim()&&!!p.analysis_report?.trim();if(a==='pass_review')return !!p.verification_status&&!!p.verification_conclusion?.trim()&&!!p.quality_review_result?.trim();return true})
 const attachmentItems=computed<PocAttachmentItem[]>(()=>(ticket.value?.attachments||[]).map(a=>({key:`att-${a.id}`,name:a.original_filename,size:a.size,hint:`${a.stage?stateLabel(a.stage as PocState):'—'} · ${a.uploader_name||'未知'}`,attachment:a})))
 async function uploadFiles(event:Event){const input=event.target as HTMLInputElement;const files=Array.from(input.files||[]);if(!ticket.value||!files.length)return;uploading.value=true;try{await pocTicketApi.uploadAttachments(ticket.value.id,files);ElMessage.success('附件上传成功');await load()}finally{uploading.value=false;input.value=''}}
 async function load(){loading.value=true;try{ticket.value=await pocTicketApi.get(Number(route.params.id))}catch(e:any){if(e?.response?.status===404){ElMessage.error('该问题不存在或已被删除');router.replace({name:'TicketList'});return}throw e}finally{loading.value=false}}
@@ -125,8 +125,8 @@ function openAction(a:TicketAction){currentAction.value=a;comment.value='';Objec
   // 修订类动作按工单当前值预填：退回后改哪项改哪项，直接确认即可
   const PREFILL:Partial<Record<TicketAction,string[]>>={
     route:['confirmation_comment'],
-    submit_plan:['temporary_measure','long_term_measure','planned_completion_at'],
-    submit_analysis:['initial_investigation','root_cause','analysis_report'],
+    submit_plan:['initial_investigation','temporary_measure','long_term_measure','planned_completion_at'],
+    submit_analysis:['root_cause','analysis_report'],
     pass_review:['verification_status','verification_conclusion','quality_review_result'],
     resubmit:['title','proposer','proposer_department','product_line','customer_name','priority','problem_type','closure_requirement','occurred_at','location','longitude','latitude','device_info','description'],
   }

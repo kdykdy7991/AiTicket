@@ -380,6 +380,7 @@ async def test_return_path_plan_confirmation_to_planning(api):
         ticket_id,
         "submit_plan",
         payload={
+            "initial_investigation": "修订后的初步排查结论",
             "long_term_measure": "修订后的长期整改措施",
             "planned_completion_at": "2026-11-30T18:00:00+08:00",
         },
@@ -409,7 +410,6 @@ async def test_return_path_quality_review_to_processing(api):
         ticket_id,
         "submit_analysis",
         payload={
-            "initial_investigation": "补充初步排查",
             "root_cause": "补充根因",
             "analysis_report": "补充复现记录与日志证据",
         },

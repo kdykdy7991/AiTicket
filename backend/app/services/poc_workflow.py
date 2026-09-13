@@ -463,6 +463,8 @@ async def execute_action(
         ticket.confirmation_comment = _text(payload, comment, "confirmation_comment")
         await _apply_route(db, ticket, payload)
     elif action is TicketAction.SUBMIT_PLAN:
+        if payload.get("initial_investigation") is not None:
+            ticket.initial_investigation = payload["initial_investigation"]
         if payload.get("temporary_measure") is not None:
             ticket.temporary_measure = payload["temporary_measure"] or None
         if payload.get("long_term_measure") is not None:
@@ -476,8 +478,6 @@ async def execute_action(
             payload, comment, "plan_confirmation_comment"
         )
     elif action is TicketAction.SUBMIT_ANALYSIS:
-        if payload.get("initial_investigation") is not None:
-            ticket.initial_investigation = payload["initial_investigation"]
         if payload.get("root_cause") is not None:
             ticket.root_cause = payload["root_cause"]
         if payload.get("analysis_report") is not None:

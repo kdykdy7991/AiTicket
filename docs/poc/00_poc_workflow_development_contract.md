@@ -82,9 +82,9 @@
 | --- | --- | --- | --- | --- |
 | `pending_approval` | `approve` | `pending_routing` | `approver` | 可选审批意见 |
 | `pending_routing` | `route` | `planning` | `taskforce` | `skill_group_id`、`subsystem_owner_id`；`confirmation_comment` 可选 |
-| `planning` | `submit_plan` | `pending_plan_confirmation` | 对应 `subsystem` | `long_term_measure`、`planned_completion_at`；临时措施可选 |
+| `planning` | `submit_plan` | `pending_plan_confirmation` | 对应 `subsystem` | `initial_investigation`、`long_term_measure`、`planned_completion_at`；临时措施可选 |
 | `pending_plan_confirmation` | `confirm_plan` | `processing` | 创建该问题的 `presales` | 可选确认意见 |
-| `processing` | `submit_analysis` | `pending_quality_review` | 对应 `subsystem` | `initial_investigation`、`root_cause`、`analysis_report` |
+| `processing` | `submit_analysis` | `pending_quality_review` | 对应 `subsystem` | `root_cause`、`analysis_report`（举一反三） |
 | `pending_quality_review` | `pass_review` | `pending_final_approval` | `quality` | `verification_status`、`verification_conclusion`、`quality_review_result` |
 | `pending_final_approval` | `approve_closure` | `closed` | 该问题的 `approver` | 可选复核意见 |
 
@@ -165,9 +165,9 @@
 | `long_term_measure` | text | 闭环计划 |
 | `planned_completion_at` | datetime | 闭环计划 |
 | `plan_confirmation_comment` | text | 售前确认计划 |
-| `initial_investigation` | text | 分析验证 |
+| `initial_investigation` | text | 闭环计划 |
 | `root_cause` | text | 分析验证 |
-| `analysis_report` | text | 分析验证 |
+| `analysis_report` | text | 分析验证（界面名称：举一反三） |
 | `actual_completion_at` | datetime | 分析验证提交时自动写入 |
 | `verification_status` | enum | 质量评审（通过后进入批准人复核）|
 | `verification_conclusion` | text | 质量评审 |

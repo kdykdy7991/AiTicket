@@ -11,6 +11,7 @@ MAIN_FLOW_STEPS = [
         TicketAction.SUBMIT_PLAN,
         {
             "temporary_measure": "临时重启终端恢复业务",
+            "initial_investigation": "初步定位为固件心跳超时",
             "long_term_measure": "升级终端固件并补充回归测试",
             "planned_completion_at": "2026-12-31T18:00:00+08:00",
         },
@@ -21,7 +22,6 @@ MAIN_FLOW_STEPS = [
         "subsystem01",
         TicketAction.SUBMIT_ANALYSIS,
         {
-            "initial_investigation": "初步定位为固件心跳超时",
             "root_cause": "固件 3.2.1 心跳重连逻辑缺陷",
             "analysis_report": "分析报告正文：复现三次，定位到重连定时器",
         },

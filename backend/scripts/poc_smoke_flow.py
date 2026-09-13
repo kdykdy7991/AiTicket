@@ -165,6 +165,7 @@ class POCSmokeFlow:
             ticket_id,
             "submit_plan",
             payload={
+                "initial_investigation": "初步排除链路与电源因素",
                 "temporary_measure": "现场临时重启终端并切换备用链路",
                 "long_term_measure": "修复心跳重连逻辑，补充回归用例",
                 "planned_completion_at": planned,
@@ -176,7 +177,6 @@ class POCSmokeFlow:
             ticket_id,
             "submit_analysis",
             payload={
-                "initial_investigation": "初步排除链路与电源因素",
                 "root_cause": "固件心跳定时器溢出导致重连失败",
                 "analysis_report": "三次复现记录 + 日志定位到定时器溢出点",
             },

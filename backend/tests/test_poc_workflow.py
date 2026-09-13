@@ -50,11 +50,11 @@ def test_required_action_fields_match_contract():
     """必填项契约：与总约定第 3.1 节一致。"""
     assert ACTION_REQUIREMENTS[TicketAction.ROUTE] == ("skill_group_id", "subsystem_owner_id")
     assert ACTION_REQUIREMENTS[TicketAction.SUBMIT_PLAN] == (
+        "initial_investigation",
         "long_term_measure",
         "planned_completion_at",
     )
     assert ACTION_REQUIREMENTS[TicketAction.SUBMIT_ANALYSIS] == (
-        "initial_investigation",
         "root_cause",
         "analysis_report",
     )
@@ -210,6 +210,7 @@ async def test_overdue_flag_follows_planned_completion(api):
         ticket_id,
         "submit_plan",
         payload={
+            "initial_investigation": "初步排查结论",
             "long_term_measure": "修复固件",
             "planned_completion_at": "2020-01-01T00:00:00+00:00",
         },

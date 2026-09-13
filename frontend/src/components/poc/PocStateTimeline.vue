@@ -86,7 +86,7 @@ const PAYLOAD_FIELDS: { key: string; label: string }[] = [
   { key: 'planned_completion_at', label: '计划完成时间' },
   { key: 'initial_investigation', label: '初步排查结论' },
   { key: 'root_cause', label: '根本原因分析' },
-  { key: 'analysis_report', label: '质量问题分析报告' },
+  { key: 'analysis_report', label: '举一反三' },
   { key: 'verification_status', label: '验证状态' },
   { key: 'verification_conclusion', label: '验证结论' },
   { key: 'quality_review_result', label: '质量评审结果' },

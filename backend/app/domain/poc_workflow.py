@@ -282,8 +282,15 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         target_state=TicketState.PENDING_PLAN_CONFIRMATION,
         roles=frozenset({BusinessRole.SUBSYSTEM}),
         scope=ActorScope.SUBSYSTEM_OWNER,
-        required_fields=("long_term_measure", "planned_completion_at"),
-        payload_fields=("temporary_measure", "long_term_measure", "planned_completion_at"),
+        required_fields=(
+            "initial_investigation", "long_term_measure", "planned_completion_at"
+        ),
+        payload_fields=(
+            "initial_investigation",
+            "temporary_measure",
+            "long_term_measure",
+            "planned_completion_at",
+        ),
     ),
     (TicketState.PENDING_PLAN_CONFIRMATION, TicketAction.CONFIRM_PLAN): _R(
         target_state=TicketState.PROCESSING,
@@ -295,8 +302,8 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         target_state=TicketState.PENDING_QUALITY_REVIEW,
         roles=frozenset({BusinessRole.SUBSYSTEM}),
         scope=ActorScope.SUBSYSTEM_OWNER,
-        required_fields=("initial_investigation", "root_cause", "analysis_report"),
-        payload_fields=("initial_investigation", "root_cause", "analysis_report"),
+        required_fields=("root_cause", "analysis_report"),
+        payload_fields=("root_cause", "analysis_report"),
     ),
     (TicketState.PENDING_QUALITY_REVIEW, TicketAction.PASS_REVIEW): _R(
         target_state=TicketState.PENDING_FINAL_APPROVAL,
@@ -373,8 +380,15 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         target_state=TicketState.PENDING_PLAN_CONFIRMATION,
         roles=frozenset({BusinessRole.SUBSYSTEM}),
         scope=ActorScope.RETURN_TARGET,
-        required_fields=("long_term_measure", "planned_completion_at"),
-        payload_fields=("temporary_measure", "long_term_measure", "planned_completion_at"),
+        required_fields=(
+            "initial_investigation", "long_term_measure", "planned_completion_at"
+        ),
+        payload_fields=(
+            "initial_investigation",
+            "temporary_measure",
+            "long_term_measure",
+            "planned_completion_at",
+        ),
         only_when_return_target=frozenset({TicketState.PLANNING}),
     ),
     # 退回到分析验证：分系统负责人直接修订并提交分析验证
@@ -382,8 +396,8 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         target_state=TicketState.PENDING_QUALITY_REVIEW,
         roles=frozenset({BusinessRole.SUBSYSTEM}),
         scope=ActorScope.RETURN_TARGET,
-        required_fields=("initial_investigation", "root_cause", "analysis_report"),
-        payload_fields=("initial_investigation", "root_cause", "analysis_report"),
+        required_fields=("root_cause", "analysis_report"),
+        payload_fields=("root_cause", "analysis_report"),
         only_when_return_target=frozenset({TicketState.PROCESSING}),
     ),
     # 退回到质量评审：质量直接修订评审结论并重新提交
