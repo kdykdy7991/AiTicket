@@ -19,6 +19,20 @@ BACKUP_DIR="${PROJECT_DIR}/backups"
 INIT_MODE=false
 TAG=""
 
+cd "${PROJECT_DIR}"
+
+# 每次部署前先同步当前分支。拉取完成后重新执行脚本，确保本次部署使用
+# Git 中的最新 deploy.sh。DEPLOY_AFTER_PULL 用于防止重复拉取。
+if [ "${DEPLOY_AFTER_PULL:-0}" != "1" ]; then
+    if [ -d .git ]; then
+        echo "[0] 同步 Git 代码 ..."
+        git pull --ff-only
+        exec env DEPLOY_AFTER_PULL=1 "$0" "$@"
+    else
+        echo "警告：当前目录不是 Git 仓库，跳过代码同步"
+    fi
+fi
+
 # 生成默认 tag：vYYYYMMDD-NN，NN 同日自增
 # 失败（docker 未起 / 无历史镜像）时退化为 vYYYYMMDD-01
 gen_default_tag() {
