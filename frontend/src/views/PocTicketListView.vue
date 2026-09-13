@@ -8,9 +8,6 @@
       </div>
     </div>
 
-    <div class="tabs">
-      <button v-for="tab in tabs" :key="tab.value" :class="{ active: selectedState === tab.value }" @click="selectState(tab.value)">{{ tab.label }}</button>
-    </div>
 
     <el-card shadow="never" class="filters">
       <el-select v-model="filters.priority" multiple collapse-tags placeholder="问题级别" clearable @change="reload">
@@ -62,10 +59,8 @@ const loading = ref(false)
 const exporting = ref(false)
 const tickets = ref<PocTicketBrief[]>([])
 const skillGroups = ref<Group[]>([])
-const selectedState = ref<PocState | ''>('')
 const filters = reactive<PocTicketFilters>({ sort: 'updated_desc' })
 const pagination = reactive({ page: 1, page_size: 20, total: 0, total_pages: 0 })
-const tabs = [{ value: '' as const, label: '全部' }, ...POC_STATE_OPTIONS.map(item => ({ value: item.value, label: item.label }))]
 
 function stateType(state: PocState) {
   return POC_STATE_OPTIONS.find(item => item.value === state)?.type || 'info'
@@ -77,7 +72,6 @@ function responsibleText(row: PocTicketBrief) {
   return row.current_responsible_user_name ? `${role} · ${row.current_responsible_user_name}` : role
 }
 function openDetail(row: PocTicketBrief) { router.push({ name: 'TicketDetail', params: { id: row.id } }) }
-function selectState(state: PocState | '') { selectedState.value = state; filters.state = state ? [state] : undefined; reload() }
 function reload() { pagination.page = 1; load(1) }
 
 async function load(page = pagination.page) {
@@ -107,6 +101,5 @@ onMounted(async () => { skillGroups.value = await pocMetaApi.getSkillGroups(); a
 <style scoped>
 .page-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:20px; }
 .page-header h1 { margin:0; font-size:24px; }.page-header p { margin:6px 0 0; color:var(--color-text-tertiary); }.actions{display:flex;gap:8px}
-.tabs { display:flex; gap:6px; overflow-x:auto; padding-bottom:10px; }.tabs button{border:1px solid var(--color-border-light);background:white;border-radius:8px;padding:7px 12px;white-space:nowrap;cursor:pointer}.tabs button.active{color:var(--color-primary);border-color:var(--color-primary);background:var(--color-primary-light)}
 .filters :deep(.el-card__body){display:flex;align-items:center;gap:10px}.filters .el-select{width:170px}.filters .el-input{max-width:300px;margin-left:auto}.table-card{margin-top:14px}.table-card :deep(.el-table__row){cursor:pointer}.el-pagination{justify-content:flex-end;margin-top:16px}.priority{font-weight:600}.p0_blocker{color:#dc2626}.p1_critical{color:#ea580c}.p2_normal{color:#2563eb}.p3_low{color:#64748b}.overdue{color:#dc2626;font-weight:600}
 </style>
