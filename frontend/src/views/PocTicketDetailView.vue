@@ -37,10 +37,10 @@
           </el-card>
           <el-card v-if="hasPlan" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><Calendar /></el-icon><strong>闭环计划</strong></div></template>
             <div class="detail-table"><table><tbody>
-              <tr><th>计划完成时间</th><td>{{ formatTime(ticket.planned_completion_at) }}</td><th>售前确认意见</th><td>{{ ticket.plan_confirmation_comment || '—' }}</td></tr>
-              <tr><th>初步排查结论</th><td colspan="3" class="long-value">{{ ticket.initial_investigation || '—' }}</td></tr>
               <tr><th>临时处置措施</th><td colspan="3" class="long-value">{{ ticket.temporary_measure || '—' }}</td></tr>
               <tr><th>长期整改措施</th><td colspan="3" class="long-value">{{ ticket.long_term_measure || '—' }}</td></tr>
+              <tr><th>计划完成时间</th><td>{{ formatTime(ticket.planned_completion_at) }}</td><th>售前确认意见</th><td>{{ ticket.plan_confirmation_comment || '—' }}</td></tr>
+              <tr><th>初步排查结论</th><td colspan="3" class="long-value">{{ ticket.initial_investigation || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
           <el-card v-if="hasAnalysis" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><DataAnalysis /></el-icon><strong>分析验证</strong></div></template>
@@ -68,7 +68,7 @@
     <el-dialog v-model="dialogVisible" :title="buttonLabel(currentAction)" width="600px" :close-on-click-modal="false">
       <el-form label-position="top">
         <template v-if="currentAction === 'route'"><el-form-item label="分系统" required><el-select v-model="actionPayload.skill_group_id" style="width:100%" @change="loadSubsystemUsers"><el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id"/></el-select></el-form-item><el-form-item label="分系统负责人" required><el-select v-model="actionPayload.subsystem_owner_id" style="width:100%"><el-option v-for="u in subsystemUsers" :key="u.id" :label="u.name" :value="u.id"/></el-select></el-form-item></template>
-        <template v-if="currentAction === 'submit_plan'"><el-form-item label="初步排查结论" required><el-input v-model="actionPayload.initial_investigation" type="textarea" :rows="3"/></el-form-item><el-form-item label="临时处置措施"><el-input v-model="actionPayload.temporary_measure" type="textarea" :rows="3"/></el-form-item><el-form-item label="长期整改措施" required><el-input v-model="actionPayload.long_term_measure" type="textarea" :rows="4"/></el-form-item><el-form-item label="计划完成时间" required><el-date-picker v-model="actionPayload.planned_completion_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%"/></el-form-item></template>
+        <template v-if="currentAction === 'submit_plan'"><el-form-item label="临时处置措施"><el-input v-model="actionPayload.temporary_measure" type="textarea" :rows="3"/></el-form-item><el-form-item label="长期整改措施" required><el-input v-model="actionPayload.long_term_measure" type="textarea" :rows="4"/></el-form-item><el-form-item label="计划完成时间" required><el-date-picker v-model="actionPayload.planned_completion_at" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" style="width:100%"/></el-form-item><el-form-item label="初步排查结论" required><el-input v-model="actionPayload.initial_investigation" type="textarea" :rows="3"/></el-form-item></template>
         <template v-if="currentAction === 'submit_analysis'"><el-form-item label="根本原因分析" required><el-input v-model="actionPayload.root_cause" type="textarea" :rows="3"/></el-form-item><el-form-item label="举一反三" required><el-input v-model="actionPayload.analysis_report" type="textarea" :rows="5"/></el-form-item></template>
         <template v-if="currentAction === 'pass_review'"><el-form-item label="验证状态" required><el-radio-group v-model="actionPayload.verification_status"><el-radio v-for="v in VERIFICATION_STATUS_OPTIONS" :key="v.value" :value="v.value">{{ v.label }}</el-radio></el-radio-group></el-form-item><el-form-item label="验证结论" required><el-input v-model="actionPayload.verification_conclusion" type="textarea" :rows="4"/></el-form-item><el-form-item label="质量评审结果" required><el-input v-model="actionPayload.quality_review_result" type="textarea" :rows="4"/></el-form-item></template>
         <template v-if="currentAction === 'resubmit'">
