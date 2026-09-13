@@ -4,6 +4,9 @@ import { ElMessage } from 'element-plus'
 const api = axios.create({
   baseURL: '/api/v1',
   timeout: 15000,
+  // FastAPI 的 list Query 参数使用重复键：priority=p0&priority=p1。
+  // Axios 默认生成 priority[]=p0，后端会忽略，导致多选筛选看起来无效。
+  paramsSerializer: { indexes: null },
 })
 
 api.interceptors.request.use(config => {
