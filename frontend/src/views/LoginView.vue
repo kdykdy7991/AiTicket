@@ -9,7 +9,7 @@
           <line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
       </div>
-      <h1 class="brand-title">Skdy Ticket</h1>
+      <h1 class="brand-title">POC 问题闭环</h1>
       <p class="brand-subtitle">登录到您的工作台</p>
     </div>
 
