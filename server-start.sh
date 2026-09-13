@@ -69,7 +69,8 @@ docker compose version >/dev/null 2>&1 || {
 }
 
 if [ -z "$BRANCH" ]; then
-    BRANCH="$(git branch --show-current)"
+    # git branch --show-current 需要 Git 2.22+；symbolic-ref 兼容旧版 Git。
+    BRANCH="$(git symbolic-ref --quiet --short HEAD || true)"
 fi
 [ -n "$BRANCH" ] || { echo "错误：当前处于 detached HEAD，请用 --branch 指定部署分支" >&2; exit 1; }
 
