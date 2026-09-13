@@ -24,6 +24,7 @@
         <main>
           <el-card shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><Document /></el-icon><strong>问题信息</strong></div></template>
             <div class="detail-table"><table><tbody>
+              <tr><th>问题名称</th><td colspan="3" class="long-value">{{ ticket.title || '—' }}</td></tr>
               <tr><th>问题类型</th><td>{{ ticket.problem_type || '—' }}</td><th>问题级别</th><td>{{ priorityLabel(ticket.priority) }}</td></tr>
               <tr><th>客户名称</th><td>{{ ticket.customer_name || '—' }}</td><th>产品线</th><td>{{ ticket.product_line || '—' }}</td></tr>
               <tr><th>提出人</th><td>{{ ticket.proposer || '—' }}</td><th>提出部门</th><td>{{ ticket.proposer_department || '—' }}</td></tr>
