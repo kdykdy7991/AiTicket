@@ -112,13 +112,24 @@ async def test_missing_required_action_payload_returns_400(api):
     await run_steps(api, ticket_id, 1)  # pending_routing
 
     api.as_("taskforce01")
-    resp = await api.action(ticket_id, "route", payload={}, expect=400)
+    resp = await api.action(ticket_id, "route", comment="确认信息", payload={}, expect=400)
     assert "skill_group_id" in resp.text and "subsystem_owner_id" in resp.text
 
     resp = await api.action(
-        ticket_id, "route", payload={"skill_group_id": api.sg("系统总体")}, expect=400
+        ticket_id, "route", comment="确认信息", payload={"skill_group_id": api.sg("系统总体")}, expect=400
     )
     assert "subsystem_owner_id" in resp.text
+
+    resp = await api.action(
+        ticket_id,
+        "route",
+        payload={
+            "skill_group_id": api.sg("系统总体"),
+            "subsystem_owner_id": api.uid("subsystem01"),
+        },
+        expect=400,
+    )
+    assert "必须填写意见" in resp.text
 
 
 async def test_route_rejects_wrong_subsystem_owner(api):
@@ -131,6 +142,7 @@ async def test_route_rejects_wrong_subsystem_owner(api):
     resp = await api.action(
         ticket_id,
         "route",
+        comment="确认信息",
         payload={
             "skill_group_id": api.sg("系统总体"),
             "subsystem_owner_id": api.uid("quality01"),
@@ -143,6 +155,7 @@ async def test_route_rejects_wrong_subsystem_owner(api):
     resp = await api.action(
         ticket_id,
         "route",
+        comment="确认信息",
         payload={
             "skill_group_id": api.sg("系统总体"),
             "subsystem_owner_id": api.uid("subsystem02"),
@@ -155,6 +168,7 @@ async def test_route_rejects_wrong_subsystem_owner(api):
     resp = await api.action(
         ticket_id,
         "route",
+        comment="确认信息",
         payload={"skill_group_id": 999999, "subsystem_owner_id": api.uid("subsystem01")},
         expect=404,
     )

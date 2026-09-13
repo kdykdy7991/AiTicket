@@ -275,6 +275,7 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
     (TicketState.PENDING_ROUTING, TicketAction.ROUTE): _R(
         target_state=TicketState.PLANNING,
         roles=frozenset({BusinessRole.TASKFORCE}),
+        comment_required=True,
         required_fields=("skill_group_id", "subsystem_owner_id"),
         payload_fields=("confirmation_comment", "skill_group_id", "subsystem_owner_id"),
     ),

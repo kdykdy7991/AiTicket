@@ -200,6 +200,7 @@ async def test_overdue_flag_follows_planned_completion(api):
     await api.action(
         ticket_id,
         "route",
+        comment="确认信息",
         payload={
             "skill_group_id": api.sg("终端系统"),
             "subsystem_owner_id": api.uid("subsystem03"),

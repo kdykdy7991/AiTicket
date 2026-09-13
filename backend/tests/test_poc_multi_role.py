@@ -116,6 +116,7 @@ async def test_multi_role_data_scope_is_union(api):
     await api.action(
         other,
         "route",
+        comment="确认信息",
         payload={
             "skill_group_id": api.sg("系统总体"),
             "subsystem_owner_id": api.uid("subsystem01"),
@@ -129,6 +130,7 @@ async def test_multi_role_data_scope_is_union(api):
     await api.action(
         third,
         "route",
+        comment="确认信息",
         payload={
             "skill_group_id": api.sg("卫星平台"),
             "subsystem_owner_id": api.uid("subsystem02"),

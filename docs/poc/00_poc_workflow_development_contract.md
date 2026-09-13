@@ -81,7 +81,7 @@
 | 当前状态 | 动作编码 | 下一状态 | 操作角色 | 后端必填数据 |
 | --- | --- | --- | --- | --- |
 | `pending_approval` | `approve` | `pending_routing` | `approver` | 可选审批意见 |
-| `pending_routing` | `route` | `planning` | `taskforce` | `skill_group_id`、`subsystem_owner_id`；`confirmation_comment` 可选 |
+| `pending_routing` | `route` | `planning` | `taskforce` | `skill_group_id`、`subsystem_owner_id`；`confirmation_comment` 必填 |
 | `planning` | `submit_plan` | `pending_plan_confirmation` | 对应 `subsystem` | `initial_investigation`、`long_term_measure`、`planned_completion_at`；临时措施可选 |
 | `pending_plan_confirmation` | `confirm_plan` | `processing` | 创建该问题的 `presales` | 可选确认意见 |
 | `processing` | `submit_analysis` | `pending_quality_review` | 对应 `subsystem` | `root_cause`、`analysis_report`（举一反三） |
@@ -284,5 +284,5 @@
 | 2026-09-12 | 「普通用户只能拥有一个业务角色」→ 支持一人多角色 | `users.role` 单值列改为 `user_roles` 关联表；人员/登录/时间线接口的 `role` 改为 `roles: string[]`；数据范围与 `allowed_actions` 按角色并集计算；`GET /users?role=x` 语义改为「拥有该角色」。前后端同时改造。 |
 | 2026-09-12 | 退回后改为「一步修订」 | `returned` 状态下按 `return_to_state` 放行对应节点的动作（`resubmit` / `submit_plan` / `submit_analysis` / `pass_review`），责任人可在同一次提交里修订字段并回到流程；此前必须先 `resubmit` 再执行节点动作，且退回态没有任何可改内容。 |
 | 2026-09-12 | 删除「待缺陷入库」节点，质量评审后新增「待批准人复核」 | 删除状态 `pending_defect_registration` 与动作 `register_defect`：缺陷入库在 SVN 侧完成，不作为工单系统内的流转节点，工单也不再记录缺陷 ID / SVN 路径（数据库列一并删除）。`pass_review` 目标改为 `pending_final_approval`；新增 `approve_closure`（批准闭环，角色 `approver`、人员范围为该问题的 `approver_id`），批准即 `closed`；批准人可执行 `return` 驳回并退回 `pending_quality_review`。 |
-| 2026-09-12 | 「待问题确认 / 待流转 / 待分系统接收」三步合并为一步 | 删除状态 `pending_confirmation`、`pending_acceptance` 与动作 `confirm_problem`、`accept`；`approve` 目标改为 `pending_routing`（展示名「待确认流转」）；专项小组用 `route` 一次完成确认与流转，目标改为 `planning`，可选填 `confirmation_comment`；专项小组不通过时执行 `return`（界面显示「驳回」）回 `pending_approval`；`acceptance_comment` 不再产生。主流程由 10 步变为 8 步。 |
+| 2026-09-12 | 「待问题确认 / 待流转 / 待分系统接收」三步合并为一步 | 删除状态 `pending_confirmation`、`pending_acceptance` 与动作 `confirm_problem`、`accept`；`approve` 目标改为 `pending_routing`（展示名「待确认流转」）；专项小组用 `route` 一次完成确认与流转，目标改为 `planning`，必须填写 `confirmation_comment`；专项小组不通过时执行 `return`（界面显示「驳回」）回 `pending_approval`；`acceptance_comment` 不再产生。主流程由 10 步变为 8 步。 |
 | 2026-09-12 | `taskforce` 数据范围由「全部未闭环问题」收紧为「批准人批准之后的未闭环问题」 | 待审批阶段问题归售前与批准人，专项小组不再可见（列表、详情、附件、导出、统计一致生效）；`pending_routing` 起可见。被批准人驳回退回售前（`returned` + 退回目标 `pending_approval`）的问题同样不可见。 |
