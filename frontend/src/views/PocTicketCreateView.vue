@@ -5,7 +5,6 @@
         <h1>新建 POC 问题</h1>
         <p>填写现场问题信息并提交批准人审批</p>
       </div>
-      <el-tag v-if="draftId" type="info">草稿 #{{ draftId }}</el-tag>
     </div>
 
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top" status-icon>
@@ -80,7 +79,7 @@
             选择图片或附件
           </label>
           <span class="material-hint">
-            支持 {{ ALLOWED_EXT.join('、') }}；单个不超过 {{ MAX_FILE_MB }} MB；选择后将在「保存草稿」或「提交审批」时上传
+            支持 {{ ALLOWED_EXT.join('、') }}；单个不超过 {{ MAX_FILE_MB }} MB；选择后将在「提交审批」时上传
           </span>
         </div>
         <div class="material-list">
@@ -94,7 +93,6 @@
 
       <div class="form-actions">
         <el-button @click="router.push('/tickets')">取消</el-button>
-        <el-button :loading="saving || uploading" @click="saveDraft(false)">保存草稿</el-button>
         <el-button type="primary" :loading="submitting || uploading" @click="submitForApproval">提交审批</el-button>
       </div>
     </el-form>
