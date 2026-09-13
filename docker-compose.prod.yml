@@ -2,7 +2,7 @@
 # 用法：
 #   cp .env.example .env  # 填值
 #   docker compose -f docker-compose.prod.yml up -d --build
-name: skdy_prod
+name: skdy-poc
 
 services:
   db:
@@ -18,7 +18,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data:Z
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${DB_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -107,7 +107,7 @@ services:
     image: grafana/loki:3.0.0
     command: -config.file=/etc/loki/local-config.yaml
     ports:
-      - "127.0.0.1:3100:3100"
+      - "127.0.0.1:${LOKI_PORT:-3101}:3100"
     volumes:
       - ./infra/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
       - loki-data:/loki:Z

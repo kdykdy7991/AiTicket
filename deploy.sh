@@ -97,8 +97,8 @@ if [ "$INIT_MODE" = true ]; then
     # 2. 构建镜像
     echo "[2/4] 构建镜像 skdy-api:${TAG} ..."
     DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web
-    docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
-    docker tag skdy_prod-api "skdy-api:latest" 2>/dev/null || true
+    docker tag skdy-poc-api "skdy-api:${TAG}" 2>/dev/null || true
+    docker tag skdy-poc-api "skdy-api:latest" 2>/dev/null || true
 
     # 3. 执行数据库迁移 + 种子数据
     echo "[3/4] 初始化数据库 ..."
@@ -117,14 +117,14 @@ else
     # 2. 备份数据库
     BACKUP_FILE="${BACKUP_DIR}/skdy_ticket_$(date +%Y%m%d_%H%M%S).sql"
     echo "[1/5] 备份数据库到 ${BACKUP_FILE} ..."
-    docker exec skdy_prod-db-1 pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > "${BACKUP_FILE}"
+    docker compose -f "${COMPOSE_FILE}" exec -T db pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > "${BACKUP_FILE}"
     echo "数据库备份完成：${BACKUP_FILE}"
 
     # 3. 构建镜像
     echo "[2/5] 构建镜像 skdy-api:${TAG} ..."
     DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web
-    docker tag skdy_prod-api "skdy-api:${TAG}" 2>/dev/null || true
-    docker tag skdy_prod-api "skdy-api:latest" 2>/dev/null || true
+    docker tag skdy-poc-api "skdy-api:${TAG}" 2>/dev/null || true
+    docker tag skdy-poc-api "skdy-api:latest" 2>/dev/null || true
 
     # 4. 执行数据库迁移
     echo "[3/5] 执行数据库迁移 ..."
@@ -146,6 +146,13 @@ else
       sleep 5
     done
 fi
+
+# 首次启动时 API 需要一些初始化时间；常规部署若已等待完成，此处会立即通过。
+echo "等待 API 健康检查 ..."
+for _ in $(seq 1 12); do
+    docker compose -f "${COMPOSE_FILE}" ps api | grep -q "healthy" && break
+    sleep 5
+done
 
 # 通用健康检查
 echo "======================================"
