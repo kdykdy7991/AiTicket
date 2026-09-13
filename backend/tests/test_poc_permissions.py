@@ -128,6 +128,19 @@ async def test_approver_scope_is_limited_to_assigned_tickets(api):
     assert [t["id"] for t in listed.json()["data"]] == [ticket_id]
 
 
+async def test_approver_loses_visibility_after_creator_cancels(api):
+    """创建人撤销后，被指定批准人不再能列表、详情或导出该问题。"""
+    api.as_("presales01")
+    ticket_id = (await api.create_ticket()).json()["data"]["id"]
+    number = (await api.detail(ticket_id))["number"]
+    await api.action(ticket_id, "cancel", comment="不再提交")
+
+    api.as_("approver01")
+    assert (await api.c.get("/api/v1/tickets")).json()["data"] == []
+    await api.detail(ticket_id, expect=403)
+    assert number not in (await api.c.get("/api/v1/tickets/export")).text
+
+
 async def test_subsystem_scope_follows_skill_group(api):
     api.as_("presales01")
     ticket_id = (await api.create_ticket()).json()["data"]["id"]

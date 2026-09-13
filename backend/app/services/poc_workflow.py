@@ -112,7 +112,12 @@ def ticket_scope(actor: Any) -> ColumnElement | None:
     if BusinessRole.PRESALES.value in roles:
         conditions.append(Ticket.creator_id == actor.id)
     if BusinessRole.APPROVER.value in roles:
-        conditions.append(Ticket.approver_id == actor.id)
+        conditions.append(
+            and_(
+                Ticket.approver_id == actor.id,
+                Ticket.state != TicketState.CANCELLED.value,
+            )
+        )
     if BusinessRole.SUBSYSTEM.value in roles:
         conditions.append(Ticket.subsystem_owner_id == actor.id)
         skill_group_ids = actor_skill_group_ids(actor)
@@ -153,7 +158,11 @@ def can_view(ticket: Any, actor: Any) -> bool:
         return True
     if BusinessRole.PRESALES.value in roles and ticket.creator_id == actor.id:
         return True
-    if BusinessRole.APPROVER.value in roles and ticket.approver_id == actor.id:
+    if (
+        BusinessRole.APPROVER.value in roles
+        and ticket.approver_id == actor.id
+        and ticket.state != TicketState.CANCELLED.value
+    ):
         return True
     if BusinessRole.SUBSYSTEM.value in roles:
         if ticket.subsystem_owner_id == actor.id:
