@@ -212,29 +212,7 @@ async def seed() -> None:
 
         await db.commit()
 
-        rows = (
-            await db.execute(
-                text(
-                    """
-                    SELECT u.username, u.name,
-                           coalesce(string_agg(DISTINCT r.role, '/' ORDER BY r.role), '') AS roles,
-                           coalesce(string_agg(DISTINCT s.name, '/' ORDER BY s.name), '') AS skill_groups
-                      FROM users u
-                      LEFT JOIN user_roles r ON r.user_id = u.id
-                      LEFT JOIN user_skill_groups m ON m.user_id = u.id
-                      LEFT JOIN skill_groups s ON s.id = m.skill_group_id
-                     WHERE u.username = ANY(:usernames)
-                     GROUP BY u.id, u.username, u.name
-                     ORDER BY u.username
-                    """
-                ),
-                {"usernames": [u[0] for u in USERS]},
-            )
-        ).all()
-        print(f"Seed completed. {len(rows)} POC accounts:")
-        for username, name, roles, skill_groups in rows:
-            suffix = f"  [{skill_groups}]" if skill_groups else ""
-            print(f"  - {username:14s} {name:8s} {roles}{suffix}")
+        print("Seed completed successfully.")
 
 
 if __name__ == "__main__":
