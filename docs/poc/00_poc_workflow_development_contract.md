@@ -66,7 +66,7 @@
 | 3 | `planning` | 闭环计划制定 | 分系统 |
 | 4 | `pending_plan_confirmation` | 待计划确认 | 售前 |
 | 5 | `processing` | 分析验证 | 分系统 |
-| 6 | `pending_quality_review` | 待质量评审 | 质量 |
+| 6 | `pending_quality_review` | 待验证确认 | 质量 |
 | 7 | `pending_final_approval` | 待批准人复核 | 批准人 |
 | 8 | `closed` | 已闭环 | 无 |
 | — | `returned` | 已退回 | 根据 `return_to_state` 确定 |

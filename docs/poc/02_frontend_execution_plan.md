@@ -181,7 +181,7 @@ ticketApi.downloadAttachment(attachmentId)
 - 待确认流转
 - 闭环计划
 - 分析验证
-- 待质量评审
+- 待验证确认
 - 待批准人复核
 - 已闭环
 - 已退回

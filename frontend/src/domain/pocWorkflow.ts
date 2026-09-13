@@ -23,7 +23,7 @@ export const POC_STATE_OPTIONS = [
   { value: 'planning', label: '闭环计划制定', type: 'primary' },
   { value: 'pending_plan_confirmation', label: '待计划确认', type: 'warning' },
   { value: 'processing', label: '分析验证', type: 'primary' },
-  { value: 'pending_quality_review', label: '待质量评审', type: 'warning' },
+  { value: 'pending_quality_review', label: '待验证确认', type: 'warning' },
   { value: 'pending_final_approval', label: '待批准人复核', type: 'warning' },
   { value: 'closed', label: '已闭环', type: 'success' },
   { value: 'returned', label: '已退回', type: 'danger' },
