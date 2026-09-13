@@ -113,35 +113,43 @@ if [ "$INIT_MODE" = true ]; then
 else
     # 常规部署
 
-    # 1. 创建备份目录
+    # 确保数据库和缓存已启动（兼容整套服务被 stop 后再次部署）
+    echo "[1/7] 启动数据库和缓存 ..."
+    docker compose -f "${COMPOSE_FILE}" up -d db redis
+    echo "等待数据库就绪 ..."
+    until docker compose -f "${COMPOSE_FILE}" exec -T db pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > /dev/null 2>&1; do
+        sleep 1
+    done
+
+    # 2. 创建备份目录
     mkdir -p "${BACKUP_DIR}"
 
     # 2. 备份数据库
     BACKUP_FILE="${BACKUP_DIR}/skdy_ticket_$(date +%Y%m%d_%H%M%S).sql"
-    echo "[1/5] 备份数据库到 ${BACKUP_FILE} ..."
+    echo "[2/7] 备份数据库到 ${BACKUP_FILE} ..."
     docker compose -f "${COMPOSE_FILE}" exec -T db pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" > "${BACKUP_FILE}"
     echo "数据库备份完成：${BACKUP_FILE}"
 
     # 3. 构建镜像
-    echo "[2/5] 构建镜像 skdy-api:${TAG} ..."
+    echo "[3/7] 构建镜像 skdy-api:${TAG} ..."
     DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web
     docker tag skdy-poc-api "skdy-api:${TAG}" 2>/dev/null || true
     docker tag skdy-poc-api "skdy-api:latest" 2>/dev/null || true
 
     # 4. 执行数据库迁移
-    echo "[3/5] 执行数据库迁移 ..."
+    echo "[4/7] 执行数据库迁移 ..."
     docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
 
     # 同步种子数据（POC 角色账号与五个分系统，幂等，可重复执行）
-    echo "[4/5] 同步种子数据 ..."
+    echo "[5/7] 同步种子数据 ..."
     docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/seed.py
 
-    # 5. 启动/更新服务
-    echo "[5/6] 启动服务 ..."
+    # 6. 启动/更新服务
+    echo "[6/7] 启动服务 ..."
     docker compose -f "${COMPOSE_FILE}" up -d
 
-    # 6. 健康检查
-    echo "[6/6] 等待服务健康检查 ..."
+    # 7. 健康检查
+    echo "[7/7] 等待服务健康检查 ..."
     # 循环等待 api 健康检查通过（最多 ~60s），避免单次 sleep 不足导致误报
     for _ in $(seq 1 12); do
       docker compose -f "${COMPOSE_FILE}" ps api | grep -q "healthy" && break
