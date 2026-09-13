@@ -7,7 +7,7 @@
       </div>
 
       <div class="workflow-strip">
-        <div v-for="(state, index) in MAIN_FLOW_STATES" :key="state" :class="['step', { active: ticket.state === state, done: stateIndex(ticket.state) > index }]">
+        <div v-for="(state, index) in MAIN_FLOW_STATES" :key="state" :class="['step', { active: workflowState === state, done: stateIndex(workflowState) > index }]">
           <i>{{ index + 1 }}</i><span>{{ stateLabel(state) }}</span>
         </div>
       </div>
@@ -108,6 +108,7 @@ import type { Group } from '@/types'
 const route=useRoute(), router=useRouter(); const loading=ref(false), submitting=ref(false), uploading=ref(false), dialogVisible=ref(false)
 const ticket=ref<PocTicketDetail|null>(null); const currentAction=ref<TicketAction>('approve'); const comment=ref(''); const actionPayload=reactive<Record<string, any>>({}); const skillGroups=ref<Group[]>([]); const subsystemUsers=ref<UserItem[]>([])
 const hasPlan=computed(()=>!!(ticket.value?.long_term_measure||ticket.value?.planned_completion_at)); const hasAnalysis=computed(()=>!!(ticket.value?.root_cause||ticket.value?.analysis_report)); const hasReview=computed(()=>!!(ticket.value?.verification_status||ticket.value?.quality_review_result));
+const workflowState=computed<PocState>(()=>ticket.value?.state==='returned'&&ticket.value.return_to_state?ticket.value.return_to_state:ticket.value?.state||'pending_approval')
 const coordinates=computed(()=>ticket.value?.longitude!=null&&ticket.value?.latitude!=null?`${ticket.value.longitude}, ${ticket.value.latitude}`:'—'); const verificationLabel=computed(()=>VERIFICATION_STATUS_OPTIONS.find(v=>v.value===ticket.value?.verification_status)?.label||'—')
 function buttonType(a:TicketAction){return ['reject','return','cancel'].includes(a)?'danger':'primary'} const RETURNED_ACTION_LABELS:Partial<Record<TicketAction,string>>={submit_plan:'修订并提交计划',submit_analysis:'修订并提交分析',pass_review:'修订并重新评审',resubmit:'修订并重新提交'}
 function buttonLabel(a:TicketAction){const state=ticket.value?.state
