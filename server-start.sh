@@ -74,7 +74,8 @@ if [ -z "$BRANCH" ]; then
 fi
 [ -n "$BRANCH" ] || { echo "错误：当前处于 detached HEAD，请用 --branch 指定部署分支" >&2; exit 1; }
 
-git remote get-url "$REMOTE" >/dev/null 2>&1 || {
+# git remote get-url 在部分旧版 Git 中不可用，直接读取远端配置兼容性更好。
+git config --get "remote.${REMOTE}.url" >/dev/null 2>&1 || {
     echo "错误：Git 远端 '$REMOTE' 不存在" >&2
     exit 1
 }
