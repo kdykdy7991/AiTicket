@@ -63,9 +63,9 @@
 | --- | --- | --- | --- |
 | 1 | `pending_approval` | 待审批 | 批准人 |
 | 2 | `pending_routing` | 待确认流转 | 专项小组 |
-| 3 | `planning` | 闭环计划制定中 | 分系统 |
+| 3 | `planning` | 闭环计划制定 | 分系统 |
 | 4 | `pending_plan_confirmation` | 待计划确认 | 售前 |
-| 5 | `processing` | 分析验证中 | 分系统 |
+| 5 | `processing` | 分析验证 | 分系统 |
 | 6 | `pending_quality_review` | 待质量评审 | 质量 |
 | 7 | `pending_final_approval` | 待批准人复核 | 批准人 |
 | 8 | `closed` | 已闭环 | 无 |

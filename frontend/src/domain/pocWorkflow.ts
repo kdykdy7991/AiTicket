@@ -20,9 +20,9 @@ export const ROLE_LABELS: Record<BusinessRole, string> = Object.fromEntries(
 export const POC_STATE_OPTIONS = [
   { value: 'pending_approval', label: '待审批', type: 'warning' },
   { value: 'pending_routing', label: '待确认流转', type: 'warning' },
-  { value: 'planning', label: '闭环计划制定中', type: 'primary' },
+  { value: 'planning', label: '闭环计划制定', type: 'primary' },
   { value: 'pending_plan_confirmation', label: '待计划确认', type: 'warning' },
-  { value: 'processing', label: '分析验证中', type: 'primary' },
+  { value: 'processing', label: '分析验证', type: 'primary' },
   { value: 'pending_quality_review', label: '待质量评审', type: 'warning' },
   { value: 'pending_final_approval', label: '待批准人复核', type: 'warning' },
   { value: 'closed', label: '已闭环', type: 'success' },

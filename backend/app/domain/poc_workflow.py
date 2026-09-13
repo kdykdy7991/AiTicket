@@ -85,9 +85,9 @@ TERMINAL_STATES: frozenset[TicketState] = frozenset(
 STATE_LABELS: dict[TicketState, str] = {
     TicketState.PENDING_APPROVAL: "待审批",
     TicketState.PENDING_ROUTING: "待确认流转",
-    TicketState.PLANNING: "闭环计划制定中",
+    TicketState.PLANNING: "闭环计划制定",
     TicketState.PENDING_PLAN_CONFIRMATION: "待计划确认",
-    TicketState.PROCESSING: "分析验证中",
+    TicketState.PROCESSING: "分析验证",
     TicketState.PENDING_QUALITY_REVIEW: "待质量评审",
     TicketState.PENDING_FINAL_APPROVAL: "待批准人复核",
     TicketState.CLOSED: "已闭环",
