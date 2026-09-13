@@ -7,7 +7,7 @@ export COMPOSE_PROJECT_NAME="skdy-poc"
 
 usage() {
     echo "用法：./restore-backup.sh <数据库备份.sql> <附件备份.tar.gz>"
-    echo "示例：./restore-backup.sh backups/skdy_ticket_20260913_134042.sql backups/skdy-poc_uploads_20260913.tar.gz"
+    echo "示例：./restore-backup.sh backups/restore/skdy_ticket_20260913_134042.sql backups/restore/skdy-poc_uploads_20260913.tar.gz"
 }
 
 if [ "$#" -ne 2 ]; then
@@ -66,7 +66,7 @@ done
 echo "[2/9] 停止 POC API 和 Web ..."
 docker compose -f "$COMPOSE_FILE" stop api web 2>/dev/null || true
 
-mkdir -p backups
+mkdir -p backups backups/restore
 RESTORE_TIME="$(date +%Y%m%d_%H%M%S)"
 SAFETY_BACKUP="${PROJECT_DIR}/backups/pre_restore_${RESTORE_TIME}.sql"
 SAFETY_UPLOADS="${PROJECT_DIR}/backups/pre_restore_uploads_${RESTORE_TIME}.tar.gz"
