@@ -188,6 +188,43 @@ body{
 .legend__r .vl{font-weight:700;color:var(--ink);text-align:right}
 .legend__r .pc{color:var(--ink-3);text-align:right}
 
+/* ============ 图表交互 ============ */
+.chart{cursor:crosshair}
+.chart svg{overflow:visible}
+
+/* 趋势图浮层提示 */
+.tip{
+  position:absolute;left:0;top:0;z-index:5;min-width:150px;
+  padding:9px 11px;border-radius:var(--r-xs);
+  background:#fff;border:1px solid var(--line);
+  box-shadow:0 10px 26px -14px rgba(31,36,41,.34),0 1px 2px rgba(31,36,41,.05);
+  pointer-events:none;opacity:0;
+  transition:opacity .16s ease;
+}
+.tip.on{opacity:1}
+.tip__hd{font-size:11.5px;font-weight:600;letter-spacing:.03em;color:var(--ink-3);margin-bottom:5px}
+.tip__r{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-2);line-height:1.9}
+.tip__r b{margin-left:auto;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* 图例可点击切换系列 */
+.trend__lg span{cursor:pointer;user-select:none;transition:opacity .18s ease}
+.trend__lg span:hover{opacity:.68}
+.trend__lg span.off{opacity:.32}
+.trend__lg span.off .dot{filter:grayscale(1)}
+.trend__lg span:focus-visible{outline:2px solid #C8D3CE;outline-offset:3px;border-radius:4px}
+
+/* 环形图与图例联动 */
+.donut circle{transition:stroke-width .22s cubic-bezier(.33,1,.68,1),opacity .22s ease;cursor:pointer}
+.legend__r{
+  padding:3px 7px;margin:-3px -7px;border-radius:6px;
+  transition:background .15s ease,opacity .18s ease;
+}
+.legend__r.on{background:var(--chip)}
+.legend__r .lb{transition:color .18s ease}
+.legend__r.on .lb{color:var(--ink)}
+.donut__mid b,.donut__mid span{transition:color .18s ease}
+.donut__mid b.beat{color:var(--ink)}
+
 /* ============ 响应式 ============ */
 @media (max-width:1280px){
   .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
@@ -338,9 +375,9 @@ body{
       <div class="trend__hd">
         <svg class="ic" viewBox="0 0 24 24"><path d="M4.5 20V12M10 20V5.5M15.5 20v-6.5M21 20V9"/><path d="M2.5 20h19"/></svg>
         <h2 class="card-title">周问题趋势</h2>
-        <div class="trend__lg">
-          <span><i class="dot" style="background:var(--line-new)"></i>新增问题</span>
-          <span><i class="dot" style="background:var(--line-done)"></i>已解决问题</span>
+        <div class="trend__lg" title="点击图例可显示 / 隐藏对应曲线">
+          <span data-series="new" role="button" tabindex="0"><i class="dot" style="background:var(--line-new)"></i>新增问题</span>
+          <span data-series="done" role="button" tabindex="0"><i class="dot" style="background:var(--line-done)"></i>已解决问题</span>
         </div>
       </div>
       <div class="chart" id="trendChart"></div>
@@ -429,8 +466,27 @@ body{
 
 <script>
 (function(){
-  var CSS = getComputedStyle(document.documentElement);
-  var v = function(n){ return CSS.getPropertyValue(n).trim(); };
+  var NS = 'http://www.w3.org/2000/svg';
+  var REDUCED = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+  function el(n, a){
+    var e = document.createElementNS(NS, n);
+    for(var k in a) e.setAttribute(k, a[k]);
+    return e;
+  }
+  function easeOut(t){ return 1 - Math.pow(1 - t, 3); }
+  /* 线性补间；偏好减少动效时直接落到终态 */
+  function tween(dur, step, done){
+    if(REDUCED){ step(1); if(done) done(); return; }
+    var t0 = null;
+    function frame(ts){
+      if(t0 === null) t0 = ts;
+      var p = Math.min((ts - t0) / dur, 1);
+      step(p);
+      if(p < 1) requestAnimationFrame(frame); else if(done) done();
+    }
+    requestAnimationFrame(frame);
+  }
 
   /* ---------------- 环形图 ---------------- */
   var DONUTS = {
@@ -439,39 +495,88 @@ body{
     c:[ {c:'#5E8C6A',w:18},{c:'#C08A54',w:8},{c:'#5F7F9E',w:6},{c:'#BE5F5F',w:10} ]
   };
   var CX = 55, R = 42, SW = 16, GAP = 3.2, C = 2 * Math.PI * R;
-  var NS = 'http://www.w3.org/2000/svg';
 
-  document.querySelectorAll('[data-donut]').forEach(function(host){
+  function initDonut(host){
     var data = DONUTS[host.getAttribute('data-donut')];
     if(!data) return;
+
     var svg = host.querySelector('svg');
-    var total = data.reduce(function(s,d){ return s + d.w; }, 0);
+    var mid = host.querySelector('.donut__mid');
+    var midN = mid.querySelector('b');
+    var midCap = mid.querySelector('span');
+    var origN = midN.textContent;
+    var origCap = midCap.textContent;
+    var total = data.reduce(function(s, d){ return s + d.w; }, 0);
 
-    var track = document.createElementNS(NS,'circle');
-    track.setAttribute('cx',CX); track.setAttribute('cy',CX); track.setAttribute('r',R);
-    track.setAttribute('fill','none'); track.setAttribute('stroke','#F1F2F3');
-    track.setAttribute('stroke-width',SW);
-    svg.appendChild(track);
+    /* 图例行与扇区一一对应（顺序一致） */
+    var panel = host.closest('.panel');
+    var bd = panel.querySelector('.panel__bd');
+    var rows = [].slice.call(panel.querySelectorAll('.legend__r'));
 
-    var g = document.createElementNS(NS,'g');
-    g.setAttribute('transform','rotate(-90 ' + CX + ' ' + CX + ')');
+    svg.appendChild(el('circle', {cx:CX, cy:CX, r:R, fill:'none', stroke:'#F1F2F3', 'stroke-width':SW}));
+
+    var g = el('g', {transform:'rotate(-90 ' + CX + ' ' + CX + ')'});
     svg.appendChild(g);
 
-    var acc = 0;
+    var segs = [], acc = 0;
     data.forEach(function(d){
       var len = d.w / total * C;
-      var draw = Math.max(len - GAP, 0.8);
-      var seg = document.createElementNS(NS,'circle');
-      seg.setAttribute('cx',CX); seg.setAttribute('cy',CX); seg.setAttribute('r',R);
-      seg.setAttribute('fill','none');
-      seg.setAttribute('stroke',d.c);
-      seg.setAttribute('stroke-width',SW);
-      seg.setAttribute('stroke-dasharray', draw.toFixed(2) + ' ' + (C - draw).toFixed(2));
-      seg.setAttribute('stroke-dashoffset', (-acc / total * C).toFixed(2));
+      var seg = el('circle', {
+        cx:CX, cy:CX, r:R, fill:'none',
+        stroke:d.c, 'stroke-width':SW,
+        'stroke-dasharray':'0 ' + C.toFixed(2),
+        'stroke-dashoffset':(-acc / total * C).toFixed(2)
+      });
+      seg.__draw = Math.max(len - GAP, 0.8);
       g.appendChild(seg);
+      segs.push(seg);
       acc += d.w;
     });
-  });
+
+    /* 进场：逐段生长 */
+    var DUR = 620, STAGGER = 70, ALL = DUR + STAGGER * (segs.length - 1);
+    tween(ALL, function(p){
+      var now = p * ALL;
+      segs.forEach(function(seg, i){
+        var lp = Math.min(Math.max((now - i * STAGGER) / DUR, 0), 1);
+        var draw = seg.__draw * easeOut(lp);
+        seg.style.strokeDasharray = draw.toFixed(2) + ' ' + (C - draw).toFixed(2);
+      });
+    });
+
+    /* 悬停联动：扇区加粗、其余淡出、中心数字切换 */
+    function focus(i){
+      segs.forEach(function(s, j){
+        var on = (i === j);
+        s.style.strokeWidth = on ? (SW + 3.5) : SW;
+        s.style.opacity = (i == null || on) ? 1 : .28;
+      });
+      rows.forEach(function(r, j){
+        var on = (i === j);
+        r.classList.toggle('on', on);
+        r.style.opacity = (i == null || on) ? 1 : .45;
+      });
+      if(i == null){
+        midN.textContent = origN; midN.classList.remove('beat');
+        midCap.textContent = origCap;
+      } else {
+        var r = rows[i];
+        midN.textContent = r ? r.querySelector('.vl').textContent : origN;
+        midN.classList.add('beat');
+        midCap.textContent = r ? r.querySelector('.lb').textContent : origCap;
+      }
+    }
+
+    segs.forEach(function(s, i){
+      s.addEventListener('mouseenter', function(){ focus(i); });
+    });
+    rows.forEach(function(r, i){
+      r.addEventListener('mouseenter', function(){ focus(i); });
+    });
+    bd.addEventListener('mouseleave', function(){ focus(null); });
+  }
+
+  document.querySelectorAll('[data-donut]').forEach(initDonut);
 
   /* ---------------- 周问题趋势 ---------------- */
   var LABELS = ['11-04','11-05','11-06','11-07','11-08','11-09','11-10'];
@@ -491,20 +596,36 @@ body{
     }
     return d;
   }
-  function el(n, a){
-    var e = document.createElementNS(NS, n);
-    for(var k in a) e.setAttribute(k, a[k]);
-    return e;
+  var host = document.getElementById('trendChart');
+  var tip = document.createElement('div');
+  tip.className = 'tip';
+  host.appendChild(tip);
+
+  var tOff = { new:false, done:false };   /* 图例开关状态 */
+  var trefs = null;                        /* 当前渲染出的图形引用 */
+
+  function applySeries(){
+    if(!trefs) return;
+    var onNew = !tOff.new, onDone = !tOff.done;
+    trefs.newPath.style.opacity = onNew ? 1 : .13;
+    trefs.donePath.style.opacity = onDone ? 1 : .13;
+    trefs.area.style.opacity = onDone ? 1 : 0;
+    trefs.newDots.forEach(function(d){ d.style.opacity = onNew ? 1 : 0; });
+    trefs.hide();
   }
 
-  function renderTrend(){
-    var host = document.getElementById('trendChart');
+  function renderTrend(fresh){
+    var old = host.querySelector('svg');
+    if(old) old.remove();
+
     var W = Math.max(host.clientWidth, 320);
     var padL = 36, padR = 6, padT = 10, padB = 24;
     var pw = W - padL - padR, ph = H - padT - padB;
 
     var svg = el('svg', {height:H, viewBox:'0 0 ' + W + ' ' + H});
     svg.style.width = '100%';
+    host.appendChild(svg);
+    host.appendChild(tip);   /* 浮层保持最上层 */
 
     var xAt = function(i){ return padL + i * pw / (LABELS.length - 1); };
     var yAt = function(val){ return padT + ph * (1 - val / 100); };
@@ -519,46 +640,173 @@ body{
     });
 
     /* 纵向虚线 + 横轴标签（首尾向内对齐，避免出界） */
+    var xLabels = [];
     LABELS.forEach(function(lb, i){
       var x = xAt(i);
       svg.appendChild(el('line', {x1:x, y1:padT, x2:x, y2:padT + ph, stroke:'#F3F4F5', 'stroke-width':1, 'stroke-dasharray':'3 4'}));
       var anchor = i === 0 ? 'start' : (i === LABELS.length - 1 ? 'end' : 'middle');
-      var tx = el('text', {x:x, y:H - 7, 'text-anchor':anchor, 'font-size':11.5, fill:'#9AA1A8'});
+      var tx = el('text', {x:x, y:H - 7, 'text-anchor':anchor, 'font-size':11.5, fill:'#9AA1A8', style:'transition:fill .15s ease'});
       tx.textContent = lb;
       svg.appendChild(tx);
+      xLabels.push(tx);
     });
 
     /* 已解决曲线下方极浅色块 */
     var donePts = DONE.map(function(val, i){ return [xAt(i), yAt(val)]; });
-    var area = smooth(donePts, 0.17)
-             + ' L' + (padL + pw) + ',' + (padT + ph)
-             + ' L' + padL + ',' + (padT + ph) + ' Z';
-    svg.appendChild(el('path', {d:area, fill:'#F5F6F7'}));
+    var areaD = smooth(donePts, 0.17)
+              + ' L' + (padL + pw) + ',' + (padT + ph)
+              + ' L' + padL + ',' + (padT + ph) + ' Z';
+    var area = el('path', {d:areaD, fill:'#F5F6F7'});
+    area.style.transition = 'opacity 500ms ease';
+    svg.appendChild(area);
 
     /* 两条平滑曲线 */
     var newPts = NEW.map(function(val, i){ return [xAt(i), yAt(val)]; });
-    svg.appendChild(el('path', {
+    var newPath = el('path', {
       d:smooth(newPts, 0.17), fill:'none', stroke:'#566A7C',
       'stroke-width':1.8, 'stroke-linecap':'round', 'stroke-linejoin':'round'
-    }));
-    svg.appendChild(el('path', {
+    });
+    var donePath = el('path', {
       d:smooth(donePts, 0.17), fill:'none', stroke:'#A9835C',
       'stroke-width':1.8, 'stroke-linecap':'round', 'stroke-linejoin':'round'
-    }));
+    });
+    newPath.style.transition = 'opacity 220ms ease';
+    donePath.style.transition = 'opacity 220ms ease';
+    svg.appendChild(newPath);
+    svg.appendChild(donePath);
 
     /* 新增问题数据点 */
-    newPts.forEach(function(p){
-      svg.appendChild(el('circle', {cx:p[0], cy:p[1], r:3, fill:'#566A7C'}));
+    var newDots = newPts.map(function(p){
+      var c = el('circle', {cx:p[0], cy:p[1], r:3, fill:'#566A7C'});
+      c.style.transition = 'opacity 320ms ease';
+      svg.appendChild(c);
+      return c;
     });
 
-    host.innerHTML = '';
-    host.appendChild(svg);
+    /* —— 悬停层：竖向游标 + 高亮圆点 + 命中矩形 —— */
+    var guide = el('line', {y1:padT, y2:padT + ph, stroke:'#D8DCDF', 'stroke-width':1, 'stroke-dasharray':'3 4'});
+    guide.style.opacity = 0; guide.style.transition = 'opacity .14s ease';
+    svg.appendChild(guide);
+    var hnew = el('circle', {r:5, fill:'#fff', stroke:'#566A7C', 'stroke-width':2});
+    var hdone = el('circle', {r:5, fill:'#fff', stroke:'#A9835C', 'stroke-width':2});
+    [hnew, hdone].forEach(function(c){
+      c.style.opacity = 0; c.style.transition = 'opacity .14s ease,cx .1s ease,cy .1s ease';
+      svg.appendChild(c);
+    });
+    var hit = el('rect', {x:padL, y:padT, width:pw, height:ph, fill:'transparent'});
+    svg.appendChild(hit);
+
+    var lastI = -1, tw = 0, th = 0;
+
+    function hide(){
+      guide.style.opacity = 0;
+      hnew.style.opacity = 0;
+      hdone.style.opacity = 0;
+      xLabels.forEach(function(t){ t.setAttribute('fill', '#9AA1A8'); });
+      tip.classList.remove('on');
+      lastI = -1;
+    }
+
+    function show(i, e){
+      var rect = svg.getBoundingClientRect();
+      var hrect = host.getBoundingClientRect();
+      var scale = rect.width / W || 1;
+      var x = xAt(i);
+
+      guide.setAttribute('x1', x); guide.setAttribute('x2', x);
+      guide.style.opacity = 1;
+      if(tOff.done){ hdone.style.opacity = 0; }
+      else { hdone.setAttribute('cx', x); hdone.setAttribute('cy', yAt(DONE[i])); hdone.style.opacity = 1; }
+      if(tOff.new){ hnew.style.opacity = 0; }
+      else { hnew.setAttribute('cx', x); hnew.setAttribute('cy', yAt(NEW[i])); hnew.style.opacity = 1; }
+
+      xLabels.forEach(function(t, j){
+        t.setAttribute('fill', j === i ? '#5C636B' : '#9AA1A8');
+      });
+
+      if(i !== lastI){
+        var html = '<div class="tip__hd">' + LABELS[i] + '</div>';
+        if(!tOff.new) html += '<div class="tip__r"><i class="dot" style="background:#566A7C"></i>新增问题<b>' + NEW[i] + '</b></div>';
+        if(!tOff.done) html += '<div class="tip__r"><i class="dot" style="background:#A9835C"></i>已解决问题<b>' + DONE[i] + '</b></div>';
+        if(!tOff.new && !tOff.done){
+          var dv = NEW[i] - DONE[i];
+          html += '<div class="tip__r"><i class="dot" style="background:#D6D9DC"></i>净增<b>' + (dv > 0 ? '+' : '') + dv + '</b></div>';
+        }
+        tip.innerHTML = html;
+        tw = tip.offsetWidth; th = tip.offsetHeight;
+        lastI = i;
+      }
+      tip.classList.add('on');
+
+      var px = x * scale + (rect.left - hrect.left);
+      var left = px + 14;
+      if(left + tw > hrect.width - 4) left = px - tw - 14;
+      if(left < 4) left = 4;
+      var top = e.clientY - hrect.top - th / 2;
+      top = Math.max(4, Math.min(hrect.height - th - 4, top));
+      tip.style.left = left + 'px';
+      tip.style.top = top + 'px';
+    }
+
+    hit.addEventListener('mousemove', function(e){
+      var rect = svg.getBoundingClientRect();
+      var scale = rect.width / W || 1;
+      var vbX = (e.clientX - rect.left) / scale;
+      var i = Math.round((vbX - padL) / (pw / (LABELS.length - 1)));
+      show(Math.max(0, Math.min(LABELS.length - 1, i)), e);
+    });
+    hit.addEventListener('mouseleave', hide);
+
+    trefs = {newPath:newPath, donePath:donePath, area:area, newDots:newDots, hide:hide};
+
+    if(fresh && !REDUCED){
+      /* 进场：曲线自左向右生长，数据点依次浮现 */
+      [[newPath, 0], [donePath, 120]].forEach(function(p){
+        var path = p[0], delay = p[1];
+        var L = path.getTotalLength();
+        path.style.strokeDasharray = L + ' ' + L;
+        path.style.strokeDashoffset = L;
+        path.style.transition = 'stroke-dashoffset 900ms cubic-bezier(.33,1,.68,1) ' + delay + 'ms,opacity 220ms ease';
+      });
+      area.style.opacity = 0;
+      newDots.forEach(function(d){
+        d.style.opacity = 0;
+        d.style.transitionDelay = '0ms';
+      });
+      requestAnimationFrame(function(){
+        requestAnimationFrame(function(){
+          newPath.style.strokeDashoffset = 0;
+          donePath.style.strokeDashoffset = 0;
+          area.style.opacity = 1;
+          newDots.forEach(function(d, i){ d.style.transitionDelay = (520 + i * 55) + 'ms'; d.style.opacity = 1; });
+          window.setTimeout(function(){
+            newDots.forEach(function(d){ d.style.transitionDelay = '0ms'; });
+          }, 1600);
+        });
+      });
+    } else {
+      applySeries();
+    }
   }
 
-  renderTrend();
+  /* —— 图例：点击显示 / 隐藏对应曲线 —— */
+  document.querySelectorAll('.trend__lg span').forEach(function(s){
+    var key = s.getAttribute('data-series');
+    function toggle(){
+      tOff[key] = !tOff[key];
+      s.classList.toggle('off', tOff[key]);
+      applySeries();
+    }
+    s.addEventListener('click', toggle);
+    s.addEventListener('keydown', function(ev){
+      if(ev.key === 'Enter' || ev.key === ' '){ ev.preventDefault(); toggle(); }
+    });
+  });
+
+  renderTrend(true);
   var rt;
   window.addEventListener('resize', function(){
-    clearTimeout(rt); rt = setTimeout(renderTrend, 120);
+    clearTimeout(rt); rt = setTimeout(function(){ renderTrend(false); }, 120);
   });
 })();
 </script>
