@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>问题总览 · Dashboard</title>
+<style>
+:root{
+  /* —— 表面 —— */
+  --page:#F6F7F8;
+  --card:#FFFFFF;
+  --chip:#F7F8F9;
+  --track:#EFF1F2;
+  /* —— 文字 —— */
+  --ink:#1F2429;
+  --ink-2:#5C636B;
+  --ink-3:#9AA1A8;
+  /* —— 线条 —— */
+  --line:#ECEEF0;
+  --line-2:#F1F3F4;
+  /* —— 状态色（低饱和，仅用于图标/进度条/图例） —— */
+  --c-solved:#5E8C6A;
+  --c-temp:#C08A54;
+  --c-repro:#5F7F9E;
+  --c-open:#BE5F5F;
+  --c-late:#C25C52;
+  --c-accent:#4E7A6E;
+  /* —— 分类色（另一套低饱和） —— */
+  --g-product:#7C8AA0;
+  --g-system:#8CA586;
+  --g-flow:#C9A96A;
+  --g-data:#B7C1CB;
+  --g-other:#D6D9DC;
+  /* —— 曲线 —— */
+  --line-new:#566A7C;
+  --line-done:#A9835C;
+  /* —— 形体 —— */
+  --r:12px;
+  --r-sm:9px;
+  --r-xs:7px;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Inter","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --sidebar-w:200px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--page);color:var(--ink);
+  font-family:var(--sans);font-size:14px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  font-feature-settings:"tnum" 1,"kern" 1;
+}
+::selection{background:#DCE6E2;color:var(--ink)}
+
+/* 细线图标 */
+.ic{width:18px;height:18px;stroke:currentColor;stroke-width:1.6;fill:none;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.ic--sm{width:16px;height:16px;stroke-width:1.7}
+
+/* ============ 布局 ============ */
+.app{display:flex;min-height:100vh}
+
+/* ============ 左侧导航 ============ */
+.sidebar{
+  width:var(--sidebar-w);flex-shrink:0;background:var(--card);
+  border-right:1px solid var(--line);
+  display:flex;flex-direction:column;
+  position:sticky;top:0;align-self:flex-start;height:100vh;
+}
+.brand{display:flex;align-items:center;gap:10px;padding:20px 16px 18px}
+.brand svg{width:26px;height:26px;stroke:var(--ink);stroke-width:1.5;fill:none}
+.brand b{font-size:16px;font-weight:700;letter-spacing:-.01em}
+.nav{padding:4px 10px;display:flex;flex-direction:column;gap:2px}
+.nav a{
+  position:relative;display:flex;align-items:center;gap:11px;
+  padding:10px 10px 10px 13px;border-radius:var(--r-sm);
+  color:var(--ink-2);text-decoration:none;font-size:15px;font-weight:500;
+  transition:background .15s ease,color .15s ease;
+}
+.nav a:hover{background:#F5F6F7;color:var(--ink)}
+.nav a.on{background:#F2F3F4;color:var(--ink);font-weight:600}
+.nav a.on::before{
+  content:"";position:absolute;left:0;top:50%;transform:translateY(-50%);
+  width:3px;height:18px;border-radius:2px;background:var(--c-accent);
+}
+.nav a.on .ic{color:var(--c-accent)}
+.sidebar__foot{
+  margin-top:auto;border-top:1px solid var(--line);
+  padding:16px;display:flex;align-items:center;gap:11px;
+}
+.avatar{
+  width:32px;height:32px;border-radius:50%;flex-shrink:0;
+  background:#EDEFF1;color:var(--ink-2);
+  display:grid;place-items:center;font-size:13px;font-weight:700;
+}
+.sidebar__foot b{display:block;font-size:14px;font-weight:600;color:var(--ink);line-height:1.35}
+.sidebar__foot span{display:block;font-size:12px;color:var(--ink-3)}
+
+/* ============ 主区 ============ */
+.main{flex:1;min-width:0;padding:16px 20px 26px}
+.crumb{display:flex;align-items:center;gap:8px;color:var(--ink-3);font-size:14px;margin-bottom:10px}
+.crumb .ic{color:var(--ink-3)}
+.page-title{font-size:26px;font-weight:700;letter-spacing:-.025em;line-height:1.25;margin-bottom:14px}
+
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+}
+.card__hd{display:flex;align-items:center;gap:9px}
+.card__hd .ic{color:var(--ink-2)}
+.card-title{font-size:15px;font-weight:600;letter-spacing:-.005em}
+
+/* ============ 客户 ============ */
+.clients{padding:16px 20px 18px;margin-bottom:12px}
+.clients__body{display:grid;grid-template-columns:152px minmax(0,1fr);align-items:stretch}
+.clients__left{padding-right:22px;display:flex;flex-direction:column}
+.clients__left .card__hd{margin-bottom:14px}
+.clients__n{font-size:36px;font-weight:700;line-height:1.1;letter-spacing:-.028em}
+.clients__cap{font-size:14px;color:var(--ink-2);margin-top:4px}
+.clients__right{border-left:1px solid var(--line);padding-left:22px}
+.chips{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px}
+.chip{
+  height:32px;display:flex;align-items:center;justify-content:center;
+  background:var(--chip);border:1px solid var(--line-2);border-radius:var(--r-xs);
+  font-size:13px;color:var(--ink-3);white-space:nowrap;
+  padding:0 8px;overflow:hidden;text-overflow:ellipsis;
+}
+
+/* ============ 状态卡 ============ */
+.stats{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:12px}
+.stat{padding:16px 18px;min-height:132px;display:flex;flex-direction:column}
+.stat__hd{display:flex;align-items:center;gap:8px;font-size:14px;color:var(--ink-2);font-weight:500}
+.stat__n{font-size:32px;font-weight:700;letter-spacing:-.03em;line-height:1.15;margin-top:12px}
+.stat__ft{margin-top:auto;padding-top:10px;font-size:13px;color:var(--ink-3);display:flex;align-items:center;gap:6px}
+.stat__dv{display:inline-flex;align-items:center;gap:3px;font-weight:600}
+.arw{width:12px;height:12px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.stat__bar{margin-top:auto;padding-top:16px}
+.bar{height:7px;border-radius:4px;background:var(--track);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:4px}
+
+.c-solved{color:var(--c-solved)}
+.c-temp{color:var(--c-temp)}
+.c-repro{color:var(--c-repro)}
+.c-open{color:var(--c-open)}
+.c-late{color:var(--c-late)}
+
+/* ============ 趋势 ============ */
+.trend{padding:16px 22px 8px;margin-bottom:12px}
+.trend__hd{display:flex;align-items:center;gap:9px}
+.trend__lg{margin-left:auto;display:flex;align-items:center;gap:20px;font-size:13.5px;color:var(--ink-2)}
+.trend__lg span{display:inline-flex;align-items:center;gap:7px}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.chart{position:relative;margin-top:4px}
+.chart svg{display:block;width:100%}
+
+/* ============ 底部三卡 ============ */
+.analytics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.panel{padding:16px 18px 18px;display:flex;flex-direction:column}
+.panel__hd{display:flex;align-items:center;gap:9px;min-height:30px}
+.sel{margin-left:auto;position:relative;display:inline-flex;align-items:center}
+.sel select{
+  appearance:none;-webkit-appearance:none;
+  height:30px;padding:0 30px 0 12px;
+  font-family:var(--sans);font-size:13px;color:var(--ink-2);font-weight:500;
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-xs);
+  cursor:pointer;transition:border-color .15s ease;
+}
+.sel select:hover{border-color:#D6D9DC}
+.sel::after{
+  content:"";position:absolute;right:10px;top:50%;margin-top:-2px;
+  width:6px;height:6px;border-right:1.5px solid var(--ink-3);border-bottom:1.5px solid var(--ink-3);
+  transform:translateY(-1px) rotate(45deg);pointer-events:none;
+}
+.panel__bd{display:flex;align-items:center;gap:20px;margin-top:16px;flex:1}
+
+.donut{position:relative;width:92px;height:92px;flex-shrink:0}
+.donut svg{display:block;width:92px;height:92px}
+.donut__mid{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;pointer-events:none;
+}
+.donut__mid b{font-size:19px;font-weight:700;letter-spacing:-.03em;line-height:1.1}
+.donut__mid span{font-size:8.5px;color:var(--ink-3);margin-top:1px;white-space:nowrap}
+
+.legend{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px}
+.legend__r{
+  display:grid;grid-template-columns:8px 54px 28px 38px;
+  justify-content:start;align-items:center;column-gap:10px;font-size:13px;
+}
+.legend__r .lb{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.legend__r .vl{font-weight:700;color:var(--ink);text-align:right}
+.legend__r .pc{color:var(--ink-3);text-align:right}
+
+/* ============ 响应式 ============ */
+@media (max-width:1280px){
+  .stats{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .chips{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .analytics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .analytics .panel:nth-child(3){grid-column:span 2}
+}
+@media (max-width:1024px){
+  :root{--sidebar-w:186px}
+  .main{padding:14px 16px 22px}
+  .page-title{font-size:23px}
+  .clients__body{grid-template-columns:136px minmax(0,1fr)}
+  .clients__left{padding-right:18px}
+  .clients__right{padding-left:18px}
+  .chips{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .analytics{grid-template-columns:minmax(0,1fr)}
+  .analytics .panel:nth-child(3){grid-column:auto}
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ================= 左侧导航 ================= -->
+  <aside class="sidebar">
+    <div class="brand">
+      <svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2.75" y="2.75" width="18.5" height="18.5" rx="5.5"/>
+        <circle cx="8.6" cy="8.6" r="1.5"/><circle cx="15.4" cy="8.6" r="1.5"/>
+        <circle cx="8.6" cy="15.4" r="1.5"/><circle cx="15.4" cy="15.4" r="1.5"/>
+      </svg>
+      <b>问题管理</b>
+    </div>
+    <nav class="nav">
+      <a href="#" class="on"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.8"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.8"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.8"/></svg>总览</a>
+      <a href="#"><svg class="ic" viewBox="0 0 24 24"><path d="M8.5 6.5h12M8.5 12h12M8.5 17.5h12"/><circle cx="4" cy="6.5" r="1.15"/><circle cx="4" cy="12" r="1.15"/><circle cx="4" cy="17.5" r="1.15"/></svg>问题列表</a>
+      <a href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="9.5" cy="8" r="3.2"/><path d="M3.5 19v-1.4A3.6 3.6 0 0 1 7.1 14h4.8a3.6 3.6 0 0 1 3.6 3.6V19"/><path d="M16.2 5.1a3.2 3.2 0 0 1 0 5.8"/><path d="M20.5 19v-1.4a3.6 3.6 0 0 0-2.7-3.5"/></svg>客户管理</a>
+      <a href="#"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3.2 19 6v5.4c0 4.2-2.9 7.8-7 9-4.1-1.2-7-4.8-7-9V6z"/><path d="m9.3 11.9 2 2 3.5-3.9"/></svg>责任系统</a>
+      <a href="#"><svg class="ic" viewBox="0 0 24 24"><path d="M3.2 12.6V5.2A2 2 0 0 1 5.2 3.2h7.4L21 11.4a2 2 0 0 1 0 2.8l-6.8 6.8a2 2 0 0 1-2.8 0z"/><circle cx="8.2" cy="8.2" r="1.35"/></svg>问题分类</a>
+      <a href="#"><svg class="ic" viewBox="0 0 24 24"><path d="M5 20v-8.5M12 20V4.5M19 20v-6"/><path d="M3.2 20h17.6"/></svg>数据分析</a>
+      <a href="#"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M12 3.2v2.1M12 18.7v2.1M20.8 12h-2.1M5.3 12H3.2M18.2 5.8l-1.5 1.5M7.3 16.7l-1.5 1.5M18.2 18.2l-1.5-1.5M7.3 7.3 5.8 5.8"/></svg>系统设置</a>
+    </nav>
+    <div class="sidebar__foot">
+      <div class="avatar">U</div>
+      <div><b>用户</b><span>退出登录</span></div>
+    </div>
+  </aside>
+
+  <!-- ================= 主区 ================= -->
+  <main class="main">
+    <div class="crumb">
+      <svg class="ic ic--sm" viewBox="0 0 24 24"><rect x="3" y="4.2" width="18" height="15.6" rx="2.6"/><path d="M9.6 4.2v15.6"/></svg>
+      总览
+    </div>
+    <h1 class="page-title">问题总览</h1>
+
+    <!-- ---------- 客户 ---------- -->
+    <section class="card clients">
+      <div class="clients__body">
+        <div class="clients__left">
+          <div class="card__hd">
+            <svg class="ic" viewBox="0 0 24 24"><circle cx="9.5" cy="8" r="3.2"/><path d="M3.5 19v-1.4A3.6 3.6 0 0 1 7.1 14h4.8a3.6 3.6 0 0 1 3.6 3.6V19"/><path d="M16.2 5.1a3.2 3.2 0 0 1 0 5.8"/><path d="M20.5 19v-1.4a3.6 3.6 0 0 0-2.7-3.5"/></svg>
+            <h2 class="card-title">客户</h2>
+          </div>
+          <div class="clients__n">24</div>
+          <div class="clients__cap">客户总数量</div>
+        </div>
+        <div class="clients__right">
+          <div class="chips">
+            <div class="chip">华东科技</div><div class="chip">远航电子</div><div class="chip">新睿医疗</div><div class="chip">中科云联</div><div class="chip">天行智能</div><div class="chip">博远科技</div><div class="chip">理想生物</div><div class="chip">启明星辰</div>
+            <div class="chip">云创软件</div><div class="chip">联拓能源</div><div class="chip">智维科技</div><div class="chip">星海通信</div><div class="chip">东原航天</div><div class="chip">海川信息</div><div class="chip">数联智能</div><div class="chip">长风科技</div>
+            <div class="chip">银河动力</div><div class="chip">北辰电子</div><div class="chip">凌云装备</div><div class="chip">启锐微电子</div><div class="chip">深蓝科技</div><div class="chip">光启智能</div><div class="chip">信达软件</div><div class="chip">华域通信</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ---------- 状态卡 ---------- -->
+    <section class="stats">
+      <div class="card stat">
+        <div class="stat__hd c-solved">
+          <svg class="ic ic--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.2 12.4 2.5 2.5 5.1-5.4"/></svg>
+          <span>已解决</span>
+        </div>
+        <div class="stat__n">128</div>
+        <div class="stat__ft">较上周
+          <span class="stat__dv c-solved">+12%
+            <svg class="arw" viewBox="0 0 16 16"><path d="M4.5 11.5l7-7M6.6 4.5h4.9v4.9"/></svg>
+          </span>
+        </div>
+      </div>
+      <div class="card stat">
+        <div class="stat__hd c-temp">
+          <svg class="ic ic--sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.4V12l3.1 1.9"/></svg>
+          <span>临时解决</span>
+        </div>
+        <div class="stat__n">36</div>
+        <div class="stat__ft">较上周
+          <span class="stat__dv c-temp">-8%
+            <svg class="arw" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.4 6.6v4.9H6.5"/></svg>
+          </span>
+        </div>
+      </div>
+      <div class="card stat">
+        <div class="stat__hd c-repro">
+          <svg class="ic ic--sm" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.4-5.7"/><path d="M20 4.2v4.1h-4.1"/></svg>
+          <span>待复现</span>
+        </div>
+        <div class="stat__n">24</div>
+        <div class="stat__ft">较上周
+          <span class="stat__dv c-open">-20%
+            <svg class="arw" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.4 6.6v4.9H6.5"/></svg>
+          </span>
+        </div>
+      </div>
+      <div class="card stat">
+        <div class="stat__hd c-open">
+          <svg class="ic ic--sm" viewBox="0 0 24 24"><path d="M12 4.4 20.2 18.6H3.8z"/><path d="M12 9.8v4"/><path d="M12 16.7h.01"/></svg>
+          <span>未解决</span>
+        </div>
+        <div class="stat__n">18</div>
+        <div class="stat__ft">较上周
+          <span class="stat__dv c-open">+6%
+            <svg class="arw" viewBox="0 0 16 16"><path d="M4.5 11.5l7-7M6.6 4.5h4.9v4.9"/></svg>
+          </span>
+        </div>
+      </div>
+      <div class="card stat">
+        <div class="stat__hd c-solved">
+          <svg class="ic ic--sm" viewBox="0 0 24 24"><path d="M18.6 5.4 5.4 18.6"/><circle cx="7.6" cy="7.6" r="2.6"/><circle cx="16.4" cy="16.4" r="2.6"/></svg>
+          <span>闭环率</span>
+        </div>
+        <div class="stat__n">76%</div>
+        <div class="stat__bar"><div class="bar"><i style="width:76%;background:var(--c-solved)"></i></div></div>
+      </div>
+      <div class="card stat">
+        <div class="stat__hd c-late">
+          <svg class="ic ic--sm" viewBox="0 0 24 24"><circle cx="12" cy="13" r="7.4"/><path d="M12 9.6V13l2.6 1.6"/><path d="M4.7 5.4 7.3 3.1M19.3 5.4 16.7 3.1"/></svg>
+          <span>未按时闭环率</span>
+        </div>
+        <div class="stat__n">12%</div>
+        <div class="stat__bar"><div class="bar"><i style="width:12%;background:var(--c-late)"></i></div></div>
+      </div>
+    </section>
+
+    <!-- ---------- 周问题趋势 ---------- -->
+    <section class="card trend">
+      <div class="trend__hd">
+        <svg class="ic" viewBox="0 0 24 24"><path d="M4.5 20V12M10 20V5.5M15.5 20v-6.5M21 20V9"/><path d="M2.5 20h19"/></svg>
+        <h2 class="card-title">周问题趋势</h2>
+        <div class="trend__lg">
+          <span><i class="dot" style="background:var(--line-new)"></i>新增问题</span>
+          <span><i class="dot" style="background:var(--line-done)"></i>已解决问题</span>
+        </div>
+      </div>
+      <div class="chart" id="trendChart"></div>
+    </section>
+
+    <!-- ---------- 底部三张分析卡 ---------- -->
+    <section class="analytics">
+
+      <div class="card panel">
+        <div class="panel__hd">
+          <svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.4"/><path d="M5.4 19.5v-1.2A4 4 0 0 1 9.4 14.3h5.2a4 4 0 0 1 4 4v1.2"/></svg>
+          <h2 class="card-title">客户分析</h2>
+          <label class="sel">
+            <select aria-label="选择客户">
+              <option selected>全部客户</option>
+              <option>华东科技</option>
+              <option>远航电子</option>
+              <option>新睿医疗</option>
+            </select>
+          </label>
+        </div>
+        <div class="panel__bd">
+          <div class="donut" data-donut="a">
+            <svg viewBox="0 0 110 110"></svg>
+            <div class="donut__mid"><b>56</b><span>问题总数</span></div>
+          </div>
+          <div class="legend">
+            <div class="legend__r"><i class="dot" style="background:var(--c-solved)"></i><span class="lb">已解决</span><span class="vl">28</span><span class="pc">50%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--c-temp)"></i><span class="lb">临时解决</span><span class="vl">10</span><span class="pc">18%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--c-repro)"></i><span class="lb">待复现</span><span class="vl">8</span><span class="pc">14%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--c-open)"></i><span class="lb">未解决</span><span class="vl">10</span><span class="pc">18%</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card panel">
+        <div class="panel__hd">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M12 3.4 20.4 7 12 10.6 3.6 7z"/><path d="m3.6 12 8.4 3.6L20.4 12"/><path d="m3.6 16.6 8.4 3.6 8.4-3.6"/></svg>
+          <h2 class="card-title">问题分类</h2>
+        </div>
+        <div class="panel__bd">
+          <div class="donut" data-donut="b">
+            <svg viewBox="0 0 110 110"></svg>
+            <div class="donut__mid"><b>186</b><span>问题总数</span></div>
+          </div>
+          <div class="legend">
+            <div class="legend__r"><i class="dot" style="background:var(--g-product)"></i><span class="lb">产品问题</span><span class="vl">68</span><span class="pc">37%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--g-system)"></i><span class="lb">系统问题</span><span class="vl">52</span><span class="pc">28%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--g-flow)"></i><span class="lb">流程问题</span><span class="vl">24</span><span class="pc">13%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--g-data)"></i><span class="lb">数据问题</span><span class="vl">18</span><span class="pc">10%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--g-other)"></i><span class="lb">其他</span><span class="vl">24</span><span class="pc">13%</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card panel">
+        <div class="panel__hd">
+          <svg class="ic" viewBox="0 0 24 24"><path d="M12 3.2 19 6v5.4c0 4.2-2.9 7.8-7 9-4.1-1.2-7-4.8-7-9V6z"/><path d="m9.3 11.9 2 2 3.5-3.9"/></svg>
+          <h2 class="card-title">责任系统</h2>
+          <label class="sel">
+            <select aria-label="选择责任系统">
+              <option selected>全部系统</option>
+              <option>订单系统</option>
+              <option>支付系统</option>
+              <option>库存系统</option>
+            </select>
+          </label>
+        </div>
+        <div class="panel__bd">
+          <div class="donut" data-donut="c">
+            <svg viewBox="0 0 110 110"></svg>
+            <div class="donut__mid"><b>42</b><span>问题总数</span></div>
+          </div>
+          <div class="legend">
+            <div class="legend__r"><i class="dot" style="background:var(--c-solved)"></i><span class="lb">已解决</span><span class="vl">18</span><span class="pc">43%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--c-temp)"></i><span class="lb">临时解决</span><span class="vl">8</span><span class="pc">19%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--c-repro)"></i><span class="lb">待复现</span><span class="vl">6</span><span class="pc">14%</span></div>
+            <div class="legend__r"><i class="dot" style="background:var(--c-open)"></i><span class="lb">未解决</span><span class="vl">10</span><span class="pc">24%</span></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+</div>
+
+<script>
+(function(){
+  var CSS = getComputedStyle(document.documentElement);
+  var v = function(n){ return CSS.getPropertyValue(n).trim(); };
+
+  /* ---------------- 环形图 ---------------- */
+  var DONUTS = {
+    a:[ {c:'#5E8C6A',w:28},{c:'#C08A54',w:10},{c:'#5F7F9E',w:8},{c:'#BE5F5F',w:10} ],
+    b:[ {c:'#7C8AA0',w:68},{c:'#8CA586',w:52},{c:'#C9A96A',w:24},{c:'#B7C1CB',w:18},{c:'#D6D9DC',w:24} ],
+    c:[ {c:'#5E8C6A',w:18},{c:'#C08A54',w:8},{c:'#5F7F9E',w:6},{c:'#BE5F5F',w:10} ]
+  };
+  var CX = 55, R = 42, SW = 16, GAP = 3.2, C = 2 * Math.PI * R;
+  var NS = 'http://www.w3.org/2000/svg';
+
+  document.querySelectorAll('[data-donut]').forEach(function(host){
+    var data = DONUTS[host.getAttribute('data-donut')];
+    if(!data) return;
+    var svg = host.querySelector('svg');
+    var total = data.reduce(function(s,d){ return s + d.w; }, 0);
+
+    var track = document.createElementNS(NS,'circle');
+    track.setAttribute('cx',CX); track.setAttribute('cy',CX); track.setAttribute('r',R);
+    track.setAttribute('fill','none'); track.setAttribute('stroke','#F1F2F3');
+    track.setAttribute('stroke-width',SW);
+    svg.appendChild(track);
+
+    var g = document.createElementNS(NS,'g');
+    g.setAttribute('transform','rotate(-90 ' + CX + ' ' + CX + ')');
+    svg.appendChild(g);
+
+    var acc = 0;
+    data.forEach(function(d){
+      var len = d.w / total * C;
+      var draw = Math.max(len - GAP, 0.8);
+      var seg = document.createElementNS(NS,'circle');
+      seg.setAttribute('cx',CX); seg.setAttribute('cy',CX); seg.setAttribute('r',R);
+      seg.setAttribute('fill','none');
+      seg.setAttribute('stroke',d.c);
+      seg.setAttribute('stroke-width',SW);
+      seg.setAttribute('stroke-dasharray', draw.toFixed(2) + ' ' + (C - draw).toFixed(2));
+      seg.setAttribute('stroke-dashoffset', (-acc / total * C).toFixed(2));
+      g.appendChild(seg);
+      acc += d.w;
+    });
+  });
+
+  /* ---------------- 周问题趋势 ---------------- */
+  var LABELS = ['11-04','11-05','11-06','11-07','11-08','11-09','11-10'];
+  var NEW  = [42,72,44,58,74,42,62];
+  var DONE = [22,46,30,34,50,24,42];
+  var TICKS = [0,20,40,60,80,100];
+  var H = 186;
+
+  function smooth(pts, t){
+    if(pts.length < 2) return '';
+    var d = 'M' + pts[0][0] + ',' + pts[0][1];
+    for(var i = 0; i < pts.length - 1; i++){
+      var p0 = pts[i-1] || pts[i], p1 = pts[i], p2 = pts[i+1], p3 = pts[i+2] || p2;
+      var c1x = p1[0] + (p2[0]-p0[0]) * t, c1y = p1[1] + (p2[1]-p0[1]) * t;
+      var c2x = p2[0] - (p3[0]-p1[0]) * t, c2y = p2[1] - (p3[1]-p1[1]) * t;
+      d += ' C' + c1x.toFixed(2) + ',' + c1y.toFixed(2) + ' ' + c2x.toFixed(2) + ',' + c2y.toFixed(2) + ' ' + p2[0] + ',' + p2[1];
+    }
+    return d;
+  }
+  function el(n, a){
+    var e = document.createElementNS(NS, n);
+    for(var k in a) e.setAttribute(k, a[k]);
+    return e;
+  }
+
+  function renderTrend(){
+    var host = document.getElementById('trendChart');
+    var W = Math.max(host.clientWidth, 320);
+    var padL = 36, padR = 6, padT = 10, padB = 24;
+    var pw = W - padL - padR, ph = H - padT - padB;
+
+    var svg = el('svg', {height:H, viewBox:'0 0 ' + W + ' ' + H});
+    svg.style.width = '100%';
+
+    var xAt = function(i){ return padL + i * pw / (LABELS.length - 1); };
+    var yAt = function(val){ return padT + ph * (1 - val / 100); };
+
+    /* 横向网格线（极浅） */
+    TICKS.forEach(function(tk){
+      var y = yAt(tk);
+      svg.appendChild(el('line', {x1:padL, y1:y, x2:W - padR, y2:y, stroke:'#F1F2F3', 'stroke-width':1}));
+      var tx = el('text', {x:padL - 11, y:y + 4, 'text-anchor':'end', 'font-size':11.5, fill:'#9AA1A8'});
+      tx.textContent = tk;
+      svg.appendChild(tx);
+    });
+
+    /* 纵向虚线 + 横轴标签（首尾向内对齐，避免出界） */
+    LABELS.forEach(function(lb, i){
+      var x = xAt(i);
+      svg.appendChild(el('line', {x1:x, y1:padT, x2:x, y2:padT + ph, stroke:'#F3F4F5', 'stroke-width':1, 'stroke-dasharray':'3 4'}));
+      var anchor = i === 0 ? 'start' : (i === LABELS.length - 1 ? 'end' : 'middle');
+      var tx = el('text', {x:x, y:H - 7, 'text-anchor':anchor, 'font-size':11.5, fill:'#9AA1A8'});
+      tx.textContent = lb;
+      svg.appendChild(tx);
+    });
+
+    /* 已解决曲线下方极浅色块 */
+    var donePts = DONE.map(function(val, i){ return [xAt(i), yAt(val)]; });
+    var area = smooth(donePts, 0.17)
+             + ' L' + (padL + pw) + ',' + (padT + ph)
+             + ' L' + padL + ',' + (padT + ph) + ' Z';
+    svg.appendChild(el('path', {d:area, fill:'#F5F6F7'}));
+
+    /* 两条平滑曲线 */
+    var newPts = NEW.map(function(val, i){ return [xAt(i), yAt(val)]; });
+    svg.appendChild(el('path', {
+      d:smooth(newPts, 0.17), fill:'none', stroke:'#566A7C',
+      'stroke-width':1.8, 'stroke-linecap':'round', 'stroke-linejoin':'round'
+    }));
+    svg.appendChild(el('path', {
+      d:smooth(donePts, 0.17), fill:'none', stroke:'#A9835C',
+      'stroke-width':1.8, 'stroke-linecap':'round', 'stroke-linejoin':'round'
+    }));
+
+    /* 新增问题数据点 */
+    newPts.forEach(function(p){
+      svg.appendChild(el('circle', {cx:p[0], cy:p[1], r:3, fill:'#566A7C'}));
+    });
+
+    host.innerHTML = '';
+    host.appendChild(svg);
+  }
+
+  renderTrend();
+  var rt;
+  window.addEventListener('resize', function(){
+    clearTimeout(rt); rt = setTimeout(renderTrend, 120);
+  });
+})();
+</script>
+</body>
+</html>
