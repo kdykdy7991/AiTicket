@@ -132,9 +132,7 @@ PRIORITY_VALUES: frozenset[str] = frozenset(p.value for p in Priority)
 
 class VerificationStatus(StrEnum):
     RESOLVED = "resolved"
-    TEMPORARILY_RESOLVED = "temporarily_resolved"
-    PENDING_REPRODUCTION = "pending_reproduction"
-    UNRESOLVED = "unresolved"
+    SUSPENDED = "suspended"  # 挂起
 
 
 VERIFICATION_STATUS_VALUES: frozenset[str] = frozenset(

@@ -6,7 +6,7 @@
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -16,6 +16,7 @@ from app.core.security import hash_password
 from app.domain.poc_workflow import (
     ALL_ROLES,
     BusinessRole,
+    MAIN_FLOW_STATES,
     Priority,
     STATE_ORDER,
     TicketAction,
@@ -411,6 +412,39 @@ async def poc_workflow_meta(user: User = Depends(get_current_user)):
 
 stats_router = APIRouter(tags=["stats"])
 
+#: 质量评审（待验证确认）之前的主流程阶段
+PRE_QUALITY_REVIEW_STATE_VALUES: frozenset[str] = frozenset(
+    state.value
+    for state in MAIN_FLOW_STATES[: MAIN_FLOW_STATES.index(TicketState.PENDING_QUALITY_REVIEW)]
+)
+
+
+def _pre_quality_review_condition():
+    """流程尚未走到质量评审（退回时按退回目标节点判断）。"""
+    return or_(
+        Ticket.state.in_(PRE_QUALITY_REVIEW_STATE_VALUES),
+        (Ticket.state == TicketState.RETURNED.value)
+        & Ticket.return_to_state.in_(PRE_QUALITY_REVIEW_STATE_VALUES),
+    )
+
+
+def _ticket_category_expr():
+    """统一问题分类（卡片计数与状态饼图同源）：
+
+    评审前阶段优先按是否有临时处置措施分为 temporary / processing；
+    评审之后按质量评审结论分为 resolved / suspended；其余历史数据归 other。
+    """
+    has_temporary_measure = func.coalesce(func.btrim(Ticket.temporary_measure), "") != ""
+    return case(
+        (
+            _pre_quality_review_condition(),
+            case((has_temporary_measure, "temporary"), else_="processing"),
+        ),
+        (Ticket.verification_status == VerificationStatus.RESOLVED.value, "resolved"),
+        (Ticket.verification_status == VerificationStatus.SUSPENDED.value, "suspended"),
+        else_="other",
+    )
+
 
 def _scoped_conditions(user: User):
     conditions = [Ticket.legacy_state.is_(None), Ticket.is_draft == False]  # noqa: E712
@@ -456,37 +490,31 @@ async def dashboard_stats(
     closed_count = await _count(
         db, effective_base + [Ticket.state == TicketState.CLOSED.value]
     )
-    resolved_count = await _count(
-        db, effective_base + [Ticket.verification_status == VerificationStatus.RESOLVED.value]
-    )
-    temporarily_resolved_count = await _count(
-        db, effective_base
-        + [Ticket.verification_status == VerificationStatus.TEMPORARILY_RESOLVED.value]
-    )
-    pending_reproduction_count = await _count(
-        db, effective_base
-        + [Ticket.verification_status == VerificationStatus.PENDING_REPRODUCTION.value]
-    )
-    unresolved_count = await _count(
-        db, effective_base + [Ticket.verification_status == VerificationStatus.UNRESOLVED.value]
-    )
-    pending_status_count = await _count(
-        db, effective_base + [Ticket.verification_status.is_(None)]
-    )
+    # 统一问题分类：卡片计数与状态饼图同源
+    category_expr = _ticket_category_expr()
+    category_rows = (
+        await db.execute(
+            select(category_expr, func.count(Ticket.id))
+            .where(*effective_base)
+            .group_by(category_expr)
+        )
+    ).all()
+    category_counts: dict[str, int] = {key: count for key, count in category_rows}
+    resolved_count = category_counts.get("resolved", 0)
+    temporarily_resolved_count = category_counts.get("temporary", 0)
+    suspended_count = category_counts.get("suspended", 0)
+    processing_count = category_counts.get("processing", 0)
     plan_eligible_count = await _count(
         db, effective_base + [Ticket.planned_completion_at.is_not(None)]
     )
+    # 超时：有计划完成时间、计划时间已过、且流程仍未到达质量评审阶段
     overdue_plan_count = await _count(
         db,
         effective_base
         + [
             Ticket.planned_completion_at.is_not(None),
-            or_(
-                (Ticket.closed_at.is_not(None))
-                & (Ticket.closed_at > Ticket.planned_completion_at),
-                (Ticket.closed_at.is_(None))
-                & (Ticket.planned_completion_at < now),
-            ),
+            Ticket.planned_completion_at < now,
+            _pre_quality_review_condition(),
         ],
     )
     overdue_count = await _count(
@@ -529,34 +557,32 @@ async def dashboard_stats(
         await db.execute(
             select(
                 Ticket.customer_name,
-                Ticket.verification_status,
+                category_expr,
                 func.count(Ticket.id),
             )
             .where(*effective_base, Ticket.customer_name.is_not(None))
-            .group_by(Ticket.customer_name, Ticket.verification_status)
+            .group_by(Ticket.customer_name, category_expr)
         )
     ).all()
     by_customer_status: dict[str, dict[str, int]] = {}
-    for customer_name, verification_status, count in customer_status_rows:
-        status_key = verification_status or "pending"
-        by_customer_status.setdefault(customer_name, {})[status_key] = count
+    for customer_name, category, count in customer_status_rows:
+        by_customer_status.setdefault(customer_name, {})[category] = count
     skill_group_status_rows = (
         await db.execute(
             select(
                 SkillGroup.name,
-                Ticket.verification_status,
+                category_expr,
                 func.count(Ticket.id),
             )
             .select_from(Ticket)
             .join(SkillGroup, SkillGroup.id == Ticket.skill_group_id)
             .where(*effective_base)
-            .group_by(SkillGroup.name, Ticket.verification_status)
+            .group_by(SkillGroup.name, category_expr)
         )
     ).all()
     by_skill_group_status: dict[str, dict[str, int]] = {}
-    for group_name, verification_status, count in skill_group_status_rows:
-        status_key = verification_status or "pending"
-        by_skill_group_status.setdefault(group_name, {})[status_key] = count
+    for group_name, category, count in skill_group_status_rows:
+        by_skill_group_status.setdefault(group_name, {})[category] = count
     group_rows = (
         await db.execute(
             select(SkillGroup.name, func.count(Ticket.id))
@@ -589,14 +615,14 @@ async def dashboard_stats(
             ),
             "resolved_count": resolved_count,
             "temporarily_resolved_count": temporarily_resolved_count,
-            "pending_reproduction_count": pending_reproduction_count,
-            "unresolved_count": unresolved_count,
-            "pending_status_count": pending_status_count,
-            "resolution_rate": round(resolved_count / effective_total, 4) if effective_total else 0.0,
-            "workflow_closure_rate": round(closed_count / effective_total, 4) if effective_total else 0.0,
+            "suspended_count": suspended_count,
+            "processing_count": processing_count,
+            # 闭环率 = 已解决 / 有效总数；未按时闭环率 = 超时 / 有计划完成时间数。
+            # 分母为 0（如导入数据尚不完整）时返回 null，前端以占位符展示。
+            "resolution_rate": round(resolved_count / effective_total, 4) if effective_total else None,
             "plan_eligible_count": plan_eligible_count,
             "overdue_plan_count": overdue_plan_count,
-            "overdue_closure_rate": round(overdue_plan_count / plan_eligible_count, 4) if plan_eligible_count else 0.0,
+            "overdue_closure_rate": round(overdue_plan_count / plan_eligible_count, 4) if plan_eligible_count else None,
             "plan_coverage_rate": round(plan_eligible_count / effective_total, 4) if effective_total else 0.0,
             "customer_count": len(customer_rows),
             "by_customer": {name: count for name, count in customer_rows},
@@ -606,7 +632,7 @@ async def dashboard_stats(
             "by_priority": await grouped(Ticket.priority),
             "by_skill_group": {name: count for name, count in group_rows},
             "by_skill_group_status": by_skill_group_status,
-            "by_verification_status": await grouped(Ticket.verification_status),
+            "by_category": category_counts,
         }
     }
 

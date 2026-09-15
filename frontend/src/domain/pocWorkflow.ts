@@ -58,9 +58,7 @@ export const PRIORITY_LABELS: Record<PocPriority, string> = Object.fromEntries(
 
 export const VERIFICATION_STATUS_OPTIONS = [
   { value: 'resolved', label: '已解决' },
-  { value: 'temporarily_resolved', label: '临时解决' },
-  { value: 'pending_reproduction', label: '待复现' },
-  { value: 'unresolved', label: '未解决' },
+  { value: 'suspended', label: '挂起' },
 ] as const
 
 export type VerificationStatus = typeof VERIFICATION_STATUS_OPTIONS[number]['value']

@@ -435,13 +435,13 @@ async def test_return_path_quality_review_to_processing(api):
         ticket_id,
         "pass_review",
         payload={
-            "verification_status": "temporarily_resolved",
-            "verification_conclusion": "临时解决，后续跟踪",
+            "verification_status": "suspended",
+            "verification_conclusion": "挂起，后续跟踪",
             "quality_review_result": "同意入库",
         },
     )
     assert detail["state"] == "pending_final_approval"
-    assert detail["verification_status"] == "temporarily_resolved"
+    assert detail["verification_status"] == "suspended"
 
 
 async def test_return_target_is_fixed_per_node(api):

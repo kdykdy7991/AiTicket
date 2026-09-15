@@ -82,7 +82,7 @@
 | --- | --- | --- | --- | --- |
 | `pending_approval` | `approve` | `pending_routing` | `approver` | 可选审批意见 |
 | `pending_routing` | `route` | `planning` | `taskforce` | `skill_group_id`、`subsystem_owner_id`；`confirmation_comment` 必填 |
-| `planning` | `submit_plan` | `pending_plan_confirmation` | 对应 `subsystem` | `initial_investigation`、`long_term_measure`、`planned_completion_at`；临时措施可选 |
+| `planning` | `submit_plan` | `pending_plan_confirmation` | 对应 `subsystem` | `initial_investigation`、`long_term_measure`、`planned_completion_at`；临时处置措施可选 |
 | `pending_plan_confirmation` | `confirm_plan` | `processing` | 创建该问题的 `presales` | 可选确认意见 |
 | `processing` | `submit_analysis` | `pending_quality_review` | 对应 `subsystem` | `root_cause`、`analysis_report`（举一反三） |
 | `pending_quality_review` | `pass_review` | `pending_final_approval` | `quality` | `verification_status`、`verification_conclusion`、`quality_review_result` |
@@ -173,7 +173,15 @@
 | `verification_conclusion` | text | 质量评审 |
 | `quality_review_result` | text | 质量评审 |
 
-`verification_status` 固定值：`resolved`、`temporarily_resolved`、`pending_reproduction`、`unresolved`。
+`verification_status` 固定值：`resolved`（已解决）、`suspended`（挂起）。
+
+> 历史值 `temporarily_resolved`（临时解决）、`pending_reproduction`（待复现）、`unresolved`（未解决）已废弃。
+>
+> 总览（卡片与分析饼图）使用统一的**问题分类**，与本字段不完全等同：
+> - 流程未到质量评审（退回时看退回目标）：有 `temporary_measure`（临时处置措施）→ `temporary`（临时解决），否则 → `processing`（处理中）；
+> - 已到/过质量评审：本字段为 `resolved` → 已解决，`suspended` → 挂起，其余历史值 → `other`（其他）。
+>
+> 分类由 `/stats/dashboard` 一次 CASE 分组产出（`by_category` / `by_customer_status` / `by_skill_group_status` 同源）。
 
 ## 6. API 契约
 
