@@ -59,7 +59,7 @@ async def test_one_account_covers_two_roles_in_same_ticket(api):
     api.as_("multi01")
     planning = await api.detail(ticket_id)
     assert planning["state"] == "planning"
-    assert planning["allowed_actions"] == ["submit_plan"]
+    assert planning["allowed_actions"] == ["submit_plan", "return"]
 
     planned = await api.acted(
         ticket_id,
@@ -290,7 +290,7 @@ async def test_skill_groups_only_kept_for_subsystem_role(api):
     assert target["roles"] == ["quality"]
 
 
-@pytest.mark.parametrize("username", ["presales01", "subsystem01", "quality01"])
+@pytest.mark.parametrize("username", ["presales01", "subsystem02", "quality01"])
 async def test_single_role_users_unchanged(api, username):
     """存量单角色账号行为不变。"""
     api.as_(username)

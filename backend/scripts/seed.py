@@ -2,7 +2,7 @@
 
 在 `alembic upgrade head` 之后执行，写入：
 - 五个分系统（skill_groups）
-- 六个角色（含隐藏管理员）的联调账号
+- 七个角色（含隐藏管理员）的联调账号
 - subsystem 用户与分系统的关联
 
 可重复执行：按 username / name 做 upsert，不会产生重复数据，也不会改动已有工单。
@@ -63,13 +63,16 @@ USERS = [
     # 邱庆举同时是批准人和应用平台负责人：一人多角色，只用一个账号
     ("approver01", "邱庆举", ["approver", "subsystem"], "应用平台"),
     ("taskforce01", "陈毅君", ["taskforce"], None),
-    ("subsystem01", "邓雪群", ["subsystem"], "系统总体"),
+    ("subsystem01", "邓雪群", ["taskforce", "subsystem"], "系统总体"),
     ("subsystem02", "卢翔", ["subsystem"], "卫星平台"),
     ("subsystem03", "余华伟", ["subsystem"], "终端系统"),
     ("subsystem05", "倪汉华", ["subsystem"], "测运控平台"),
     ("quality01", "金凯", ["quality"], None),
     ("quality02", "马祥艺", ["quality"], None),
     ("quality03", "巫雪峰", ["quality"], None),
+    # 领导账号：全量查看正式工单，不参与流程且无写权限
+    ("Tony", "领导账号一", ["leader"], None),
+    ("Edison", "领导账号二", ["leader"], None),
 ]
 
 

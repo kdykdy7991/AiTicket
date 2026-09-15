@@ -4,6 +4,7 @@ export const BUSINESS_ROLE_OPTIONS = [
   { value: 'taskforce', label: '专项小组' },
   { value: 'subsystem', label: '分系统' },
   { value: 'quality', label: '质量' },
+  { value: 'leader', label: '领导' },
 ] as const
 
 export const SYSTEM_ROLE_OPTIONS = [

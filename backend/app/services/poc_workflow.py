@@ -94,7 +94,7 @@ def actor_has_role(actor: Any, *roles: BusinessRole | str) -> bool:
 
 
 def ticket_scope(actor: Any) -> ColumnElement | None:
-    """角色数据范围条件。返回 None 表示不受限（admin/quality）。
+    """角色数据范围条件。返回 None 表示不受限（admin/quality/leader）。
 
     多角色用户取各角色数据范围的**并集**。
     列表、详情、附件下载、导出必须复用同一条件。
@@ -102,7 +102,7 @@ def ticket_scope(actor: Any) -> ColumnElement | None:
     roles = actor_roles(actor)
     if not roles:
         return false()
-    if roles & {BusinessRole.ADMIN.value, BusinessRole.QUALITY.value}:
+    if roles & {BusinessRole.ADMIN.value, BusinessRole.QUALITY.value, BusinessRole.LEADER.value}:
         return None
 
     conditions: list[ColumnElement] = []
@@ -150,7 +150,7 @@ def can_view(ticket: Any, actor: Any) -> bool:
     roles = actor_roles(actor)
     if getattr(ticket, "is_draft", False):
         return ticket.creator_id == actor.id or BusinessRole.ADMIN.value in roles
-    if roles & {BusinessRole.ADMIN.value, BusinessRole.QUALITY.value}:
+    if roles & {BusinessRole.ADMIN.value, BusinessRole.QUALITY.value, BusinessRole.LEADER.value}:
         return True
     if BusinessRole.TASKFORCE.value in roles and taskforce_visible(
         ticket.state, ticket.return_to_state
@@ -182,6 +182,8 @@ def ensure_can_view(ticket: Any, actor: Any) -> None:
 
 def _return_target_matches(ticket: Any, actor: Any) -> bool:
     target = ticket.return_to_state
+    if target == TicketState.PENDING_ROUTING.value:
+        return actor_has_role(actor, BusinessRole.TASKFORCE)
     if target == TicketState.PENDING_APPROVAL.value:
         return actor_has_role(actor, BusinessRole.PRESALES) and ticket.creator_id == actor.id
     if target in (TicketState.PLANNING.value, TicketState.PROCESSING.value):

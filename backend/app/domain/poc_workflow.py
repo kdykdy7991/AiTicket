@@ -15,13 +15,15 @@ from enum import StrEnum
 
 
 class BusinessRole(StrEnum):
-    """固定业务角色，仅允许以下六个编码。历史客服角色编码一律不再接受。"""
+    """固定业务角色。历史客服角色编码一律不再接受。"""
 
     PRESALES = "presales"
     APPROVER = "approver"
     TASKFORCE = "taskforce"
     SUBSYSTEM = "subsystem"
     QUALITY = "quality"
+    #: 领导：可查看全部正式工单，但不参与流程、没有任何写权限
+    LEADER = "leader"
     ADMIN = "admin"
 
 
@@ -32,6 +34,7 @@ BUSINESS_ROLES: tuple[BusinessRole, ...] = (
     BusinessRole.TASKFORCE,
     BusinessRole.SUBSYSTEM,
     BusinessRole.QUALITY,
+    BusinessRole.LEADER,
 )
 
 #: 数据里允许出现的全部角色
@@ -342,6 +345,15 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         payload_fields=("return_to_state",),
         return_targets=frozenset({TicketState.PENDING_APPROVAL}),
     ),
+    # 分系统负责人可在制定闭环计划阶段驳回到上一步“确认并流转”
+    (TicketState.PLANNING, TicketAction.RETURN): _R(
+        target_state=TicketState.RETURNED,
+        roles=frozenset({BusinessRole.SUBSYSTEM}),
+        scope=ActorScope.SUBSYSTEM_OWNER,
+        comment_required=True,
+        payload_fields=("return_to_state",),
+        return_targets=frozenset({TicketState.PENDING_ROUTING}),
+    ),
     (TicketState.PENDING_PLAN_CONFIRMATION, TicketAction.RETURN): _R(
         target_state=TicketState.RETURNED,
         roles=frozenset({BusinessRole.PRESALES}),
@@ -367,6 +379,16 @@ ACTION_RULES: dict[tuple[TicketState, TicketAction], ActionRule] = {
         return_targets=frozenset({TicketState.PENDING_QUALITY_REVIEW}),
     ),
     # 退回后处置：对应责任人在退回节点上一步完成「修订 + 流转」
+    # 退回到确认并流转：专项小组重新选择分系统及负责人后再次流转
+    (TicketState.RETURNED, TicketAction.ROUTE): _R(
+        target_state=TicketState.PLANNING,
+        roles=frozenset({BusinessRole.TASKFORCE}),
+        scope=ActorScope.RETURN_TARGET,
+        comment_required=True,
+        required_fields=("skill_group_id", "subsystem_owner_id"),
+        payload_fields=("confirmation_comment", "skill_group_id", "subsystem_owner_id"),
+        only_when_return_target=frozenset({TicketState.PENDING_ROUTING}),
+    ),
     # 退回到售前（创建阶段）时售前携带创建字段重新提交，回到待审批
     (TicketState.RETURNED, TicketAction.RESUBMIT): _R(
         target_state=TicketState.PENDING_APPROVAL,
@@ -452,6 +474,7 @@ ACTION_REQUIREMENTS: dict[TicketAction, tuple[str, ...]] = {
 
 #: 退回目标 -> 重新提交后的责任角色与责任字段
 RETURN_TARGET_RESPONSIBLE_ROLE: dict[TicketState, BusinessRole] = {
+    TicketState.PENDING_ROUTING: BusinessRole.TASKFORCE,
     TicketState.PENDING_APPROVAL: BusinessRole.PRESALES,
     TicketState.PENDING_QUALITY_REVIEW: BusinessRole.QUALITY,
     TicketState.PLANNING: BusinessRole.SUBSYSTEM,

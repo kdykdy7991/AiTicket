@@ -76,6 +76,7 @@ ROLE_LABELS = {
     BusinessRole.TASKFORCE.value: "专项小组",
     BusinessRole.SUBSYSTEM.value: "分系统",
     BusinessRole.QUALITY.value: "质量",
+    BusinessRole.LEADER.value: "领导",
     BusinessRole.ADMIN.value: "系统管理员",
 }
 

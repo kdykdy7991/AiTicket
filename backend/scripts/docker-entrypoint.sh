@@ -1,9 +1,7 @@
 #!/bin/sh
 set -e
 
-# 生产环境数据库迁移请在部署时单独执行：
-#   docker compose -f docker-compose.prod.yml run --rm api alembic upgrade head
-# 种子数据初始化请在首次部署时单独执行：
-#   docker compose -f docker-compose.prod.yml run --rm api python scripts/seed.py
+# 生产环境的迁移、迁移头校验和种子同步由项目根目录 deploy.sh 统一执行。
+# 容器入口不自行迁移，避免横向扩容时多个 API 实例并发修改数据库。
 
 exec "$@"

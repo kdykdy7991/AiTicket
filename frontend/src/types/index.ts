@@ -1,4 +1,4 @@
-export type RoleName = 'admin' | 'presales' | 'approver' | 'taskforce' | 'subsystem' | 'quality'
+export type RoleName = 'admin' | 'presales' | 'approver' | 'taskforce' | 'subsystem' | 'quality' | 'leader'
 
 export interface Role {
   id: number

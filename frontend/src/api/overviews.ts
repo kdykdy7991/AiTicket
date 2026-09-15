@@ -1,7 +1,7 @@
 import api from './index'
 import { mockOverviewApi } from '@/mock'   // overview 一期暂用 mock
 import type {
-  Overview, DashboardStats, PaginatedResponse, Ticket,
+  Overview, PaginatedResponse, Ticket,
   TicketState, TicketPriority, Group, User,
   TicketCategory, Region,
 } from '@/types'
@@ -17,35 +17,9 @@ export const overviewApi = {
 }
 
 export const statsApi = {
-  async dashboard(): Promise<DashboardStats> {
-    const res: any = await api.get('/stats/dashboard')
-    const d = res.data ?? {}
-
-    // 后端按状态计数；前端 DashboardView 期望 tickets_by_state 为数组 [{state, count}]
-    const byCategoryObj = (d.by_category as Record<string, number>) || {}
-    return {
-      // 前端 DashboardView 使用的字段
-      tickets_by_state: [
-        { state: 'new', count: d.pending_count ?? 0 },
-        { state: 'open', count: d.open_count ?? 0 },
-        { state: 'pending', count: 0 },
-        { state: 'resolved', count: d.today_resolved ?? 0 },
-        { state: 'closed', count: 0 },
-      ],
-      tickets_by_category: Object.entries(byCategoryObj).map(([name, count]) => ({ category_l1: name, count })),
-      avg_resolution_per_group: [],           // 后端暂未提供，置空数组避免崩溃
-      escalated_count: d.overdue_count ?? 0,
-      resolved_today: d.today_resolved ?? 0,
-      sla_breach_rate: (d.sla_breach_rate ?? 0) * 100,   // 后端是小数，前端按百分比展示
-      first_contact_resolution_rate: (d.first_contact_resolution_rate ?? 0) * 100,
-      // 兼容旧字段
-      total_tickets: (d.pending_count ?? 0) + (d.open_count ?? 0),
-      tickets_by_priority: (d.by_priority as Record<string, number>) || {},
-      tickets_by_group: {},
-      avg_resolution_minutes: d.avg_resolution_minutes ?? null,
-      group_avg_resolution: [],
-      category_distribution: Object.entries(byCategoryObj).map(([name, count]) => ({ name, count })),
-    } as any
+  async dashboard(params: { date_from?: string; date_to?: string } = {}): Promise<any> {
+    const res: any = await api.get('/stats/dashboard', { params: { ...params, _t: Date.now() } })
+    return res.data
   },
 
   async report(params: { period?: string; date_from?: string; date_to?: string; skill_group_id?: number } = {}): Promise<any> {

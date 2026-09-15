@@ -426,42 +426,143 @@ async def _count(db: AsyncSession, conditions) -> int:
 
 @stats_router.get("/stats/dashboard")
 async def dashboard_stats(
+    date_from: date | None = Query(None),
+    date_to: date | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """POC 总览指标；日期范围统一按问题创建时间过滤。"""
+    if date_from and date_to and date_to < date_from:
+        raise HTTPException(422, detail="date_to 不能早于 date_from")
+
     base = _scoped_conditions(user)
+    if date_from:
+        base.append(
+            Ticket.created_at
+            >= datetime.combine(date_from, datetime.min.time()).replace(tzinfo=timezone.utc)
+        )
+    if date_to:
+        base.append(
+            Ticket.created_at
+            <= datetime.combine(date_to, datetime.max.time()).replace(tzinfo=timezone.utc)
+        )
+
     now = datetime.now(timezone.utc)
     today = now.date()
-
     total = await _count(db, base)
-    open_count = await _count(db, base + [Ticket.state.notin_(TERMINAL_VALUES)])
-    closed_count = await _count(db, base + [Ticket.state == TicketState.CLOSED.value])
+    effective_base = base + [Ticket.state != TicketState.CANCELLED.value]
+    effective_total = await _count(db, effective_base)
+    open_count = await _count(db, effective_base + [Ticket.state.notin_(TERMINAL_VALUES)])
+    closed_count = await _count(
+        db, effective_base + [Ticket.state == TicketState.CLOSED.value]
+    )
+    resolved_count = await _count(
+        db, effective_base + [Ticket.verification_status == VerificationStatus.RESOLVED.value]
+    )
+    temporarily_resolved_count = await _count(
+        db, effective_base
+        + [Ticket.verification_status == VerificationStatus.TEMPORARILY_RESOLVED.value]
+    )
+    pending_reproduction_count = await _count(
+        db, effective_base
+        + [Ticket.verification_status == VerificationStatus.PENDING_REPRODUCTION.value]
+    )
+    unresolved_count = await _count(
+        db, effective_base + [Ticket.verification_status == VerificationStatus.UNRESOLVED.value]
+    )
+    pending_status_count = await _count(
+        db, effective_base + [Ticket.verification_status.is_(None)]
+    )
+    plan_eligible_count = await _count(
+        db, effective_base + [Ticket.planned_completion_at.is_not(None)]
+    )
+    overdue_plan_count = await _count(
+        db,
+        effective_base
+        + [
+            Ticket.planned_completion_at.is_not(None),
+            or_(
+                (Ticket.closed_at.is_not(None))
+                & (Ticket.closed_at > Ticket.planned_completion_at),
+                (Ticket.closed_at.is_(None))
+                & (Ticket.planned_completion_at < now),
+            ),
+        ],
+    )
     overdue_count = await _count(
         db,
-        base
+        effective_base
         + [
             Ticket.planned_completion_at.is_not(None),
             Ticket.planned_completion_at < now,
             Ticket.state.notin_(TERMINAL_VALUES),
         ],
     )
-    today_created = await _count(db, base + [func.date(Ticket.created_at) == today])
-    today_closed = await _count(
-        db, base + [Ticket.state == TicketState.CLOSED.value, func.date(Ticket.closed_at) == today]
-    )
 
     async def grouped(column):
         rows = (
-            await db.execute(select(column, func.count(Ticket.id)).where(*base).group_by(column))
+            await db.execute(
+                select(column, func.count(Ticket.id))
+                .where(*effective_base)
+                .group_by(column)
+            )
         ).all()
         return {str(key): count for key, count in rows if key is not None}
 
-    rows = (
+    customer_rows = (
+        await db.execute(
+            select(Ticket.customer_name, func.count(Ticket.id))
+            .where(*effective_base, Ticket.customer_name.is_not(None))
+            .group_by(Ticket.customer_name)
+            .order_by(func.count(Ticket.id).desc(), Ticket.customer_name)
+        )
+    ).all()
+    problem_type_rows = (
+        await db.execute(
+            select(Ticket.problem_type, func.count(Ticket.id))
+            .where(*effective_base, Ticket.problem_type.is_not(None))
+            .group_by(Ticket.problem_type)
+            .order_by(func.count(Ticket.id).desc(), Ticket.problem_type)
+        )
+    ).all()
+    customer_status_rows = (
+        await db.execute(
+            select(
+                Ticket.customer_name,
+                Ticket.verification_status,
+                func.count(Ticket.id),
+            )
+            .where(*effective_base, Ticket.customer_name.is_not(None))
+            .group_by(Ticket.customer_name, Ticket.verification_status)
+        )
+    ).all()
+    by_customer_status: dict[str, dict[str, int]] = {}
+    for customer_name, verification_status, count in customer_status_rows:
+        status_key = verification_status or "pending"
+        by_customer_status.setdefault(customer_name, {})[status_key] = count
+    skill_group_status_rows = (
+        await db.execute(
+            select(
+                SkillGroup.name,
+                Ticket.verification_status,
+                func.count(Ticket.id),
+            )
+            .select_from(Ticket)
+            .join(SkillGroup, SkillGroup.id == Ticket.skill_group_id)
+            .where(*effective_base)
+            .group_by(SkillGroup.name, Ticket.verification_status)
+        )
+    ).all()
+    by_skill_group_status: dict[str, dict[str, int]] = {}
+    for group_name, verification_status, count in skill_group_status_rows:
+        status_key = verification_status or "pending"
+        by_skill_group_status.setdefault(group_name, {})[status_key] = count
+    group_rows = (
         await db.execute(
             select(SkillGroup.name, func.count(Ticket.id))
             .select_from(Ticket)
             .join(SkillGroup, SkillGroup.id == Ticket.skill_group_id)
-            .where(*base)
+            .where(*effective_base)
             .group_by(SkillGroup.name)
         )
     ).all()
@@ -469,30 +570,42 @@ async def dashboard_stats(
     return {
         "data": {
             "total": total,
+            "effective_total": effective_total,
             "open_count": open_count,
             "closed_count": closed_count,
             "overdue_count": overdue_count,
-            "today_created": today_created,
-            "today_closed": today_closed,
-            "pending_approval_count": await _count(
-                db, base + [Ticket.state == TicketState.PENDING_APPROVAL.value]
+            "today_created": await _count(
+                db, base + [func.date(Ticket.created_at) == today]
             ),
-            "planning_count": await _count(
+            "pending_approval_count": await _count(db, base + [Ticket.state == TicketState.PENDING_APPROVAL.value]),
+            "planning_count": await _count(db, base + [Ticket.state.in_([TicketState.PLANNING.value, TicketState.PENDING_PLAN_CONFIRMATION.value, TicketState.PROCESSING.value])]),
+            "today_closed": await _count(
                 db,
                 base
                 + [
-                    Ticket.state.in_(
-                        [
-                            TicketState.PLANNING.value,
-                            TicketState.PENDING_PLAN_CONFIRMATION.value,
-                            TicketState.PROCESSING.value,
-                        ]
-                    )
+                    Ticket.state == TicketState.CLOSED.value,
+                    func.date(Ticket.closed_at) == today,
                 ],
             ),
+            "resolved_count": resolved_count,
+            "temporarily_resolved_count": temporarily_resolved_count,
+            "pending_reproduction_count": pending_reproduction_count,
+            "unresolved_count": unresolved_count,
+            "pending_status_count": pending_status_count,
+            "resolution_rate": round(resolved_count / effective_total, 4) if effective_total else 0.0,
+            "workflow_closure_rate": round(closed_count / effective_total, 4) if effective_total else 0.0,
+            "plan_eligible_count": plan_eligible_count,
+            "overdue_plan_count": overdue_plan_count,
+            "overdue_closure_rate": round(overdue_plan_count / plan_eligible_count, 4) if plan_eligible_count else 0.0,
+            "plan_coverage_rate": round(plan_eligible_count / effective_total, 4) if effective_total else 0.0,
+            "customer_count": len(customer_rows),
+            "by_customer": {name: count for name, count in customer_rows},
+            "by_customer_status": by_customer_status,
+            "by_problem_type": {name: count for name, count in problem_type_rows},
             "by_state": await grouped(Ticket.state),
             "by_priority": await grouped(Ticket.priority),
-            "by_skill_group": {name: count for name, count in rows},
+            "by_skill_group": {name: count for name, count in group_rows},
+            "by_skill_group_status": by_skill_group_status,
             "by_verification_status": await grouped(Ticket.verification_status),
         }
     }

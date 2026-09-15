@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>问题总览</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+    background: #f4f6fa;
+    color: #2b2f36;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    display: flex;
+    min-height: 100vh;
+  }
+  /* ===== Sidebar (decorative; user said ignore it, but we keep the layout slot) ===== */
+  .sidebar {
+    width: 200px;
+    background: #fff;
+    border-right: 1px solid #eef0f4;
+    padding: 18px 0;
+    flex-shrink: 0;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 20px 18px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #2b2f36;
+  }
+  .brand-logo {
+    width: 26px; height: 26px; border-radius: 8px;
+    background: #2b3142;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 14px;
+  }
+  .nav { list-style: none; }
+  .nav li {
+    display: flex; align-items: center; gap: 12px;
+    padding: 11px 20px;
+    color: #6b7280;
+    cursor: pointer;
+    position: relative;
+    font-size: 14px;
+  }
+  .nav li .ico { width: 18px; text-align: center; opacity: .8; }
+  .nav li.active {
+    background: #f4f6fa;
+    color: #2b2f36;
+    font-weight: 500;
+  }
+  .nav li.active::before {
+    content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px;
+    background: #2b2f36; border-radius: 0 3px 3px 0;
+  }
+  .nav-group {
+    padding: 14px 20px 6px;
+    color: #9aa1ad;
+    font-size: 12px;
+  }
+  .sidebar-foot {
+    position: absolute; bottom: 16px; left: 16px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px;
+  }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%;
+    background: #d9d9d9; color: #555;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px;
+  }
+  .user-name { font-size: 13px; color: #2b2f36; }
+  .user-sub { font-size: 11px; color: #9aa1ad; }
+
+  /* ===== Main area ===== */
+  .main {
+    flex: 1;
+    padding: 22px 28px 32px;
+    min-width: 0;
+  }
+  .crumb {
+    display: inline-flex; align-items: center; gap: 4px;
+    color: #9aa1ad;
+    font-size: 12px;
+    margin-bottom: 8px;
+  }
+  .crumb .arrow { font-size: 14px; line-height: 1; }
+  .page-title {
+    font-size: 22px;
+    font-weight: 600;
+    color: #1f2329;
+    margin-bottom: 18px;
+  }
+
+  /* ===== Customer card ===== */
+  .customer-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 22px 26px;
+    display: flex;
+    gap: 36px;
+    margin-bottom: 16px;
+  }
+  .customer-left {
+    width: 150px;
+    border-right: 1px solid #eef0f4;
+    padding-right: 28px;
+    flex-shrink: 0;
+  }
+  .customer-label {
+    display: flex; align-items: center; gap: 8px;
+    color: #2b2f36;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 22px;
+  }
+  .customer-label .ico-people {
+    width: 18px; height: 18px;
+    background: #2b2f36;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z'/></svg>") center/contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z'/></svg>") center/contain no-repeat;
+  }
+  .customer-num {
+    font-size: 44px;
+    font-weight: 600;
+    color: #1f2329;
+    line-height: 1.1;
+    margin-bottom: 4px;
+    font-family: "DIN", "Helvetica Neue", Arial;
+  }
+  .customer-sub {
+    color: #9aa1ad;
+    font-size: 13px;
+  }
+  .customer-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 10px 14px;
+    align-content: center;
+  }
+  .chip {
+    background: #f4f6fa;
+    border-radius: 6px;
+    padding: 10px 14px;
+    text-align: center;
+    color: #4b5563;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  /* ===== Stat cards ===== */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .stat {
+    background: #fff;
+    border-radius: 8px;
+    padding: 18px 20px 22px;
+    position: relative;
+  }
+  .stat-head {
+    display: flex; align-items: center; gap: 8px;
+    color: #4b5563;
+    font-size: 13px;
+  }
+  .stat-icon {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 12px;
+  }
+  .icon-green  { background: #e8f5e0; color: #4ea84a; }
+  .icon-orange { background: #fdeede; color: #d97a3b; }
+  .icon-blue   { background: #e3eef9; color: #4a89c7; }
+  .icon-red    { background: #fbe1de; color: #d8534b; }
+  .icon-pct    { background: #ecf2e5; color: #6ea34a; font-weight: 700; }
+  .icon-clockr { background: #fbe1de; color: #d8534b; }
+  .stat-num {
+    font-size: 36px;
+    font-weight: 600;
+    color: #1f2329;
+    margin-top: 10px;
+    line-height: 1.05;
+    font-family: "DIN", "Helvetica Neue", Arial;
+  }
+  .stat-foot {
+    margin-top: 12px;
+    display: flex; align-items: center; gap: 6px;
+    font-size: 12px;
+    color: #9aa1ad;
+  }
+  .delta-up { color: #4ea84a; }
+  .delta-down { color: #d8534b; }
+  .arrow-up::before { content: "↗"; }
+  .arrow-down::before { content: "↘"; }
+  .progress {
+    margin-top: 14px;
+    height: 6px;
+    background: #eef0f4;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-bar-green { height: 100%; background: #6ea34a; border-radius: 3px; }
+  .progress-bar-red   { height: 100%; background: #d8534b; border-radius: 3px; }
+
+  /* ===== Trend chart card ===== */
+  .chart-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 22px 26px 16px;
+    margin-bottom: 16px;
+  }
+  .chart-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .chart-title {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2329;
+  }
+  .chart-title .ico-bar {
+    width: 18px; height: 18px;
+    background: #2b2f36;
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M5 9.2h3V19H5V9.2zm5.6-4.2h2.8V19h-2.8V5zm5.6 8H19V19h-2.8v-6z'/></svg>") center/contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M5 9.2h3V19H5V9.2zm5.6-4.2h2.8V19h-2.8V5zm5.6 8H19V19h-2.8v-6z'/></svg>") center/contain no-repeat;
+  }
+  .legend {
+    display: flex; align-items: center; gap: 22px;
+    font-size: 13px;
+    color: #4b5563;
+  }
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+  .legend-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #2b2f36;
+  }
+  .legend-dot.tan { background: #d3a06c; }
+  .trend-svg {
+    width: 100%;
+    height: 280px;
+    display: block;
+  }
+
+  /* ===== Bottom three cards ===== */
+  .bottom-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+  }
+  .donut-card {
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px 24px;
+  }
+  .donut-head {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1f2329;
+    margin-bottom: 16px;
+  }
+  .donut-head .ico-people,
+  .donut-head .ico-folder,
+  .donut-head .ico-board {
+    width: 18px; height: 18px;
+    background: #2b2f36;
+  }
+  .ico-people {
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z'/></svg>") center/contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5s-3 1.34-3 3 1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z'/></svg>") center/contain no-repeat;
+  }
+  .ico-folder {
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z'/></svg>") center/contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2z'/></svg>") center/contain no-repeat;
+  }
+  .ico-board {
+    -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M3 5h18v3H3V5zm0 6h18v8H3v-8zm4 2v4h4v-4H7z'/></svg>") center/contain no-repeat;
+            mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23000'><path d='M3 5h18v3H3V5zm0 6h18v8H3v-8zm4 2v4h4v-4H7z'/></svg>") center/contain no-repeat;
+  }
+  .donut-body {
+    display: flex; align-items: center; gap: 18px;
+  }
+  .donut-svg {
+    width: 150px; height: 150px;
+    flex-shrink: 0;
+  }
+  .donut-legend { flex: 1; min-width: 0; }
+  .donut-legend-row {
+    display: grid;
+    grid-template-columns: 12px 1fr auto auto;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #4b5563;
+    padding: 4px 0;
+  }
+  .donut-legend-row .swatch {
+    width: 10px; height: 10px; border-radius: 50%;
+  }
+  .donut-legend-row .val { color: #1f2329; font-weight: 500; }
+  .donut-legend-row .pct { color: #9aa1ad; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== Sidebar (kept for layout slot; user said ignore) ===== -->
+  <aside class="sidebar" style="position: relative;">
+    <div class="brand">
+      <div class="brand-logo">P</div>
+      <div>问题管理</div>
+    </div>
+    <ul class="nav">
+      <li class="active"><span class="ico">▦</span>总览</li>
+      <li><span class="ico">▤</span>问题列表</li>
+    </ul>
+    <div class="nav-group">客户</div>
+    <ul class="nav">
+      <li><span class="ico">👤</span>客户管理</li>
+      <li><span class="ico">👤</span>责任系统</li>
+    </ul>
+    <ul class="nav">
+      <li><span class="ico">📄</span>问题分类</li>
+      <li><span class="ico">📊</span>数据分析</li>
+      <li><span class="ico">⚙</span>系统设置</li>
+    </ul>
+    <div class="sidebar-foot">
+      <div class="avatar">U</div>
+      <div>
+        <div class="user-name">用户</div>
+        <div class="user-sub">退出登录</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+    <div class="crumb"><span class="arrow">←</span> 总览</div>
+    <h1 class="page-title">问题总览</h1>
+
+    <!-- Customer card -->
+    <section class="customer-card">
+      <div class="customer-left">
+        <div class="customer-label">
+          <span class="ico-people"></span>
+          <span>客户</span>
+        </div>
+        <div class="customer-num">24</div>
+        <div class="customer-sub">客户总数量</div>
+      </div>
+      <div class="customer-grid">
+        <div class="chip">华东科技</div>
+        <div class="chip">远航电子</div>
+        <div class="chip">新睿医疗</div>
+        <div class="chip">中科云联</div>
+        <div class="chip">天行智能</div>
+        <div class="chip">博远科技</div>
+        <div class="chip">理想生物</div>
+        <div class="chip">启明星辰</div>
+        <div class="chip">云创软件</div>
+        <div class="chip">联拓能源</div>
+        <div class="chip">智维科技</div>
+        <div class="chip">星海通信</div>
+        <div class="chip">东原航天</div>
+        <div class="chip">海川信息</div>
+        <div class="chip">数联智能</div>
+        <div class="chip">长风科技</div>
+        <div class="chip">银河动力</div>
+        <div class="chip">北辰电子</div>
+        <div class="chip">凌云装备</div>
+        <div class="chip">启航微电子</div>
+        <div class="chip">深蓝科技</div>
+        <div class="chip">光启智能</div>
+        <div class="chip">信达软件</div>
+        <div class="chip">华域通信</div>
+      </div>
+    </section>
+
+    <!-- Stat row -->
+    <section class="stat-row">
+      <div class="stat">
+        <div class="stat-head">
+          <span class="stat-icon icon-green">✓</span>
+          <span>已解决</span>
+        </div>
+        <div class="stat-num">128</div>
+        <div class="stat-foot">较上周 +12% <span class="delta-up arrow-up"></span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-head">
+          <span class="stat-icon icon-orange">⏱</span>
+          <span>临时解决</span>
+        </div>
+        <div class="stat-num">36</div>
+        <div class="stat-foot">较上周 -8% <span class="delta-down arrow-down"></span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-head">
+          <span class="stat-icon icon-blue">⟳</span>
+          <span>待表现</span>
+        </div>
+        <div class="stat-num">24</div>
+        <div class="stat-foot">较上周 -20% <span class="delta-down arrow-down"></span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-head">
+          <span class="stat-icon icon-red">⚠</span>
+          <span>未解决</span>
+        </div>
+        <div class="stat-num">18</div>
+        <div class="stat-foot">较上周 +6% <span class="delta-up arrow-up"></span></div>
+      </div>
+      <div class="stat">
+        <div class="stat-head">
+          <span class="stat-icon icon-pct">%</span>
+          <span>闭环率</span>
+        </div>
+        <div class="stat-num">76%</div>
+        <div class="progress"><div class="progress-bar-green" style="width:76%;"></div></div>
+      </div>
+      <div class="stat">
+        <div class="stat-head">
+          <span class="stat-icon icon-clockr">⏱</span>
+          <span>未按时闭环率</span>
+        </div>
+        <div class="stat-num">12%</div>
+        <div class="progress"><div class="progress-bar-red" style="width:12%;"></div></div>
+      </div>
+    </section>
+
+    <!-- Trend chart -->
+    <section class="chart-card">
+      <div class="chart-head">
+        <div class="chart-title"><span class="ico-bar"></span>周问题趋势</div>
+        <div class="legend">
+          <div class="legend-item"><span class="legend-dot"></span>新增问题</div>
+          <div class="legend-item"><span class="legend-dot tan"></span>已解决问题</div>
+        </div>
+      </div>
+      <svg class="trend-svg" viewBox="0 0 1200 280" preserveAspectRatio="none">
+        <!-- gridlines -->
+        <g stroke="#eef0f4" stroke-width="1">
+          <line x1="50" y1="40"  x2="1170" y2="40"  />
+          <line x1="50" y1="90"  x2="1170" y2="90"  />
+          <line x1="50" y1="140" x2="1170" y2="140" />
+          <line x1="50" y1="190" x2="1170" y2="190" />
+          <line x1="50" y1="240" x2="1170" y2="240" />
+          <line x1="50" y1="20"  x2="50"   y2="240" />
+        </g>
+        <!-- y labels -->
+        <g fill="#9aa1ad" font-size="12" font-family="Helvetica, Arial">
+          <text x="38" y="44"  text-anchor="end">100</text>
+          <text x="38" y="94"  text-anchor="end">80</text>
+          <text x="38" y="144" text-anchor="end">60</text>
+          <text x="38" y="194" text-anchor="end">40</text>
+          <text x="38" y="244" text-anchor="end">20</text>
+        </g>
+        <!-- x labels -->
+        <g fill="#9aa1ad" font-size="12" font-family="Helvetica, Arial" text-anchor="middle">
+          <text x="170" y="266">11-04</text>
+          <text x="330" y="266">11-05</text>
+          <text x="490" y="266">11-06</text>
+          <text x="650" y="266">11-07</text>
+          <text x="810" y="266">11-08</text>
+          <text x="970" y="266">11-09</text>
+          <text x="1130" y="266">11-10</text>
+        </g>
+
+        <!-- area fill under orange line -->
+        <path d="M170,200 L330,170 L490,200 L650,190 L810,170 L970,200 L1130,180 L1130,240 L170,240 Z"
+              fill="#d3a06c" fill-opacity="0.08"/>
+
+        <!-- added line (navy) -->
+        <path d="M170,160 L330,120 L490,180 L650,160 L810,120 L970,180 L1130,140"
+              fill="none" stroke="#2b3142" stroke-width="2"/>
+        <!-- resolved line (tan) -->
+        <path d="M170,200 L330,170 L490,200 L650,190 L810,170 L970,200 L1130,180"
+              fill="none" stroke="#d3a06c" stroke-width="2"/>
+
+        <!-- dots navy -->
+        <g fill="#2b3142">
+          <circle cx="170"  cy="160" r="4"/>
+          <circle cx="330"  cy="120" r="4"/>
+          <circle cx="490"  cy="180" r="4"/>
+          <circle cx="650"  cy="160" r="4"/>
+          <circle cx="810"  cy="120" r="4"/>
+          <circle cx="970"  cy="180" r="4"/>
+          <circle cx="1130" cy="140" r="4"/>
+        </g>
+        <!-- dots tan -->
+        <g fill="#d3a06c">
+          <circle cx="170"  cy="200" r="4"/>
+          <circle cx="330"  cy="170" r="4"/>
+          <circle cx="490"  cy="200" r="4"/>
+          <circle cx="650"  cy="190" r="4"/>
+          <circle cx="810"  cy="170" r="4"/>
+          <circle cx="970"  cy="200" r="4"/>
+          <circle cx="1130" cy="180" r="4"/>
+        </g>
+      </svg>
+    </section>
+
+    <!-- Bottom three cards -->
+    <section class="bottom-row">
+
+      <!-- Customer analysis -->
+      <div class="donut-card">
+        <div class="donut-head">
+          <span class="ico-people"></span>客户分析
+        </div>
+        <div class="donut-body">
+          <svg class="donut-svg" viewBox="0 0 150 150">
+            <!-- segments: 50% green, 18% orange, 14% blue, 18% red -->
+            <!-- green 50% : 0..180 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#6a9e57" stroke-width="22"
+                    stroke-dasharray="175.93 351.86" stroke-dashoffset="0" transform="rotate(-90 75 75)"/>
+            <!-- orange 18% : 180..244.8 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#d8a76b" stroke-width="22"
+                    stroke-dasharray="63.33 351.86" stroke-dashoffset="-175.93" transform="rotate(-90 75 75)"/>
+            <!-- blue 14% : 244.8..295.2 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#7e9ab5" stroke-width="22"
+                    stroke-dasharray="49.26 351.86" stroke-dashoffset="-239.26" transform="rotate(-90 75 75)"/>
+            <!-- red 18% : 295.2..360 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#c98a85" stroke-width="22"
+                    stroke-dasharray="63.33 351.86" stroke-dashoffset="-288.52" transform="rotate(-90 75 75)"/>
+            <!-- center text -->
+            <text x="75" y="74" text-anchor="middle" font-size="26" font-weight="600" fill="#1f2329"
+                  font-family="DIN, Helvetica, Arial">56</text>
+            <text x="75" y="92" text-anchor="middle" font-size="12" fill="#9aa1ad">问题总数</text>
+          </svg>
+          <div class="donut-legend">
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#6a9e57;"></span>
+              <span>已解决</span><span class="val">28</span><span class="pct">50%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#d8a76b;"></span>
+              <span>临时解决</span><span class="val">10</span><span class="pct">18%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#7e9ab5;"></span>
+              <span>待表现</span><span class="val">8</span><span class="pct">14%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#c98a85;"></span>
+              <span>未解决</span><span class="val">10</span><span class="pct">18%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Problem category -->
+      <div class="donut-card">
+        <div class="donut-head">
+          <span class="ico-folder"></span>问题分类
+        </div>
+        <div class="donut-body">
+          <svg class="donut-svg" viewBox="0 0 150 150">
+            <!-- 37% product (dark gray-green), 28% system (green), 13% process (tan), 10% data (purple-gray), 13% other (light gray) -->
+            <!-- 37% : 0..133.2 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#5a6573" stroke-width="22"
+                    stroke-dasharray="130.18 351.86" stroke-dashoffset="0" transform="rotate(-90 75 75)"/>
+            <!-- 28% : 133.2..234 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#7a9a72" stroke-width="22"
+                    stroke-dasharray="98.52 351.86" stroke-dashoffset="-130.18" transform="rotate(-90 75 75)"/>
+            <!-- 13% : 234..280.8 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#c8a675" stroke-width="22"
+                    stroke-dasharray="45.74 351.86" stroke-dashoffset="-228.70" transform="rotate(-90 75 75)"/>
+            <!-- 10% : 280.8..316.8 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#9d85ad" stroke-width="22"
+                    stroke-dasharray="35.19 351.86" stroke-dashoffset="-274.44" transform="rotate(-90 75 75)"/>
+            <!-- 13% : 316.8..363.6 -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#c9ccd1" stroke-width="22"
+                    stroke-dasharray="45.74 351.86" stroke-dashoffset="-309.63" transform="rotate(-90 75 75)"/>
+            <text x="75" y="74" text-anchor="middle" font-size="26" font-weight="600" fill="#1f2329"
+                  font-family="DIN, Helvetica, Arial">186</text>
+            <text x="75" y="92" text-anchor="middle" font-size="12" fill="#9aa1ad">问题总数</text>
+          </svg>
+          <div class="donut-legend">
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#5a6573;"></span>
+              <span>产品问题</span><span class="val">68</span><span class="pct">37%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#7a9a72;"></span>
+              <span>系统问题</span><span class="val">52</span><span class="pct">28%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#c8a675;"></span>
+              <span>流程问题</span><span class="val">24</span><span class="pct">13%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#9d85ad;"></span>
+              <span>数据问题</span><span class="val">18</span><span class="pct">10%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#c9ccd1;"></span>
+              <span>其他</span><span class="val">24</span><span class="pct">13%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Responsibility system -->
+      <div class="donut-card">
+        <div class="donut-head">
+          <span class="ico-board"></span>责任系统
+        </div>
+        <div class="donut-body">
+          <svg class="donut-svg" viewBox="0 0 150 150">
+            <!-- 43% resolved (green), 19% temp (orange/tan), 14% pending (blue/gray), 24% unresolved (red) -->
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#6a9e57" stroke-width="22"
+                    stroke-dasharray="151.30 351.86" stroke-dashoffset="0" transform="rotate(-90 75 75)"/>
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#d8a76b" stroke-width="22"
+                    stroke-dasharray="66.85 351.86" stroke-dashoffset="-151.30" transform="rotate(-90 75 75)"/>
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#7e9ab5" stroke-width="22"
+                    stroke-dasharray="49.26 351.86" stroke-dashoffset="-218.15" transform="rotate(-90 75 75)"/>
+            <circle cx="75" cy="75" r="56" fill="none" stroke="#c98a85" stroke-width="22"
+                    stroke-dasharray="84.45 351.86" stroke-dashoffset="-267.41" transform="rotate(-90 75 75)"/>
+            <text x="75" y="74" text-anchor="middle" font-size="26" font-weight="600" fill="#1f2329"
+                  font-family="DIN, Helvetica, Arial">42</text>
+            <text x="75" y="92" text-anchor="middle" font-size="12" fill="#9aa1ad">问题总数</text>
+          </svg>
+          <div class="donut-legend">
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#6a9e57;"></span>
+              <span>已解决</span><span class="val">18</span><span class="pct">43%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#d8a76b;"></span>
+              <span>临时解决</span><span class="val">8</span><span class="pct">19%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#7e9ab5;"></span>
+              <span>待表现</span><span class="val">6</span><span class="pct">14%</span>
+            </div>
+            <div class="donut-legend-row">
+              <span class="swatch" style="background:#c98a85;"></span>
+              <span>未解决</span><span class="val">10</span><span class="pct">24%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+</div>
+</body>
+</html>

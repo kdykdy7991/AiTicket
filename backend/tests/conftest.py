@@ -65,11 +65,13 @@ FIXTURE_USERS = [
     ("approver01", "邱庆举", ["approver"], None),
     ("approver02", "备用批准人", ["approver"], None),
     ("taskforce01", "陈毅君", ["taskforce"], None),
-    ("subsystem01", "邓雪群", ["subsystem"], "系统总体"),
+    ("subsystem01", "邓雪群", ["taskforce", "subsystem"], "系统总体"),
     ("subsystem06", "系统总体-同事", ["subsystem"], "系统总体"),
     ("subsystem02", "卢翔", ["subsystem"], "卫星平台"),
     ("subsystem03", "余华伟", ["subsystem"], "终端系统"),
     ("quality01", "金凯", ["quality"], None),
+    ("Tony", "领导账号一", ["leader"], None),
+    ("Edison", "领导账号二", ["leader"], None),
     # 多角色用户：既是批准人，又是系统总体负责人
     ("multi01", "多角色-邱庆举", ["approver", "subsystem"], "系统总体"),
 ]

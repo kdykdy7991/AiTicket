@@ -80,6 +80,7 @@ const uiStore = useUIStore()
 
 const collapsed = computed(() => uiStore.sidebarCollapsed)
 
+const iconOverview = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'
 const iconTickets = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"/><polyline points="14,3 14,8 21,8"/></svg>'
 const iconNew = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
 const iconUsers = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
@@ -87,6 +88,7 @@ const iconGroup = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 
 const mainMenu = computed(() => {
   const items = [
+    { path: '/dashboard', label: '总览', icon: iconOverview },
     { path: '/tickets', label: 'POC 问题', icon: iconTickets },
   ]
   if (authStore.canCreateTicket) {
@@ -105,6 +107,7 @@ const adminMenu = [
 function isActive(path: string): boolean {
   if (path === '/tickets/new') return route.path === '/tickets/new' && !route.query.draft_id
   if (path === '/tickets/drafts') return route.path === '/tickets/drafts' || !!route.query.draft_id
+  if (path === '/dashboard') return route.path === '/dashboard'
   if (path === '/tickets') return route.path.startsWith('/tickets') && route.path !== '/tickets/new' && route.path !== '/tickets/drafts'
   return route.path.startsWith(path)
 }

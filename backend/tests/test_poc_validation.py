@@ -654,3 +654,33 @@ async def test_merged_away_actions_are_rejected(api):
     assert detail["subsystem_owner_name"] == "余华伟"
     assert detail["current_responsible_role"] == "subsystem"
     assert detail["current_responsible_user_id"] == api.uid("subsystem03")
+
+
+async def test_subsystem_owner_can_reject_planning_to_routing(api):
+    """分系统负责人可驳回闭环计划制定，专项小组重新确认并流转。"""
+    api.as_("presales01")
+    ticket_id = (await api.create_ticket()).json()["data"]["id"]
+    await run_steps(api, ticket_id, 2)
+
+    api.as_("subsystem01")
+    planning = await api.detail(ticket_id)
+    assert planning["allowed_actions"] == ["submit_plan", "return"]
+    returned = await api.acted(
+        ticket_id, "return",
+        payload={"return_to_state": "pending_routing"},
+        comment="分系统指派不正确，请重新流转",
+    )
+    assert returned["state"] == "returned"
+    assert returned["return_to_state"] == "pending_routing"
+    assert returned["current_responsible_role"] == "taskforce"
+
+    api.as_("taskforce01")
+    returned = await api.detail(ticket_id)
+    assert returned["allowed_actions"] == ["route"]
+    rerouted = await api.acted(
+        ticket_id, "route",
+        payload={"skill_group_id": api.sg("卫星平台"), "subsystem_owner_id": api.uid("subsystem02")},
+        comment="重新确认后流转至卫星平台",
+    )
+    assert rerouted["state"] == "planning"
+    assert rerouted["subsystem_owner_id"] == api.uid("subsystem02")

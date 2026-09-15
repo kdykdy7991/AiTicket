@@ -11,15 +11,14 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
-    redirect: '/tickets',
+    redirect: '/dashboard',
   },
-  // 仪表盘暂时下线，后续明确指标后再加回来
-  // {
-  //   path: '/dashboard',
-  //   name: 'Dashboard',
-  //   component: () => import('@/views/DashboardView.vue'),
-  //   meta: { title: '仪表盘' },
-  // },
+  {
+    path: '/dashboard',
+    name: 'Dashboard',
+    component: () => import('@/views/DashboardView.vue'),
+    meta: { title: '总览' },
+  },
   {
     path: '/report',
     name: 'Report',
@@ -84,7 +83,7 @@ router.beforeEach((to) => {
     return { name: 'TicketList' }
   }
 
-  // POC 跟踪报表仅质量和系统管理员可访问
+  // POC 跟踪报表仅质量、领导和系统管理员可访问
   if (to.meta.requiresAgent && !auth.canViewReport) {
     return { name: 'TicketList' }
   }

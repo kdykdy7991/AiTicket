@@ -25,8 +25,9 @@ export const useAuthStore = defineStore('auth', () => {
   const isTaskforce = computed(() => hasRole('taskforce'))
   const isSubsystem = computed(() => hasRole('subsystem'))
   const isQuality = computed(() => hasRole('quality'))
+  const isLeader = computed(() => hasRole('leader'))
   const canCreateTicket = computed(() => isPresales.value || isAdmin.value)
-  const canViewReport = computed(() => isQuality.value || isAdmin.value)
+  const canViewReport = computed(() => isQuality.value || isLeader.value || isAdmin.value)
   const displayName = computed(() => {
     if (!user.value) return ''
     const u = user.value as any
@@ -64,7 +65,7 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     accessToken, refreshToken, user,
     isLoggedIn, userRoles, hasRole, isAdmin,
-    isPresales, isApprover, isTaskforce, isSubsystem, isQuality,
+    isPresales, isApprover, isTaskforce, isSubsystem, isQuality, isLeader,
     canCreateTicket, canViewReport, displayName,
     login, logout,
   }

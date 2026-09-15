@@ -20,6 +20,8 @@ BACKUP_DIR="${PROJECT_DIR}/backups"
 export COMPOSE_PROJECT_NAME="skdy-poc"
 INIT_MODE=false
 TAG=""
+REFRESH_BASE_IMAGES=false
+BASE_IMAGES=("python:3.11-slim" "node:20-alpine" "nginx:1.27-alpine" "postgres:15-alpine" "redis:7-alpine")
 
 cd "${PROJECT_DIR}"
 
@@ -50,10 +52,61 @@ gen_default_tag() {
     printf '%s-%02d' "$prefix" "$((last_seq + 1))"
 }
 
+# 数据库发布步骤统一收口在这里。首次部署和常规部署都必须执行：
+# - upgrade head 自动应用包括 leader 角色在内的全部迁移；
+# - current --check-heads 保证数据库确实到达镜像内的最新迁移头；
+# - seed.py 幂等同步基础账号与分系统，可安全重复执行。
+migrate_and_seed() {
+    echo "执行数据库迁移 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
+
+    echo "校验数据库迁移版本 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api alembic current --check-heads
+
+    echo "同步基础数据 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/seed.py
+}
+
+# Docker Hub 偶发 EOF/超时不应让整次部署立即失败；仅重试构建步骤，避免重复备份数据库。
+build_images() {
+    local image
+    for image in "${BASE_IMAGES[@]}"; do
+        if ! docker image inspect "${image}" > /dev/null 2>&1; then
+            echo "缺少本地基础镜像：${image}"
+            echo "请先执行：./deploy.sh --refresh-base-images"
+            return 1
+        fi
+    done
+    local max_attempts=3
+    local attempt=1
+    while true; do
+        if DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web; then
+            return 0
+        fi
+        if [ "${attempt}" -ge "${max_attempts}" ]; then
+            echo "镜像构建连续失败 ${max_attempts} 次，请检查 Docker Hub 网络后重新执行 deploy.sh"
+            return 1
+        fi
+        echo "镜像构建失败，10 秒后自动重试（$((attempt + 1))/${max_attempts}）..."
+        sleep 10
+        attempt=$((attempt + 1))
+    done
+}
+
+refresh_base_images() {
+    local image
+    for image in "${BASE_IMAGES[@]}"; do
+        echo "拉取基础镜像：${image}"
+        docker pull "${image}"
+    done
+}
+
 # 解析参数
 for arg in "$@"; do
     if [ "$arg" = "--init" ]; then
         INIT_MODE=true
+    elif [ "$arg" = "--refresh-base-images" ]; then
+        REFRESH_BASE_IMAGES=true
     else
         TAG="$arg"
     fi
@@ -75,6 +128,11 @@ fi
 set -a
 source .env
 set +a
+if [ "${REFRESH_BASE_IMAGES}" = true ]; then
+    refresh_base_images
+    echo "基础镜像已更新并保存在本机"
+    exit 0
+fi
 
 echo "======================================"
 if [ "$INIT_MODE" = true ]; then
@@ -98,14 +156,13 @@ if [ "$INIT_MODE" = true ]; then
 
     # 2. 构建镜像
     echo "[2/4] 构建镜像 skdy-api:${TAG} ..."
-    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web
+    build_images
     docker tag skdy-poc-api "skdy-api:${TAG}" 2>/dev/null || true
     docker tag skdy-poc-api "skdy-api:latest" 2>/dev/null || true
 
-    # 3. 执行数据库迁移 + 种子数据
+    # 3. 执行数据库迁移、校验版本并同步种子数据
     echo "[3/4] 初始化数据库 ..."
-    docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
-    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/seed.py
+    migrate_and_seed
 
     # 4. 启动全部服务
     echo "[4/4] 启动全部服务 ..."
@@ -132,17 +189,13 @@ else
 
     # 3. 构建镜像
     echo "[3/7] 构建镜像 skdy-api:${TAG} ..."
-    DOCKER_BUILDKIT=1 docker compose -f "${COMPOSE_FILE}" build api web
+    build_images
     docker tag skdy-poc-api "skdy-api:${TAG}" 2>/dev/null || true
     docker tag skdy-poc-api "skdy-api:latest" 2>/dev/null || true
 
-    # 4. 执行数据库迁移
-    echo "[4/7] 执行数据库迁移 ..."
-    docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
-
-    # 同步种子数据（POC 角色账号与五个分系统，幂等，可重复执行）
-    echo "[5/7] 同步种子数据 ..."
-    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/seed.py
+    # 4-5. 执行数据库迁移、校验版本并同步种子数据
+    echo "[4-5/7] 更新数据库 ..."
+    migrate_and_seed
 
     # 6. 启动/更新服务
     echo "[6/7] 启动服务 ..."

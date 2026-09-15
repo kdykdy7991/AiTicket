@@ -1,413 +1,87 @@
 <template>
-  <div class="dashboard-view">
-    <div class="page-header">
-      <h2 class="page-title">仪表盘</h2>
-      <p class="page-subtitle">工单处理概览与关键指标</p>
-    </div>
+  <div v-loading="loading" class="overview-page">
+    <header class="overview-header">
+      <div><div class="breadcrumb">总览</div><h1>问题总览</h1></div>
+    </header>
 
-    <!-- 主指标卡 -->
-    <div class="stat-grid stat-grid-primary">
-      <div
-        v-for="(card, i) in primaryCards"
-        :key="card.label"
-        class="stat-card"
-        :style="{ animationDelay: `${i * 60}ms` }"
-      >
-        <div class="stat-icon-wrapper" :style="{ background: card.bgColor }">
-          <span class="stat-icon" v-html="card.icon" :style="{ color: card.color }" />
-        </div>
-        <div class="stat-content">
-          <span class="stat-value">{{ card.value }}</span>
-          <span class="stat-label">{{ card.label }}</span>
-          <span v-if="card.suffix" class="stat-suffix">{{ card.suffix }}</span>
-        </div>
-      </div>
-    </div>
+    <section class="customer-strip panel">
+      <div class="customer-total"><UserFilled class="section-icon"/><strong>客户</strong><b>{{ stats?.customer_count || 0 }}</b><small>客户总数量</small></div>
+      <div class="divider"/>
+      <div class="customer-tags"><span v-for="item in customerItems" :key="item.name">{{ item.name }}</span><span v-if="!customerItems.length" class="empty-tag">暂无客户数据</span></div>
+    </section>
 
-    <!-- P7：关键指标卡 -->
-    <div class="metric-grid">
-      <div class="metric-card sla-breach" :class="{ 'is-warning': (stats?.sla_breach_rate ?? 0) >= 15 }">
-        <div class="metric-header">
-          <span class="metric-label">SLA 超时率</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
-        </div>
-        <div class="metric-value">
-          {{ stats?.sla_breach_rate?.toFixed(1) ?? 0 }}<span class="metric-unit">%</span>
-        </div>
-        <div class="metric-bar">
-          <div class="metric-bar-fill" :style="{ width: `${Math.min(stats?.sla_breach_rate ?? 0, 100)}%` }" />
-        </div>
-      </div>
+    <section class="metrics-grid">
+      <article v-for="card in statusCards" :key="card.label" class="metric-card panel">
+        <div class="metric-title"><i :style="{background:card.tint,color:card.color}"><component :is="card.icon"/></i><span>{{ card.label }}</span></div>
+        <b>{{ card.value }}</b><small>较上周 <em :class="deltaClass(card.key, card.delta)">{{ formatDelta(card.delta) }} {{ card.delta > 0 ? '↗' : card.delta < 0 ? '↘' : '—' }}</em></small>
+      </article>
+      <article class="metric-card panel rate-card">
+        <div class="metric-title"><i class="green">%</i><span>闭环率</span></div>
+        <b>{{ percent(stats?.workflow_closure_rate) }}</b><div class="progress"><span :style="{width:barPercent(stats?.workflow_closure_rate)}"/></div>
+      </article>
+      <article class="metric-card panel rate-card overdue">
+        <div class="metric-title"><i><Timer/></i><span>未按时闭环率</span></div>
+        <b>{{ percent(stats?.overdue_closure_rate) }}</b><div class="progress"><span :style="{width:barPercent(stats?.overdue_closure_rate)}"/></div>
+      </article>
+    </section>
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span class="metric-label">一次解决率</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20,6 9,17 4,12"/></svg>
-        </div>
-        <div class="metric-value">
-          {{ stats?.first_contact_resolution_rate?.toFixed(1) ?? 0 }}<span class="metric-unit">%</span>
-        </div>
-        <div class="metric-bar">
-          <div class="metric-bar-fill success" :style="{ width: `${Math.min(stats?.first_contact_resolution_rate ?? 0, 100)}%` }" />
-        </div>
-      </div>
+    <section class="trend-panel panel">
+      <div class="panel-heading"><div><h2><Histogram/>周问题趋势</h2></div><div class="legend"><span><i class="new-dot"/>新增问题</span><span><i class="closed-dot"/>闭环问题</span></div></div>
+      <div ref="trendEl" class="trend-chart"/>
+    </section>
 
-      <div class="metric-card">
-        <div class="metric-header">
-          <span class="metric-label">处理中工单</span>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
-        </div>
-        <div class="metric-value">{{ stats?.in_progress ?? 0 }}</div>
-      </div>
-    </div>
-
-    <!-- P7：各组平均处理时长 + 故障分类 -->
-    <div class="two-col-grid">
-      <div class="panel">
-        <div class="panel-header">
-          <h3 class="panel-title">各组平均处理时长</h3>
-          <span class="panel-hint">单位：分钟</span>
-        </div>
-        <div class="group-list">
-          <div
-            v-for="g in stats?.avg_resolution_per_group ?? []"
-            :key="g.group_id"
-            class="group-row"
-          >
-            <div class="group-name">{{ g.group_name }}</div>
-            <div class="group-bar-wrapper">
-              <div class="group-bar" :style="{ width: `${groupBarPercent(g.minutes)}%` }">
-                <span class="group-value">{{ formatMinutes(g.minutes) }}</span>
-              </div>
-            </div>
-          </div>
-          <div v-if="!stats?.avg_resolution_per_group?.length" class="empty">暂无数据</div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="panel-header">
-          <h3 class="panel-title">故障分类 Top</h3>
-          <span class="panel-hint">按工单数排序</span>
-        </div>
-        <div class="category-list">
-          <div
-            v-for="(c, i) in stats?.tickets_by_category ?? []"
-            :key="c.category_l1"
-            class="category-row"
-          >
-            <span class="category-rank">{{ i + 1 }}</span>
-            <span class="category-name">{{ c.category_l1 }}</span>
-            <div class="category-bar-wrapper">
-              <div class="category-bar" :style="{ width: `${categoryBarPercent(c.count)}%` }" />
-            </div>
-            <span class="category-count">{{ c.count }}</span>
-          </div>
-          <div v-if="!stats?.tickets_by_category?.length" class="empty">暂无数据</div>
-        </div>
-      </div>
-    </div>
+    <section class="analysis-grid">
+      <article class="analysis-card panel"><div class="panel-heading"><h2><UserFilled/>客户分析</h2><el-select v-model="selectedCustomer" size="small" class="customer-select" @change="renderCustomerChart"><el-option label="全部客户" value=""/><el-option v-for="item in customerItems" :key="item.name" :label="item.name" :value="item.name"/></el-select></div><div ref="customerEl" class="pie-chart"/></article>
+      <article class="analysis-card panel"><div class="panel-heading"><h2><FolderOpened/>问题类型</h2></div><div ref="typeEl" class="pie-chart"/></article>
+      <article class="analysis-card panel"><div class="panel-heading"><h2><Management/>责任系统</h2><el-select v-model="selectedGroup" size="small" class="customer-select" @change="renderGroupChart"><el-option label="全部系统" value=""/><el-option v-for="name in groupItems" :key="name" :label="name" :value="name"/></el-select></div><div ref="groupEl" class="pie-chart"/></article>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
-import { useOverviewStore } from '@/stores/overview'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import * as echarts from 'echarts'
+import dayjs from 'dayjs'
+import { CircleCheckFilled, Clock, FolderOpened, Histogram, Management, Refresh, Timer, UserFilled, WarningFilled } from '@element-plus/icons-vue'
+import { statsApi } from '@/api/overviews'
 
-const overviewStore = useOverviewStore()
-
-const iconNew = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
-const iconOpen = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="M12 6v6l4 2"/></svg>'
-const iconPending = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/></svg>'
-const iconOverdue = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
-const iconResolved = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22,4 12,14.01 9,11.01"/></svg>'
-
-const stats = computed(() => overviewStore.dashboardStats)
-
-const primaryCards = computed(() => {
-  const s = stats.value
-  if (!s) return []
-  const byState = (name: string) => s.tickets_by_state.find(i => i.state === name)?.count || 0
-  return [
-    { label: '新工单', value: byState('new'), color: '#635BFF', bgColor: 'rgba(99,91,255,0.08)', icon: iconNew },
-    { label: '处理中', value: byState('open'), color: '#F59E0B', bgColor: 'rgba(245,158,11,0.08)', icon: iconOpen },
-    { label: '挂起/待回访', value: byState('pending'), color: '#6B7280', bgColor: 'rgba(107,114,128,0.08)', icon: iconPending },
-    { label: '已逾期', value: s.escalated_count, color: '#EF4444', bgColor: 'rgba(239,68,68,0.08)', icon: iconOverdue, suffix: '个' },
-    { label: '今日解决', value: s.resolved_today, color: '#10B981', bgColor: 'rgba(16,185,129,0.08)', icon: iconResolved, suffix: '个' },
-  ]
-})
-
-function formatMinutes(m: number): string {
-  if (m < 60) return `${m} 分钟`
-  if (m < 1440) return `${(m / 60).toFixed(1)} 小时`
-  return `${(m / 1440).toFixed(1)} 天`
+type CountMap = Record<string, number>
+type OverviewStats = {
+  effective_total:number; customer_count:number; resolved_count:number; temporarily_resolved_count:number; pending_reproduction_count:number; unresolved_count:number; pending_status_count:number; resolution_rate:number; workflow_closure_rate:number; overdue_closure_rate:number; plan_eligible_count:number; plan_coverage_rate:number; by_customer:CountMap; by_customer_status:Record<string,CountMap>; by_problem_type:CountMap; by_skill_group:CountMap; by_skill_group_status:Record<string,CountMap>; by_verification_status:CountMap
 }
-
-function groupBarPercent(minutes: number): number {
-  const list = stats.value?.avg_resolution_per_group ?? []
-  const max = Math.max(...list.map(g => g.minutes), 1)
-  return (minutes / max) * 100
-}
-
-function categoryBarPercent(count: number): number {
-  const list = stats.value?.tickets_by_category ?? []
-  const max = Math.max(...list.map(c => c.count), 1)
-  return (count / max) * 100
-}
-
-onMounted(async () => {
-  await overviewStore.fetchDashboardStats()
-})
+type TrendDay = {date:string;new:number;closed:number;overdue:number}
+type StatusKey = 'resolved_count' | 'temporarily_resolved_count' | 'pending_reproduction_count' | 'unresolved_count'
+const loading=ref(false), stats=ref<OverviewStats|null>(null), currentWeek=ref<OverviewStats|null>(null), previousWeek=ref<OverviewStats|null>(null), trend=ref<TrendDay[]>([]), selectedCustomer=ref(''), selectedGroup=ref('')
+const trendEl=ref<HTMLElement>(),customerEl=ref<HTMLElement>(),typeEl=ref<HTMLElement>(),groupEl=ref<HTMLElement>()
+const charts:echarts.ECharts[]=[]
+const customerItems=computed(()=>Object.entries(stats.value?.by_customer||{}).map(([name,value])=>({name,value})))
+const groupItems=computed(()=>Object.keys(stats.value?.by_skill_group||{}))
+const statusDistribution=(raw:CountMap)=>({'已解决':raw.resolved||0,'临时解决':raw.temporarily_resolved||0,'待复现':raw.pending_reproduction||0,'未解决':raw.unresolved||0,'待明确':raw.pending||0})
+const customerStatusData=computed(()=>statusDistribution(selectedCustomer.value ? stats.value?.by_customer_status?.[selectedCustomer.value]||{} : stats.value?.by_verification_status||{}))
+const groupStatusData=computed(()=>statusDistribution(selectedGroup.value ? stats.value?.by_skill_group_status?.[selectedGroup.value]||{} : stats.value?.by_verification_status||{}))
+function weekDelta(key:StatusKey){const current=(currentWeek.value?.[key]||0)+(key==='unresolved_count'?(currentWeek.value?.pending_status_count||0):0),previous=(previousWeek.value?.[key]||0)+(key==='unresolved_count'?(previousWeek.value?.pending_status_count||0):0);return previous?Math.round((current-previous)/previous*100):current?100:0}
+const statusCards=computed(()=>[
+ {key:'resolved_count' as const,label:'已解决',delta:weekDelta('resolved_count'),value:stats.value?.resolved_count||0,note:'验证状态已解决',icon:CircleCheckFilled,color:'#4f7c62',tint:'#eaf3ed'},
+ {key:'temporarily_resolved_count' as const,label:'临时解决',delta:weekDelta('temporarily_resolved_count'),value:stats.value?.temporarily_resolved_count||0,note:'仍需推动彻底解决',icon:Clock,color:'#a66f35',tint:'#f8efe4'},
+ {key:'pending_reproduction_count' as const,label:'待复现',delta:weekDelta('pending_reproduction_count'),value:stats.value?.pending_reproduction_count||0,note:'等待条件再次出现',icon:Refresh,color:'#58728e',tint:'#eaf0f6'},
+ {key:'unresolved_count' as const,label:'未解决',delta:weekDelta('unresolved_count'),value:(stats.value?.unresolved_count||0)+(stats.value?.pending_status_count||0),note:'待明确 '+(stats.value?.pending_status_count||0),icon:WarningFilled,color:'#a95353',tint:'#faeaea'},
+])
+function percent(v?:number){return ((v||0)*100).toFixed(1)+'%'}
+function barPercent(v?:number){return Math.min(100,Math.max(0,(v||0)*100))+'%'}
+function formatDelta(v:number){return (v>0?'+':'')+v+'%'}
+function deltaClass(key:StatusKey,v:number){if(!v)return 'flat';const good=(key==='resolved_count'||key==='temporarily_resolved_count')?v>0:v<0;return good?'good':'bad'}
+function disposeCharts(){charts.splice(0).forEach(c=>c.dispose())}
+function pie(el:HTMLElement|undefined,data:CountMap,centerLabel:string){if(!el)return;const chart=echarts.init(el);charts.push(chart);const items=Object.entries(data).map(([name,value])=>({name,value}));const total=items.reduce((n,i)=>n+i.value,0);const font="'Microsoft YaHei','Noto Sans CJK SC','Source Han Sans SC',Arial,sans-serif";chart.setOption({color:['#6f8d79','#c89c68','#8ca0b3','#bd6d6d','#8e82a3','#b7bdc4'],tooltip:{trigger:'item'},legend:{orient:'vertical',right:4,top:'center',itemWidth:9,itemHeight:9,textStyle:{color:'#4c5563',fontSize:12},data:items.map(i=>i.name),formatter:(name:string)=>{const value=data[name]||0;const rate=total?Math.round(value/total*100):0;return name+'   '+value+'   '+rate+'%'}},series:[{type:'pie',radius:['58%','82%'],center:['30%','50%'],avoidLabelOverlap:true,label:{show:false},data:items.length?items:[{name:'暂无数据',value:1,itemStyle:{color:'#edf0f3'}}]},{type:'pie',radius:['0%','58%'],center:['30%','50%'],silent:true,label:{show:true,position:'center',formatter:'{num|'+total+'}\n{lab|'+centerLabel+'}',rich:{num:{fontFamily:"Georgia,'Times New Roman',serif",fontSize:32,fontWeight:700,color:'#172033',lineHeight:40},lab:{fontFamily:font,fontSize:12,color:'#87909d',lineHeight:20}}},data:[{value:1,itemStyle:{color:'transparent'}}],tooltip:{show:false}}]})}
+function redrawPie(el:HTMLElement|undefined,data:CountMap){if(!el)return;const index=charts.findIndex(chart=>chart.getDom()===el);if(index>=0){charts[index].dispose();charts.splice(index,1)}pie(el,data,'问题总数')}
+function renderCustomerChart(){redrawPie(customerEl.value,customerStatusData.value)}
+function renderGroupChart(){redrawPie(groupEl.value,groupStatusData.value)}
+function render(){disposeCharts();const source=trend.value;const monthly=source.length>62;const map=new Map<string,{new:number;closed:number}>();source.forEach(d=>{const key=monthly?d.date.slice(0,7):d.date;const old=map.get(key)||{new:0,closed:0};old.new+=d.new;old.closed+=d.closed;map.set(key,old)});if(trendEl.value){const chart=echarts.init(trendEl.value);charts.push(chart);const entries=[...map.entries()];chart.setOption({color:['#47515e','#b58b5d'],tooltip:{trigger:'axis'},grid:{left:42,right:22,top:20,bottom:34},xAxis:{type:'category',data:entries.map(i=>i[0]),boundaryGap:false,axisLine:{lineStyle:{color:'#dfe3e8'}},axisLabel:{color:'#77808e'}},yAxis:{type:'value',minInterval:1,splitLine:{lineStyle:{color:'#edf0f3'}},axisLabel:{color:'#77808e'}},series:[{name:'新增问题',type:'line',smooth:.25,symbol:'circle',symbolSize:7,data:entries.map(i=>i[1].new),lineStyle:{width:2},areaStyle:{opacity:.04}},{name:'闭环问题',type:'line',smooth:.25,symbol:'circle',symbolSize:7,data:entries.map(i=>i[1].closed),lineStyle:{width:2},areaStyle:{opacity:.04}}]})}pie(customerEl.value,customerStatusData.value,'问题总数');pie(typeEl.value,stats.value?.by_problem_type||{},'问题总数');pie(groupEl.value,groupStatusData.value,'问题总数')}
+async function load(){loading.value=true;try{const trendTo=dayjs().format('YYYY-MM-DD'),trendFrom=dayjs().subtract(6,'day').format('YYYY-MM-DD'),previousFrom=dayjs().subtract(13,'day').format('YYYY-MM-DD'),previousTo=dayjs().subtract(7,'day').format('YYYY-MM-DD');const [s,c,p,t]=await Promise.all([statsApi.dashboard(),statsApi.dashboard({date_from:trendFrom,date_to:trendTo}),statsApi.dashboard({date_from:previousFrom,date_to:previousTo}),statsApi.trend({date_from:trendFrom,date_to:trendTo})]);stats.value=s;currentWeek.value=c;previousWeek.value=p;trend.value=t.days||[];await nextTick();render()}finally{loading.value=false}}
+function resize(){charts.forEach(c=>c.resize())}
+onMounted(()=>{load();window.addEventListener('resize',resize)})
+onBeforeUnmount(()=>{window.removeEventListener('resize',resize);disposeCharts()})
 </script>
 
 <style scoped>
-.page-header { margin-bottom: 28px; }
-.page-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  letter-spacing: -0.02em;
-  margin: 0;
-}
-.page-subtitle {
-  font-size: 14px;
-  color: var(--color-text-tertiary);
-  margin-top: 4px;
-}
-
-.stat-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 16px;
-  margin-bottom: 20px;
-}
-.stat-grid-primary { margin-bottom: 24px; }
-
-.stat-card {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  padding: 20px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  transition: all var(--duration-normal) var(--ease-out);
-  animation: stat-in 0.4s var(--ease-out) both;
-}
-.stat-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
-
-@keyframes stat-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.stat-icon-wrapper {
-  width: 44px;
-  height: 44px;
-  border-radius: var(--radius-md);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.stat-content {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 2px;
-}
-.stat-value {
-  font-size: 26px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.stat-label {
-  font-size: 12.5px;
-  color: var(--color-text-tertiary);
-  font-weight: 500;
-}
-.stat-suffix {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
-  margin-top: -2px;
-}
-
-/* 关键指标 */
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.metric-card {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  padding: 16px 20px;
-  animation: stat-in 0.4s var(--ease-out) both;
-}
-.metric-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  color: var(--color-text-tertiary);
-  margin-bottom: 8px;
-}
-.metric-label { font-size: 12.5px; font-weight: 600; }
-.metric-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  margin-bottom: 10px;
-}
-.metric-unit { font-size: 14px; font-weight: 500; color: var(--color-text-tertiary); margin-left: 2px; }
-.metric-bar {
-  height: 4px;
-  background: var(--color-bg-subtle);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.metric-bar-fill {
-  height: 100%;
-  background: var(--color-danger);
-  border-radius: 2px;
-  transition: width 0.6s var(--ease-out);
-}
-.metric-bar-fill.success { background: var(--color-success); }
-.metric-card.sla-breach.is-warning .metric-value { color: var(--color-danger); }
-
-/* 两列 */
-.two-col-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.panel {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  padding: 18px 20px;
-}
-.panel-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 14px;
-}
-.panel-title {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-.panel-hint { font-size: 11.5px; color: var(--color-text-tertiary); }
-
-.empty {
-  text-align: center;
-  color: var(--color-text-tertiary);
-  font-size: 13px;
-  padding: 16px 0;
-}
-
-/* 组条形图 */
-.group-list { display: flex; flex-direction: column; gap: 10px; }
-.group-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.group-name {
-  width: 100px;
-  font-size: 12.5px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
-  flex-shrink: 0;
-}
-.group-bar-wrapper {
-  flex: 1;
-  background: var(--color-bg-subtle);
-  border-radius: var(--radius-sm);
-  height: 24px;
-  position: relative;
-  overflow: hidden;
-}
-.group-bar {
-  height: 100%;
-  background: linear-gradient(90deg, #635BFF 0%, #8B7FFF 100%);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 10px;
-  min-width: 60px;
-  transition: width 0.6s var(--ease-out);
-}
-.group-value {
-  color: #fff;
-  font-size: 11.5px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 分类列表 */
-.category-list { display: flex; flex-direction: column; gap: 8px; }
-.category-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-size: 13px;
-}
-.category-rank {
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-full);
-  background: var(--color-bg-subtle);
-  color: var(--color-text-tertiary);
-  font-size: 11px;
-  font-weight: 600;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.category-row:nth-child(1) .category-rank { background: rgba(99,91,255,0.10); color: var(--color-primary); }
-.category-row:nth-child(2) .category-rank { background: rgba(99,91,255,0.08); color: var(--color-primary); }
-.category-row:nth-child(3) .category-rank { background: rgba(99,91,255,0.06); color: var(--color-primary); }
-.category-name { width: 90px; color: var(--color-text-primary); font-weight: 500; flex-shrink: 0; }
-.category-bar-wrapper {
-  flex: 1;
-  height: 6px;
-  background: var(--color-bg-subtle);
-  border-radius: 3px;
-  overflow: hidden;
-}
-.category-bar {
-  height: 100%;
-  background: var(--color-primary);
-  border-radius: 3px;
-  transition: width 0.6s var(--ease-out);
-}
-.category-count {
-  width: 28px;
-  text-align: right;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-text-primary);
-}
-
-/* Overview */
-.overview-card { border: 1px solid var(--color-border-light); }
-.overview-card :deep(.el-card__header) { padding: 0 20px; border-bottom: 1px solid var(--color-divider); }
-.overview-card :deep(.el-card__body) { padding: 0; }
-.overview-tabs :deep(.el-tabs__header) { margin: 0; }
-.overview-tabs :deep(.el-tabs__nav-wrap::after) { display: none; }
+.overview-page{--heading-font:'Noto Serif CJK SC','Source Han Serif SC',STSong,SimSun,serif;--body-font:'Microsoft YaHei','Noto Sans CJK SC','Source Han Sans SC',Arial,sans-serif;color:#172033;font-family:var(--body-font)}.breadcrumb{margin-bottom:7px;color:#7b8694;font-size:13px}.overview-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.overview-header h1{font-size:26px;font-weight:700;line-height:1.25;margin:0;letter-spacing:-.5px}.overview-header p,.panel-heading p{margin:0;color:#818a98;font-size:14px}.panel{background:#fff;border:1px solid #e2e7ec;border-radius:12px}.customer-strip{display:flex;min-height:110px;padding:16px 20px 18px;box-sizing:border-box;align-items:center}.customer-total{width:170px;display:grid;grid-template-columns:28px 1fr;align-items:center}.customer-total .section-icon{width:22px;height:22px;color:#46505e}.customer-total strong{font-family:var(--heading-font);font-size:19px;font-weight:700}.customer-total b{grid-column:1/3;text-align:center;font-family:Georgia,'Times New Roman',serif;font-size:38px;line-height:1;margin-top:14px}.customer-total small{grid-column:1/3;text-align:center;color:#6f7886}.divider{width:1px;height:86px;background:#d9dde3;margin:0 39px 0 11px}.customer-tags{display:grid;grid-template-columns:repeat(8,minmax(100px,1fr));gap:10px 11px;width:100%}.customer-tags span{background:#f5f6f8;border-radius:6px;height:36px;display:grid;place-items:center;box-sizing:border-box;padding:0 10px;color:#4c5563;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.customer-tags em{float:right;font-style:normal;color:#9ba3ad;font-size:12px}.metrics-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin:16px 0}.metric-card{padding:18px 20px;min-height:135px;box-sizing:border-box}.metric-title{display:flex;align-items:center;gap:10px;color:#4e5662;font-size:14px;font-weight:500}.metric-title i{width:18px;height:18px;display:grid;place-items:center;background:#faeaea;color:#a95353;font-style:normal;font-weight:700}.metric-title i.green{background:#eaf3ed;color:#4f7c62}.metric-title i svg{width:16px;height:16px}.metric-card>b{display:block;font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;line-height:1;margin:15px 0 8px}.metric-card small{color:#858e9b;font-size:12px}.metric-card small em{margin-left:4px;font-style:normal;font-weight:600}.metric-card small em.good{color:#5e8c6a}.metric-card small em.bad{color:#be5f5f}.metric-card small em.flat{color:#9aa1a8}.progress{height:8px;background:#eceff2;border-radius:8px;overflow:hidden;margin:8px 0 9px}.progress span{display:block;height:100%;background:#627b6c;border-radius:8px}.overdue .progress span{background:#bd5c5c}.trend-panel{padding:19px 22px;margin-bottom:16px}.panel-heading{display:flex;justify-content:space-between;align-items:flex-start}.panel-heading h2{display:flex;align-items:center;gap:10px;font-family:var(--heading-font);font-size:15px;font-weight:600;line-height:1.25;margin:0 0 4px}.panel-heading h2 svg{width:21px;height:21px;color:#46505e}.panel-heading>span{font-size:12px;color:#8a929e}.legend{display:flex;gap:24px;color:#68717e;font-size:13px}.legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px}.new-dot{background:#47515e}.closed-dot{background:#b58b5d}.trend-chart{height:186px}.analysis-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.analysis-card{padding:18px 20px}.customer-select{width:180px}.pie-chart{height:220px}@media(max-width:1300px){.customer-tags{grid-template-columns:repeat(5,1fr)}.metrics-grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:850px){.overview-header{align-items:flex-start;gap:12px;flex-direction:column}.customer-strip{align-items:flex-start}.customer-total{width:120px}.customer-tags{grid-template-columns:repeat(2,1fr)}.metrics-grid,.analysis-grid{grid-template-columns:1fr}.trend-chart{height:240px}}
 </style>

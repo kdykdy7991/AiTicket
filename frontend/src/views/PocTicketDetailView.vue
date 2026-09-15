@@ -40,7 +40,8 @@
               <tr><th>初步排查结论</th><td colspan="3" class="long-value">{{ ticket.initial_investigation || '—' }}</td></tr>
               <tr><th>临时处置措施</th><td colspan="3" class="long-value">{{ ticket.temporary_measure || '—' }}</td></tr>
               <tr><th>长期整改措施</th><td colspan="3" class="long-value">{{ ticket.long_term_measure || '—' }}</td></tr>
-              <tr><th>计划完成时间</th><td>{{ formatTime(ticket.planned_completion_at) }}</td><th>售前确认意见</th><td>{{ ticket.plan_confirmation_comment || '—' }}</td></tr>
+              <tr><th>计划完成时间</th><td colspan="3">{{ formatTime(ticket.planned_completion_at) }}</td></tr>
+              <tr><th>售前确认意见</th><td colspan="3" class="long-value">{{ ticket.plan_confirmation_comment || '—' }}</td></tr>
             </tbody></table></div>
           </el-card>
           <el-card v-if="hasAnalysis" shadow="never" class="section detail-section"><template #header><div class="detail-title"><el-icon><DataAnalysis /></el-icon><strong>分析验证</strong></div></template>
@@ -110,12 +111,13 @@ import type { Group } from '@/types'
 const route=useRoute(), router=useRouter(); const loading=ref(false), submitting=ref(false), uploading=ref(false), dialogVisible=ref(false)
 const authStore=useAuthStore()
 const ticket=ref<PocTicketDetail|null>(null); const currentAction=ref<TicketAction>('approve'); const comment=ref(''); const actionPayload=reactive<Record<string, any>>({}); const skillGroups=ref<Group[]>([]); const subsystemUsers=ref<UserItem[]>([])
-const hasPlan=computed(()=>!!(ticket.value?.initial_investigation||ticket.value?.long_term_measure||ticket.value?.planned_completion_at)); const hasAnalysis=computed(()=>!!(ticket.value?.root_cause||ticket.value?.analysis_report)); const hasReview=computed(()=>!!(ticket.value?.verification_status||ticket.value?.quality_review_result));
+const PLAN_VISIBLE_STATES = new Set(['planning','pending_plan_confirmation','processing','pending_quality_review','pending_final_approval','closed'])
+const hasPlan=computed(()=>{const t=ticket.value;if(!t)return false;const state=t.state==='returned'?t.return_to_state:t.state;return PLAN_VISIBLE_STATES.has(state||'')||!!(t.initial_investigation||t.temporary_measure||t.long_term_measure||t.planned_completion_at||t.plan_confirmation_comment)}); const hasAnalysis=computed(()=>!!(ticket.value?.root_cause||ticket.value?.analysis_report)); const hasReview=computed(()=>!!(ticket.value?.verification_status||ticket.value?.quality_review_result));
 const workflowState=computed<PocState>(()=>ticket.value?.state==='returned'&&ticket.value.return_to_state?ticket.value.return_to_state:ticket.value?.state||'pending_approval')
 const coordinates=computed(()=>ticket.value?.longitude!=null&&ticket.value?.latitude!=null?`${ticket.value.longitude}, ${ticket.value.latitude}`:'—'); const verificationLabel=computed(()=>VERIFICATION_STATUS_OPTIONS.find(v=>v.value===ticket.value?.verification_status)?.label||'—')
-function buttonType(a:TicketAction){return ['reject','return','cancel'].includes(a)?'danger':'primary'} const RETURNED_ACTION_LABELS:Partial<Record<TicketAction,string>>={submit_plan:'修订并提交计划',submit_analysis:'修订并提交分析',pass_review:'修订并重新评审',resubmit:'修订并重新提交'}
+function buttonType(a:TicketAction){return ['reject','return','cancel'].includes(a)?'danger':'primary'} const RETURNED_ACTION_LABELS:Partial<Record<TicketAction,string>>={route:'重新确认并流转',submit_plan:'修订并提交计划',submit_analysis:'修订并提交分析',pass_review:'修订并重新评审',resubmit:'修订并重新提交'}
 function buttonLabel(a:TicketAction){const state=ticket.value?.state
-  if(a==='return'&&['pending_routing','pending_final_approval'].includes(state||''))return '驳回'
+  if(a==='return'&&['pending_routing','planning','pending_final_approval'].includes(state||''))return '驳回'
   if(state==='returned'&&a!=='cancel')return RETURNED_ACTION_LABELS[a]||actionLabel(a)
   return actionLabel(a)} function formatTime(v:string|null){return v?dayjs(v).format('YYYY-MM-DD HH:mm'):'—'} function stateIndex(s:PocState){return MAIN_FLOW_STATES.indexOf(s)}
 const submitLabel=computed(()=>currentAction.value==='resubmit'?'修订并重新提交':'确认'); const commentRequired=computed(()=>['route','reject','return','cancel'].includes(currentAction.value)); const showComment=computed(()=>!['submit_plan','submit_analysis','pass_review','resubmit'].includes(currentAction.value)); const commentLabel=computed(()=>currentAction.value==='route'?'确认信息':commentRequired.value?'原因':'意见');
@@ -133,7 +135,7 @@ function openAction(a:TicketAction){currentAction.value=a;comment.value='';Objec
     resubmit:['title','proposer','proposer_department','product_line','customer_name','priority','problem_type','closure_requirement','occurred_at','location','longitude','latitude','device_info','description'],
   }
   for(const key of PREFILL[a]||[]){const value=(t as unknown as Record<string,unknown>)[key];if(value!=null)actionPayload[key]=value}
-  if(a==='return'){actionPayload.return_to_state=({pending_routing:'pending_approval',pending_plan_confirmation:'planning',pending_quality_review:'processing',pending_final_approval:'pending_quality_review'} as Partial<Record<PocState, PocState>>)[t.state]}
+  if(a==='return'){actionPayload.return_to_state=({pending_routing:'pending_approval',planning:'pending_routing',pending_plan_confirmation:'planning',pending_quality_review:'processing',pending_final_approval:'pending_quality_review'} as Partial<Record<PocState, PocState>>)[t.state]}
   dialogVisible.value=true}
 async function loadSubsystemUsers(id:number){actionPayload.subsystem_owner_id=null;subsystemUsers.value=await userApi.list({role:'subsystem',skill_group_id:id})}
 async function submitAction(){if(!ticket.value||!canSubmit.value)return;submitting.value=true;try{ticket.value=await pocTicketApi.executeAction(ticket.value.id,{action:currentAction.value,comment:comment.value||null,payload:{...actionPayload},expected_version:ticket.value.state_version});dialogVisible.value=false;ElMessage.success(`${actionLabel(currentAction.value)}成功`)}catch(e:any){if(e?.response?.status===409){ElMessage.warning('问题已被他人更新，已刷新详情');await load()}else throw e}finally{submitting.value=false}}

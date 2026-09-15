@@ -35,6 +35,7 @@
         <el-table-column label="当前责任" min-width="150"><template #default="{ row }">{{ responsibleText(row) }}</template></el-table-column>
         <el-table-column label="计划完成时间" min-width="155"><template #default="{ row }"><span :class="{ overdue: row.is_overdue }">{{ formatTime(row.planned_completion_at) }}</span></template></el-table-column>
         <el-table-column label="更新时间" min-width="155"><template #default="{ row }">{{ formatTime(row.updated_at) }}</template></el-table-column>
+        <el-table-column label="创建时间" min-width="155"><template #default="{ row }">{{ formatTime(row.created_at) }}</template></el-table-column>
       </el-table>
       <el-pagination v-if="pagination.total" v-model:current-page="pagination.page" :page-size="pagination.page_size" :total="pagination.total" layout="total, prev, pager, next" @current-change="load" />
     </el-card>
@@ -65,7 +66,7 @@ const pagination = reactive({ page: 1, page_size: 20, total: 0, total_pages: 0 }
 function stateType(state: PocState) {
   return POC_STATE_OPTIONS.find(item => item.value === state)?.type || 'info'
 }
-function formatTime(value: string | null) { return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—' }
+function formatTime(value: string | null) { return value ? dayjs(value).format('YYYY-MM-DD') : '—' }
 /** 当前节点由哪个角色处理；该节点有指定经办人（批准人/分系统负责人/创建人）时一并显示 */
 function responsibleText(row: PocTicketBrief) {
   const role = roleLabel(row.current_responsible_role)
