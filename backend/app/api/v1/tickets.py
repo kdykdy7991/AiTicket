@@ -95,6 +95,10 @@ def _ticket_to_brief(t: Ticket, terminal_ops: dict | None = None) -> TicketBrief
         customer_name=t.customer_name, customer_phone=t.customer_phone, customer_phone_type=t.customer_phone_type, contact_phone=t.contact_phone,
         skill_group_id=t.skill_group_id,
         skill_group_name=t.skill_group.name if t.skill_group else None,
+        handler_skill_group_id=t.handler_skill_group_id,
+        handler_skill_group_name=(
+            t.handler_skill_group.name if t.handler_skill_group else None
+        ),
         owner_id=t.owner_id,
         owner_name=t.owner.name if t.owner else None,
         dispatcher_id=t.dispatcher_id,
@@ -337,7 +341,7 @@ async def list_tickets(
     """List tickets with filters and pagination."""
     # 默认不过滤草稿
     query = select(Ticket).options(
-        selectinload(Ticket.owner), selectinload(Ticket.skill_group),
+        selectinload(Ticket.owner), selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
         selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
         selectinload(Ticket.dispatcher), selectinload(Ticket.urged_by),
     ).where(Ticket.is_draft == False)
@@ -470,7 +474,7 @@ async def export_tickets(
         select(Ticket)
         .options(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
+            selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
             selectinload(Ticket.group),
         )
     )
@@ -631,7 +635,7 @@ async def list_drafts(
     result = await db.execute(
         select(Ticket)
         .options(
-            selectinload(Ticket.owner), selectinload(Ticket.skill_group),
+            selectinload(Ticket.owner), selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
             selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
             selectinload(Ticket.dispatcher), selectinload(Ticket.urged_by),
         )
@@ -688,7 +692,7 @@ async def submit_draft(
         select(Ticket).options(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
+            selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
             selectinload(Ticket.group),
         ).where(Ticket.id == ticket.id)
     )
@@ -739,6 +743,7 @@ async def update_draft(
     ticket.category_id = body.category_id
     ticket.group_id = body.group_id or user.group_id
     ticket.skill_group_id = body.skill_group_id
+    ticket.handler_skill_group_id = body.handler_skill_group_id
     ticket.dispatcher_id = body.dispatcher_id
     ticket.is_duplicate = body.is_duplicate
     ticket.duplicate_reason = body.duplicate_reason
@@ -751,7 +756,8 @@ async def update_draft(
         .options(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
+            selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
+            selectinload(Ticket.category).selectinload(TicketCategory.parent),
             selectinload(Ticket.group), selectinload(Ticket.urged_by),
         )
         .where(Ticket.id == draft_id)
@@ -773,7 +779,7 @@ async def get_ticket(
         .options(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
+            selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
             selectinload(Ticket.group), selectinload(Ticket.urged_by),
         )
         .where(Ticket.id == ticket_id)
@@ -806,7 +812,9 @@ async def create_ticket(
             customer_level=body.customer_level, device_sn=body.device_sn,
             region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
             group_id=body.group_id or user.group_id,
-            skill_group_id=body.skill_group_id, owner_id=None,
+            skill_group_id=body.skill_group_id,
+            handler_skill_group_id=body.handler_skill_group_id,
+            owner_id=None,
             creator_id=user.id, first_owner_id=None,
             dispatcher_id=body.dispatcher_id,
             is_duplicate=body.is_duplicate,
@@ -865,7 +873,9 @@ async def create_ticket(
             customer_level=body.customer_level, device_sn=body.device_sn,
             region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
             group_id=body.group_id or user.group_id,
-            skill_group_id=body.skill_group_id, owner_id=None,
+            skill_group_id=body.skill_group_id,
+            handler_skill_group_id=body.handler_skill_group_id,
+            owner_id=None,
             creator_id=user.id, first_owner_id=None,
             dispatcher_id=body.dispatcher_id,
             is_duplicate=body.is_duplicate,
@@ -895,7 +905,7 @@ async def create_ticket(
         select(Ticket).options(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
+            selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
             selectinload(Ticket.group),
         ).where(Ticket.id == ticket.id)
     )
@@ -1038,6 +1048,8 @@ async def update_ticket(
         ticket.group_id = body.group_id
     if body.skill_group_id is not None:
         ticket.skill_group_id = body.skill_group_id
+    if body.handler_skill_group_id is not None:
+        ticket.handler_skill_group_id = body.handler_skill_group_id
     if body.dispatcher_id is not None:
         ticket.dispatcher_id = body.dispatcher_id
 
@@ -1048,7 +1060,7 @@ async def update_ticket(
         select(Ticket).options(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-            selectinload(Ticket.skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
+            selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
             selectinload(Ticket.group),
         ).where(Ticket.id == ticket.id)
     )
@@ -1077,6 +1089,8 @@ async def batch_update_tickets(
             ticket.group_id = body.updates.group_id
         if body.updates.skill_group_id is not None:
             ticket.skill_group_id = body.updates.skill_group_id
+        if body.updates.handler_skill_group_id is not None:
+            ticket.handler_skill_group_id = body.updates.handler_skill_group_id
         if body.updates.owner_id is not None:
             ticket.owner_id = body.updates.owner_id
         if body.updates.dispatcher_id is not None:

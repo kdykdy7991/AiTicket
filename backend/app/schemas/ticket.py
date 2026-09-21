@@ -22,6 +22,7 @@ class TicketCreate(BaseModel):
     category_id: int | None = None
     group_id: int | None = None
     skill_group_id: int | None = None
+    handler_skill_group_id: int | None = None  # 专业处理部门（Phase 4 新增，可由路由规则自动填）
     dispatcher_id: int | None = None  # 部门对接人（正式提交必填）
     is_duplicate: bool = False
     duplicate_reason: str | None = None
@@ -34,6 +35,7 @@ class TicketUpdate(BaseModel):
     owner_id: int | None = None
     group_id: int | None = None
     skill_group_id: int | None = None
+    handler_skill_group_id: int | None = None
     dispatcher_id: int | None = None
     reason: str | None = None  # for state transitions requiring a reason
     hold_until: str | None = None  # 暂缓到的时间（ISO date），暂缓时填写
@@ -66,6 +68,8 @@ class TicketBrief(BaseModel):
     contact_phone: str | None = None
     skill_group_id: int | None = None
     skill_group_name: str | None = None
+    handler_skill_group_id: int | None = None
+    handler_skill_group_name: str | None = None
     owner_id: int | None = None
     owner_name: str | None = None
     dispatcher_id: int | None = None

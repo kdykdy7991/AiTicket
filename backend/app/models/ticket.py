@@ -38,6 +38,9 @@ class Ticket(Base):
     category_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("ticket_categories.id", ondelete="SET NULL"))
     group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("groups.id", ondelete="SET NULL"))
     skill_group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("skill_groups.id", ondelete="SET NULL"))
+    handler_skill_group_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("skill_groups.id", ondelete="SET NULL"), nullable=True
+    )  # 专业处理部门（与 skill_group_id=协调部门 区分）
     owner_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
     creator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     first_owner_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
@@ -108,7 +111,10 @@ class Ticket(Base):
     urged_by = relationship("User", foreign_keys=[urged_by_id], lazy="selectin")
     category = relationship("TicketCategory", lazy="selectin")
     group = relationship("Group", lazy="selectin")
-    skill_group = relationship("SkillGroup", lazy="selectin")
+    skill_group = relationship("SkillGroup", foreign_keys=[skill_group_id], lazy="selectin")
+    handler_skill_group = relationship(
+        "SkillGroup", foreign_keys=[handler_skill_group_id], lazy="selectin"
+    )
 
 
 class Article(Base):
