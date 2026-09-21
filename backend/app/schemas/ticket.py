@@ -145,6 +145,9 @@ class PaginatedTickets(BaseModel):
 class DuplicateWarning(BaseModel):
     duplicate_detected: bool = False
     duplicate_tickets: list[dict] = []
+    # Phase 5: 工单创建后告诉前端路由规则填了哪些字段 / 是否有警告
+    # 例如: "已根据路由规则自动分配协调人/专业部"
+    auto_match_warning: str | None = None
 
 
 class TicketCreateResponse(BaseModel):

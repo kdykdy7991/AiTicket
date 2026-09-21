@@ -25,6 +25,7 @@ from app.schemas.ticket import (
     TicketCreateResponse,
     TicketDetail,
     TicketUpdate,
+    DuplicateWarning,
 )
 from app.services.state_machine import validate_transition
 
@@ -800,6 +801,28 @@ async def create_ticket(
     """Create a new ticket."""
     warnings = None
 
+    # Auto-match responsibility from category routing rule (Phase 5).
+    # body.* wins; routing rule fills in any field the caller left blank.
+    auto_match_warning: str | None = None
+    if body.category_id is not None:
+        from app.services.routing import resolve_rule
+        rule_result = await resolve_rule(db, body.category_id)
+        if rule_result.get("matched"):
+            if body.skill_group_id is None and rule_result.get("dispatcher_skill_group_id"):
+                body.skill_group_id = rule_result["dispatcher_skill_group_id"]
+            if body.handler_skill_group_id is None:
+                # Even when the rule has no professional department we still
+                # leave handler_skill_group_id as the caller set it.
+                body.handler_skill_group_id = rule_result.get("handler_skill_group_id")
+            if body.dispatcher_id is None and rule_result.get("dispatcher_id"):
+                body.dispatcher_id = rule_result["dispatcher_id"]
+            # Note: owner_id is NOT auto-assigned here; the rule's default
+            # owner is used by the dispatcher's "分派" step, not at creation.
+            if rule_result.get("reason"):
+                auto_match_warning = rule_result["reason"]
+        else:
+            auto_match_warning = rule_result.get("reason")
+
     if body.is_draft:
         # Draft: no number, no SLA, no duplicate check, relaxed validation
         ticket = Ticket(
@@ -911,7 +934,14 @@ async def create_ticket(
     )
     ticket = result.scalar_one()
 
-    return TicketCreateResponse(data=_ticket_to_detail(ticket), warnings=warnings)
+    return TicketCreateResponse(
+        data=_ticket_to_detail(ticket),
+        warnings=DuplicateWarning(
+            duplicate_detected=bool(warnings and warnings.get("duplicate_detected")),
+            duplicate_tickets=(warnings or {}).get("duplicate_tickets", []),
+            auto_match_warning=auto_match_warning,
+        ) if (warnings or auto_match_warning) else None,
+    )
 
 
 @router.patch("/tickets/{ticket_id}", response_model=TicketDetail)
