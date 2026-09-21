@@ -18,6 +18,9 @@ from app.schemas.common import (
     GroupOut, RegionCreate, RegionOut, SLAPolicyCreate, SLAPolicyOut,
     SkillGroupCreate, SkillGroupOut, UserCreate, UserOut, UserUpdate,
 )
+from app.services.category_utils import (
+    build_category_path, compute_level, would_create_cycle,
+)
 from app.services.notification import send_dingtalk_text
 
 # ── Users ─────────────────────────────────────────────────
@@ -406,20 +409,77 @@ async def list_categories(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Return the full category tree (arbitrary depth).
+
+    Each node carries `level` (derived from parent chain) and `path` (display
+    path e.g. "客户服务 / 业务保障 / 星座大系统"). `path` is best-effort
+    computed when the response is assembled; depth is unlimited.
+    """
     query = select(TicketCategory)
     show_all = include_inactive is True or str(include_inactive).lower() == "true"
     if not show_all:
         query = query.where(TicketCategory.is_active == True)
     result = await db.execute(query.order_by(TicketCategory.sort_order, TicketCategory.id))
-    all_cats = result.scalars().all()
+    all_cats = list(result.scalars().all())
+    if not all_cats:
+        return {"data": []}
 
-    # Build tree
-    by_id = {c.id: {"id": c.id, "name": c.name, "level": c.level, "parent_id": c.parent_id, "sort_order": c.sort_order, "children": []} for c in all_cats}
+    # Compute derived attributes (level + path) up-front.
+    by_id = {c.id: c for c in all_cats}
+    levels: dict[int, int] = {}
+    paths: dict[int, str] = {}
+
+    def _level_of(c: TicketCategory, stack: set[int]) -> int:
+        if c.id in levels:
+            return levels[c.id]
+        if c.parent_id is None or c.parent_id not in by_id:
+            levels[c.id] = 1
+            return 1
+        if c.id in stack:
+            # Defensive: should never happen post-cycle-detection.
+            levels[c.id] = 1
+            return 1
+        stack.add(c.id)
+        try:
+            levels[c.id] = _level_of(by_id[c.parent_id], stack) + 1
+        finally:
+            stack.discard(c.id)
+        return levels[c.id]
+
+    for c in all_cats:
+        _level_of(c, set())
+        path_chain = []
+        cur = c
+        stack = set()
+        while cur is not None:
+            path_chain.append(cur.name)
+            if cur.parent_id is None or cur.parent_id not in by_id:
+                break
+            if cur.parent_id in stack:
+                break
+            stack.add(cur.parent_id)
+            cur = by_id[cur.parent_id]
+        path_chain.reverse()
+        paths[c.id] = " / ".join(path_chain)
+
+    # Build tree.
+    node_map: dict[int, dict] = {}
+    for c in all_cats:
+        node_map[c.id] = {
+            "id": c.id,
+            "name": c.name,
+            "level": levels[c.id],
+            "parent_id": c.parent_id,
+            "sort_order": c.sort_order,
+            "is_active": c.is_active,
+            "path": paths[c.id],
+            "children": [],
+        }
     tree = []
     for c in all_cats:
-        node = by_id[c.id]
-        if c.parent_id and c.parent_id in by_id:
-            by_id[c.parent_id]["children"].append(node)
+        node = node_map[c.id]
+        if c.parent_id and c.parent_id in node_map:
+            node_map[c.parent_id]["children"].append(node)
         else:
             tree.append(node)
     return {"data": tree}
@@ -431,20 +491,19 @@ async def create_category(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role("admin")),
 ):
-    level = 1
+    """Create a category at any depth. parent_id optional (top-level when None)."""
+    parent_cat = None
     if body.parent_id is not None:
-        parent = await db.execute(select(TicketCategory).where(TicketCategory.id == body.parent_id))
-        parent_cat = parent.scalar_one_or_none()
+        parent_cat = await db.execute(
+            select(TicketCategory).where(TicketCategory.id == body.parent_id)
+        )
+        parent_cat = parent_cat.scalar_one_or_none()
         if not parent_cat:
             raise HTTPException(400, detail="父级分类不存在")
-        if parent_cat.level != 1:
-            raise HTTPException(400, detail="二级分类不能作为父级")
-        level = 2
 
-    # 同级名称去重
+    # 同级名称去重（仅在 parent_id 范围内判重，与 level 解耦）
     dup_cond = [
         TicketCategory.name == body.name,
-        TicketCategory.level == level,
         TicketCategory.parent_id == body.parent_id,
     ]
     existing = await db.execute(select(TicketCategory).where(*dup_cond))
@@ -454,13 +513,26 @@ async def create_category(
     cat = TicketCategory(
         name=body.name,
         parent_id=body.parent_id,
-        level=level,
+        level=1,  # 占位；list 接口会按 parent 链重算
         sort_order=body.sort_order,
         is_active=body.is_active,
     )
     db.add(cat)
     await db.flush()
-    return {"data": {"id": cat.id, "name": cat.name, "level": cat.level, "parent_id": cat.parent_id, "sort_order": cat.sort_order}}
+    derived_level = await compute_level(db, cat)
+    # 持久化派生 level 以便历史快照/兼容旧代码
+    cat.level = derived_level
+    await db.flush()
+    return {
+        "data": {
+            "id": cat.id,
+            "name": cat.name,
+            "level": derived_level,
+            "parent_id": cat.parent_id,
+            "sort_order": cat.sort_order,
+            "is_active": cat.is_active,
+        }
+    }
 
 
 @categories_router.patch("/categories/{category_id}")
@@ -475,12 +547,22 @@ async def update_category(
     if not cat:
         raise NotFoundError("分类", category_id)
 
-    new_name = body.name if body.name is not None else cat.name
-    # 如果改名，校验同级同名
+    # parent_id 变更：校验目标 parent 存在且不形成环
+    if "parent_id" in body.model_fields_set and body.parent_id != cat.parent_id:
+        if body.parent_id is not None:
+            new_parent = await db.execute(
+                select(TicketCategory).where(TicketCategory.id == body.parent_id)
+            )
+            if not new_parent.scalar_one_or_none():
+                raise HTTPException(400, detail="父级分类不存在")
+            if await would_create_cycle(db, node_id=category_id, new_parent_id=body.parent_id):
+                raise HTTPException(400, detail="不能将分类移动到自身或其子孙下")
+        cat.parent_id = body.parent_id
+
+    # 改名时校验同级同名（parent 可能刚改过，按新 parent 判重）
     if body.name is not None and body.name != cat.name:
         dup_cond = [
             TicketCategory.name == body.name,
-            TicketCategory.level == cat.level,
             TicketCategory.parent_id == cat.parent_id,
             TicketCategory.id != category_id,
         ]
@@ -494,8 +576,50 @@ async def update_category(
     if body.is_active is not None:
         cat.is_active = body.is_active
 
+    # 重新派生 level（仅当 parent 链变动时才有意义，但开销低，统一重算）
+    cat.level = await compute_level(db, cat)
+    # parent 变了，子树的 level 也得跟着重算
+    await _recompute_descendant_levels(db, cat.id)
     await db.flush()
-    return {"data": {"id": cat.id, "name": cat.name, "level": cat.level, "parent_id": cat.parent_id, "sort_order": cat.sort_order, "is_active": cat.is_active}}
+    return {
+        "data": {
+            "id": cat.id,
+            "name": cat.name,
+            "level": cat.level,
+            "parent_id": cat.parent_id,
+            "sort_order": cat.sort_order,
+            "is_active": cat.is_active,
+        }
+    }
+
+
+async def _recompute_descendant_levels(db: AsyncSession, root_id: int) -> None:
+    """Recompute `level` for every descendant of `root_id`.
+
+    Depth-first traversal with a visited set to defend against cycles.
+    """
+    stack: list[int] = [root_id]
+    visited: set[int] = set()
+    while stack:
+        current_id = stack.pop()
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+        # compute_level walks up the chain; safe even if current row not yet flushed.
+        current = await db.execute(
+            select(TicketCategory).where(TicketCategory.id == current_id)
+        )
+        cat = current.scalar_one_or_none()
+        if cat is None:
+            continue
+        new_level = await compute_level(db, cat)
+        if cat.level != new_level:
+            cat.level = new_level
+        children = await db.execute(
+            select(TicketCategory.id).where(TicketCategory.parent_id == current_id)
+        )
+        for (child_id,) in children.all():
+            stack.append(child_id)
 
 
 @categories_router.delete("/categories/{category_id}")
@@ -509,13 +633,12 @@ async def delete_category(
     if not cat:
         raise NotFoundError("分类", category_id)
 
-    # 一级分类下若有二级分类，先要求删除子分类
-    if cat.level == 1:
-        child_count = (await db.execute(
-            select(func.count()).select_from(TicketCategory).where(TicketCategory.parent_id == category_id)
-        )).scalar() or 0
-        if child_count > 0:
-            raise HTTPException(400, detail=f"该分类下还有 {child_count} 个子分类，请先删除子分类")
+    # 任意深度：只要有子节点就拒绝
+    child_count = (await db.execute(
+        select(func.count()).select_from(TicketCategory).where(TicketCategory.parent_id == category_id)
+    )).scalar() or 0
+    if child_count > 0:
+        raise HTTPException(400, detail=f"该分类下还有 {child_count} 个子分类，请先删除子分类")
 
     # 有关联工单则拒绝
     ticket_count = (await db.execute(

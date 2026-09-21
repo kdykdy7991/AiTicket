@@ -107,6 +107,7 @@ class CategoryCreate(BaseModel):
 
 class CategoryUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
+    parent_id: int | None = None
     sort_order: int | None = None
     is_active: bool | None = None
 
