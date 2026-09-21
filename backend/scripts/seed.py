@@ -309,5 +309,267 @@ async def seed() -> None:
         print("Seed completed.")
 
 
+# ── Phase 9: v2 分类与责任体系配套基础数据 ─────────────
+# 这部分数据是独立的、可重复执行的，用于在新分类树（Phase 2）下建立
+# "协调部门 / 专业部门 / 协调人 / 专业处理人" 的组织结构。
+#
+# 设计：
+# - 每个 v2 leaf 分类挂一条 CategoryRoutingRule
+# - 协调部门（dispatcher_skill_group_id）+ 协调人（dispatcher_id）必填
+# - 专业处理部门（handler_skill_group_id）+ 专业处理人（owner_id）可选
+#   （硬件故障/业务保障 等暂未到位的场景允许只有协调部分）
+
+# v2 leaf 分类 ID（与 f2a3b4c5d6e7 同步）
+V2_CAT = {
+    "即时办结咨询":     1102,
+    "服务投诉":        2101,
+    "业务运营":        2201,
+    "业务保障":        2301,
+    "核心网系统":      2311,
+    "测运控系统":      2312,
+    "卫星系统":        2313,
+}
+
+# 新增的协调 / 专业部门（v2 组织架构）
+# 与现有 SKILL_GROUPS 通过 id 区分；为避免冲突，从 100 起。
+V2_SKILL_GROUPS = [
+    (100, "服务投诉协调组"),         # 服务投诉主对接
+    (101, "业务运营组"),             # 业务运营主专业组
+    (102, "业务保障组"),             # 业务保障主专业组
+    (103, "核心网组"),               # 核心网系统
+    (104, "测运控组"),               # 测运控系统
+    (105, "卫星组"),                 # 卫星系统
+    (106, "即时办结咨询组"),         # 即时办结咨询默认协调
+]
+
+# v2 用户。用户名 + 密码 hash（用 _SKDY_HASH）
+# 角色分两类：
+#   - 协调人：is_dispatcher=True
+#   - 专业处理人：is_dispatcher=False
+V2_USERS = [
+    # 协调人
+    (200, "v2_dispatcher_complaint",  "服务投诉协调人",   "agent", 1, False, _SKDY_HASH),
+    (201, "v2_dispatcher_ops",         "业务运营协调人",   "agent", 1, False, _SKDY_HASH),
+    (202, "v2_dispatcher_assurance",   "业务保障协调人",   "agent", 1, False, _SKDY_HASH),
+    (203, "v2_dispatcher_instant",     "即时办结协调人",   "agent", 1, False, _SKDY_HASH),
+    # 专业处理人
+    (210, "v2_owner_ops",              "业务运营处理人",   "handler", 1, False, _SKDY_HASH),
+    (211, "v2_owner_assurance",        "业务保障处理人",   "handler", 1, False, _SKDY_HASH),
+    (212, "v2_owner_core",             "核心网处理人",     "handler", 1, False, _SKDY_HASH),
+    (213, "v2_owner_tt",               "测运控处理人",     "handler", 1, False, _SKDY_HASH),
+    (214, "v2_owner_satellite",        "卫星处理人",       "handler", 1, False, _SKDY_HASH),
+]
+
+# (user_id, skill_group_id, is_dispatcher)
+V2_USER_SKILL_GROUPS = [
+    # 协调人
+    (200, 100, True),  # 服务投诉协调人 -> 服务投诉协调组
+    (201, 101, True),  # 业务运营协调人 -> 业务运营组
+    (202, 102, True),  # 业务保障协调人 -> 业务保障组
+    (203, 106, True),  # 即时办结协调人 -> 即时办结咨询组
+    # 专业处理人
+    (210, 101, False),
+    (211, 102, False),
+    (212, 103, False),
+    (213, 104, False),
+    (214, 105, False),
+]
+
+# (category_id, dispatcher_skill_group_id, dispatcher_id,
+#   handler_skill_group_id, owner_id, enabled, note)
+# resolve_rule() 会向上走父链，所以不需要给每个 leaf 都挂规则；
+# 这里给业务类别（level 2/3）挂规则即可覆盖其所有子孙。
+V2_ROUTING_RULES = [
+    (V2_CAT["即时办结咨询"], 106, 203, 106, None, True,
+     "即时办结咨询走 archived 流程；协调人=即时办结协调组"),
+    (V2_CAT["服务投诉"],     100, 200, None, None, True,
+     "服务投诉统一由服务投诉协调组对接；具体专业部门按投诉类别后续补"),
+    (V2_CAT["业务运营"],     101, 201, 101, 210, True,
+     "业务运营工单由业务运营组闭环"),
+    (V2_CAT["业务保障"],     102, 202, 102, 211, True,
+     "业务保障工单由业务保障组对接并处理"),
+    (V2_CAT["核心网系统"],   102, 202, 103, 212, True,
+     "核心网组专业处理；协调人=业务保障组"),
+    (V2_CAT["测运控系统"],   102, 202, 104, 213, True,
+     "测运控组专业处理；协调人=业务保障组"),
+    (V2_CAT["卫星系统"],     102, 202, 105, 214, True,
+     "卫星组专业处理；协调人=业务保障组"),
+]
+
+# 与 alembic f2a3b4c5d6e7 保持一致的 v2 分类树定义（用于 CLI 重灌）。
+# 测试环境的 TRUNCATE 会清掉数据但 alembic_version 仍是 head，
+# 所以这里在 phase9 重新插一次以保持幂等。
+V2_CATEGORIES = [
+    (1001, None, "咨询", 1, 1),
+    (1002, None, "客户服务", 1, 2),
+    (1101, 1001, "即时", 2, 1),
+    (1102, 1101, "即时办结咨询", 3, 1),
+    (1201, 1001, "非即时", 2, 1),
+    (1202, 1201, "品牌合作", 3, 1),
+    (1203, 1201, "产品使用/参数咨询", 3, 2),
+    (1204, 1201, "渠道/代理合作", 3, 3),
+    (2101, 1002, "服务投诉", 2, 1),
+    (2102, 2101, "一般投诉", 3, 1),
+    (2103, 2101, "重要投诉", 3, 2),
+    (2104, 2101, "重大投诉", 3, 3),
+    (2201, 1002, "业务运营", 2, 1),
+    (2202, 2201, "套餐查询", 3, 1),
+    (2203, 2201, "套餐变更", 3, 2),
+    (2204, 2201, "业财对账", 3, 3),
+    (2301, 1002, "业务保障", 2, 1),
+    (2302, 2301, "应用平台", 3, 1),
+    (2310, 2301, "星座大系统", 3, 2),
+    (2311, 2310, "核心网系统", 4, 1),
+    (2312, 2310, "测运控系统", 4, 2),
+    (2313, 2310, "卫星系统", 4, 3),
+    (2321, 2301, "终端软件", 3, 3),
+    (2322, 2301, "硬件故障", 3, 4),
+]
+
+
+async def seed_phase9_base_data(session_factory: async_sessionmaker | None = None) -> None:
+    """Phase 9: 给 v2 分类树播种配套组织架构（重复执行幂等）。
+
+    与 seed() 独立：seed() 灌入老分类的基础数据，seed_phase9_base_data()
+    给 v2 分类补 skill_groups / users / category_routing_rules。
+
+    参数 session_factory 用于测试时复用同一连接池；CLI 场景不传则用
+    临时新建的引擎，避免 module-level 引擎绑死旧事件循环后无法在新
+    loop 里复用的问题。
+    """
+    own_engine = False
+    if session_factory is None:
+        local_engine = create_async_engine(DATABASE_URL, future=True)
+        session_factory = async_sessionmaker(local_engine, class_=AsyncSession, expire_on_commit=False)
+        own_engine = True
+    now = datetime.now(timezone.utc)
+    async with session_factory() as db:
+        # 确保 v2 分类树存在（测试环境 TRUNCATE 后 alembic 不会再跑迁移）
+        print("[Phase 9] Ensuring v2 categories...")
+        await db.execute(
+            text("""
+                INSERT INTO ticket_categories
+                (id, parent_id, name, level, sort_order, is_active, created_at, updated_at)
+                VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active, :created_at, :updated_at)
+                ON CONFLICT (id) DO UPDATE SET
+                    parent_id = EXCLUDED.parent_id,
+                    name = EXCLUDED.name,
+                    sort_order = EXCLUDED.sort_order,
+                    is_active = EXCLUDED.is_active,
+                    updated_at = EXCLUDED.updated_at
+            """),
+            [
+                {
+                    "id": cid, "parent_id": parent, "name": name,
+                    "level": level, "sort_order": sort, "is_active": True,
+                    "created_at": now, "updated_at": now,
+                }
+                for (cid, parent, name, level, sort) in V2_CATEGORIES
+            ],
+        )
+        print("[Phase 9] Seeding default group (id=1)...")
+        await db.execute(
+            text("""
+                INSERT INTO groups (id, name, created_at, updated_at)
+                VALUES (1, :name, :created_at, :updated_at)
+                ON CONFLICT (id) DO NOTHING
+            """),
+            {"name": "默认组", "created_at": now, "updated_at": now},
+        )
+
+        print("[Phase 9] Seeding v2 skill_groups...")
+        await db.execute(
+            text("""
+                INSERT INTO skill_groups (id, name, created_at, updated_at)
+                VALUES (:id, :name, :created_at, :updated_at)
+                ON CONFLICT (id) DO NOTHING
+            """),
+            [
+                {"id": sg[0], "name": sg[1],
+                 "created_at": now, "updated_at": now}
+                for sg in V2_SKILL_GROUPS
+            ],
+        )
+
+        print("[Phase 9] Seeding v2 users...")
+        await db.execute(
+            text("""
+                INSERT INTO users (id, username, name, role, group_id, is_group_leader,
+                                   password_hash, is_active, created_at, updated_at)
+                VALUES (:id, :username, :name, :role, :group_id, :is_group_leader,
+                        :password_hash, :is_active, :created_at, :updated_at)
+                ON CONFLICT (id) DO NOTHING
+            """),
+            [
+                {
+                    "id": u[0], "username": u[1], "name": u[2], "role": u[3],
+                    "group_id": u[4], "is_group_leader": u[5],
+                    "password_hash": u[6], "is_active": True,
+                    "created_at": now, "updated_at": now,
+                }
+                for u in V2_USERS
+            ],
+        )
+
+        print("[Phase 9] Seeding v2 user_skill_groups...")
+        await db.execute(
+            text("""
+                INSERT INTO user_skill_groups (user_id, skill_group_id, is_dispatcher)
+                VALUES (:user_id, :skill_group_id, :is_dispatcher)
+                ON CONFLICT DO NOTHING
+            """),
+            [
+                {"user_id": usg[0], "skill_group_id": usg[1], "is_dispatcher": usg[2]}
+                for usg in V2_USER_SKILL_GROUPS
+            ],
+        )
+
+        print("[Phase 9] Seeding v2 category_routing_rules...")
+        for rule in V2_ROUTING_RULES:
+            cat_id, d_sg, d_uid, h_sg, o_uid, enabled, note = rule
+            await db.execute(
+                text("""
+                    INSERT INTO category_routing_rules
+                    (category_id, dispatcher_skill_group_id, dispatcher_id,
+                     handler_skill_group_id, owner_id, enabled, note, created_at, updated_at)
+                    VALUES (:cat_id, :d_sg, :d_uid, :h_sg, :o_uid, :enabled, :note, :now, :now)
+                    ON CONFLICT (category_id) DO NOTHING
+                """),
+                {
+                    "cat_id": cat_id, "d_sg": d_sg, "d_uid": d_uid,
+                    "h_sg": h_sg, "o_uid": o_uid,
+                    "enabled": enabled, "note": note, "now": now,
+                },
+            )
+
+        # 重置序列
+        await db.execute(
+            text("""
+                SELECT setval('skill_groups_id_seq',
+                              COALESCE((SELECT MAX(id) FROM skill_groups), 1))
+            """)
+        )
+        await db.execute(
+            text("""
+                SELECT setval('users_id_seq',
+                              COALESCE((SELECT MAX(id) FROM users), 1))
+            """)
+        )
+        await db.execute(
+            text("""
+                SELECT setval('category_routing_rules_id_seq',
+                              COALESCE((SELECT MAX(id) FROM category_routing_rules), 1))
+            """)
+        )
+
+        await db.commit()
+        print("[Phase 9] Seed completed.")
+    if own_engine:
+        await local_engine.dispose()
+
+
 if __name__ == "__main__":
+    import sys
     asyncio.run(seed())
+    if "--phase9" in sys.argv:
+        asyncio.run(seed_phase9_base_data())

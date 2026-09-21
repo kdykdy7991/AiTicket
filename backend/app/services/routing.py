@@ -185,6 +185,11 @@ async def resolve_rule(
 ) -> dict:
     """Return the suggested responsibility set for a given category.
 
+    Resolution order:
+    1. Exact match on the leaf category
+    2. Walk up the parent chain until a rule is found or root reached
+       (so a level-2 routing rule applies to all its descendants)
+
     If no rule exists, return matched=False with reason. The create-ticket
     form falls back to manual mode in that case.
     """
@@ -194,18 +199,34 @@ async def resolve_rule(
             "matched": False,
             "reason": "未选择分类",
         }
-    rule = await db.execute(
-        select(CategoryRoutingRule)
-        .where(CategoryRoutingRule.category_id == category_id)
-        .options(
-            selectinload(CategoryRoutingRule.dispatcher),
-            selectinload(CategoryRoutingRule.owner),
-            selectinload(CategoryRoutingRule.dispatcher_skill_group),
-            selectinload(CategoryRoutingRule.handler_skill_group),
-            selectinload(CategoryRoutingRule.category),
+    # Walk up the tree looking for a routing rule.
+    cat_id = category_id
+    visited: set[int] = set()
+    rule = None
+    matched_category_id = None
+    while cat_id is not None and cat_id not in visited:
+        visited.add(cat_id)
+        r = await db.execute(
+            select(CategoryRoutingRule)
+            .where(CategoryRoutingRule.category_id == cat_id)
+            .options(
+                selectinload(CategoryRoutingRule.dispatcher),
+                selectinload(CategoryRoutingRule.owner),
+                selectinload(CategoryRoutingRule.dispatcher_skill_group),
+                selectinload(CategoryRoutingRule.handler_skill_group),
+                selectinload(CategoryRoutingRule.category),
+            )
         )
-    )
-    rule = rule.scalar_one_or_none()
+        r = r.scalar_one_or_none()
+        if r is not None:
+            rule = r
+            matched_category_id = cat_id
+            break
+        # Walk up to parent
+        parent_row = await db.execute(
+            select(TicketCategory.parent_id).where(TicketCategory.id == cat_id)
+        )
+        cat_id = parent_row.scalar_one_or_none()
     if rule is None:
         return {
             "category_id": category_id,
@@ -221,6 +242,7 @@ async def resolve_rule(
     out = {
         "category_id": category_id,
         "matched": True,
+        "matched_rule_category_id": matched_category_id,
         "reason": None,
         "dispatcher_skill_group_id": rule.dispatcher_skill_group_id,
         "dispatcher_skill_group_name": rule.dispatcher_skill_group.name if rule.dispatcher_skill_group else None,
