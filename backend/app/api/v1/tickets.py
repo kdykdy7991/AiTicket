@@ -151,6 +151,8 @@ def _ticket_to_detail(t: Ticket, terminal_ops: dict | None = None) -> TicketDeta
         closed_duration_minutes=t.closed_duration_minutes,
         resolved=t.resolved,
         resolution=t.resolution,
+        root_cause=t.root_cause,
+        solution=t.solution,
         group_id=t.group_id,
         group_name=t.group.name if t.group else None,
         returned_to_user_id=t.returned_to_user_id,
@@ -842,6 +844,8 @@ async def create_ticket(
             dispatcher_id=body.dispatcher_id,
             is_duplicate=body.is_duplicate,
             duplicate_reason=body.duplicate_reason,
+            root_cause=body.root_cause,
+            solution=body.solution,
             is_draft=True,
         )
     elif body.is_instant_resolve:
@@ -879,6 +883,8 @@ async def create_ticket(
             dispatcher_id=body.dispatcher_id,  # 即时办结可省略协调人
             is_duplicate=body.is_duplicate,
             duplicate_reason=body.duplicate_reason,
+            root_cause=body.root_cause,
+            solution=body.solution,
             solution_deadline=solution_deadline,
             resolved=True,
             resolution=body.instant_resolution or "即时办结咨询",
@@ -974,6 +980,8 @@ async def create_ticket(
             dispatcher_id=body.dispatcher_id,
             is_duplicate=body.is_duplicate,
             duplicate_reason=body.duplicate_reason,
+            root_cause=body.root_cause,
+            solution=body.solution,
             solution_deadline=solution_deadline,
             is_draft=False,
         )
@@ -1153,6 +1161,11 @@ async def update_ticket(
         ticket.handler_skill_group_id = body.handler_skill_group_id
     if body.dispatcher_id is not None:
         ticket.dispatcher_id = body.dispatcher_id
+    # Phase 7: structured processing
+    if body.root_cause is not None:
+        ticket.root_cause = body.root_cause
+    if body.solution is not None:
+        ticket.solution = body.solution
 
     await db.flush()
 

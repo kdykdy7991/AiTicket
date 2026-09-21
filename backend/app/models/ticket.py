@@ -71,6 +71,9 @@ class Ticket(Base):
     # 解决信息
     resolved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     resolution: Mapped[str | None] = mapped_column(Text)
+    # 根本原因 / 解决办法（Phase 7 结构化处理）
+    root_cause: Mapped[str | None] = mapped_column(Text)
+    solution: Mapped[str | None] = mapped_column(Text)
 
     # 退回：记录应退回给哪位处理人（pending/open 退回给 dispatcher，resolved 退回给 owner）
     returned_to_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))

@@ -27,6 +27,9 @@ class TicketCreate(BaseModel):
     is_duplicate: bool = False
     duplicate_reason: str | None = None
     is_draft: bool = False
+    # Phase 7: 结构化处理
+    root_cause: str | None = None
+    solution: str | None = None
     # Phase 6: 即时办结咨询
     # 走完整表单，但建单后直接进入 archived（终态），
     # 工单仍然有 number / SLA 记录与 state_log 审计
@@ -49,6 +52,8 @@ class TicketUpdate(BaseModel):
     is_callbacked: bool | None = None  # 是否已回访
     callback_required: bool | None = None  # 是否需要回访（false=无需回访）
     satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，仅当 is_callbacked=true 时填写
+    root_cause: str | None = None  # 根本原因
+    solution: str | None = None    # 解决办法
 
 
 class TicketBatchUpdate(BaseModel):
@@ -138,6 +143,8 @@ class TicketDetail(TicketBrief):
     archive_notes: str | None = None
     satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'
     is_callbacked: bool = False
+    root_cause: str | None = None  # 根本原因
+    solution: str | None = None    # 解决办法
 
     model_config = {"from_attributes": True}
 
