@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_role
@@ -10,18 +11,21 @@ from app.core.exceptions import NotFoundError
 from app.core.security import hash_password
 from app.models.category import TicketCategory, Region
 from app.models.group import Group, SkillGroup, UserSkillGroup
+from app.models.routing import CategoryRoutingRule
 from app.models.sla import SLAPolicy
 from app.models.ticket import Ticket, TicketStateLog
 from app.models.user import User
 from app.schemas.common import (
     CategoryCreate, CategoryOut, CategoryUpdate, DashboardStats, GroupCreate,
-    GroupOut, RegionCreate, RegionOut, SLAPolicyCreate, SLAPolicyOut,
+    GroupOut, RegionCreate, RegionOut, RoutingRuleCreate, RoutingRuleOut,
+    RoutingRuleUpdate, SLAPolicyCreate, SLAPolicyOut,
     SkillGroupCreate, SkillGroupOut, UserCreate, UserOut, UserUpdate,
 )
 from app.services.category_utils import (
     build_category_path, compute_level, would_create_cycle,
-)
+)  # noqa: F401  (build_category_path used elsewhere if needed)
 from app.services.notification import send_dingtalk_text
+from app.services.routing import create_rule, resolve_rule, update_rule
 
 # ── Users ─────────────────────────────────────────────────
 
@@ -1213,3 +1217,172 @@ async def trend_stats(
         cur += timedelta(days=1)
 
     return {"data": {"date_from": date_from, "date_to": date_to, "days": days}}
+
+
+# ── Category Routing Rules ──────────────────────────────────
+
+routing_router = APIRouter(tags=["routing"])
+
+
+def _serialize_rule(rule: CategoryRoutingRule, db: AsyncSession | None = None) -> dict:
+    """Build a flat dict including denormalised names for the admin UI."""
+    path = None
+    if rule.category is not None and db is not None:
+        # Build path from already-loaded relationship chain (lazy='selectin' fetches parent).
+        chain = [rule.category]
+        cur = rule.category
+        visited = set()
+        while cur is not None and cur.id not in visited:
+            visited.add(cur.id)
+            p = getattr(cur, "parent", None)
+            if p is None or p.id == cur.id:
+                break
+            chain.append(p)
+            cur = p
+        chain.reverse()
+        path = " / ".join(c.name for c in chain)
+    return {
+        "id": rule.id,
+        "category_id": rule.category_id,
+        "category_name": rule.category.name if rule.category else None,
+        "category_path": path,
+        "dispatcher_skill_group_id": rule.dispatcher_skill_group_id,
+        "dispatcher_skill_group_name": rule.dispatcher_skill_group.name if rule.dispatcher_skill_group else None,
+        "dispatcher_id": rule.dispatcher_id,
+        "dispatcher_name": rule.dispatcher.name if rule.dispatcher else None,
+        "handler_skill_group_id": rule.handler_skill_group_id,
+        "handler_skill_group_name": rule.handler_skill_group.name if rule.handler_skill_group else None,
+        "owner_id": rule.owner_id,
+        "owner_name": rule.owner.name if rule.owner else None,
+        "enabled": rule.enabled,
+        "note": rule.note,
+        "created_at": rule.created_at.isoformat() if rule.created_at else None,
+        "updated_at": rule.updated_at.isoformat() if rule.updated_at else None,
+    }
+
+
+@routing_router.get("/routing-rules")
+async def list_routing_rules(
+    category_id: int | None = None,
+    enabled: bool | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = select(CategoryRoutingRule).options(
+        selectinload(CategoryRoutingRule.category).selectinload(TicketCategory.parent),
+        selectinload(CategoryRoutingRule.dispatcher_skill_group),
+        selectinload(CategoryRoutingRule.handler_skill_group),
+        selectinload(CategoryRoutingRule.dispatcher),
+        selectinload(CategoryRoutingRule.owner),
+    )
+    if category_id is not None:
+        q = q.where(CategoryRoutingRule.category_id == category_id)
+    if enabled is not None:
+        q = q.where(CategoryRoutingRule.enabled == enabled)
+    q = q.order_by(CategoryRoutingRule.id)
+    rules = (await db.execute(q)).scalars().all()
+    return {"data": [_serialize_rule(r) for r in rules]}
+
+
+@routing_router.get("/routing-rules/{rule_id}")
+async def get_routing_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    rule = (await db.execute(
+        select(CategoryRoutingRule)
+        .where(CategoryRoutingRule.id == rule_id)
+        .options(
+            selectinload(CategoryRoutingRule.category).selectinload(TicketCategory.parent),
+            selectinload(CategoryRoutingRule.dispatcher_skill_group),
+            selectinload(CategoryRoutingRule.handler_skill_group),
+            selectinload(CategoryRoutingRule.dispatcher),
+            selectinload(CategoryRoutingRule.owner),
+        )
+    )).scalar_one_or_none()
+    if not rule:
+        raise NotFoundError("路由规则", rule_id)
+    return {"data": _serialize_rule(rule)}
+
+
+@routing_router.post("/routing-rules", status_code=status.HTTP_201_CREATED)
+async def create_routing_rule(
+    body: RoutingRuleCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+):
+    rule = await create_rule(db, body)
+    # Re-fetch with relationships loaded for response.
+    rule = (await db.execute(
+        select(CategoryRoutingRule)
+        .where(CategoryRoutingRule.id == rule.id)
+        .options(
+            selectinload(CategoryRoutingRule.category).selectinload(TicketCategory.parent),
+            selectinload(CategoryRoutingRule.dispatcher_skill_group),
+            selectinload(CategoryRoutingRule.handler_skill_group),
+            selectinload(CategoryRoutingRule.dispatcher),
+            selectinload(CategoryRoutingRule.owner),
+        )
+    )).scalar_one()
+    return {"data": _serialize_rule(rule)}
+
+
+@routing_router.patch("/routing-rules/{rule_id}")
+async def update_routing_rule(
+    rule_id: int,
+    body: RoutingRuleUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+):
+    rule = (await db.execute(
+        select(CategoryRoutingRule).where(CategoryRoutingRule.id == rule_id)
+    )).scalar_one_or_none()
+    if not rule:
+        raise NotFoundError("路由规则", rule_id)
+    await update_rule(db, rule, body)
+    rule = (await db.execute(
+        select(CategoryRoutingRule)
+        .where(CategoryRoutingRule.id == rule_id)
+        .options(
+            selectinload(CategoryRoutingRule.category).selectinload(TicketCategory.parent),
+            selectinload(CategoryRoutingRule.dispatcher_skill_group),
+            selectinload(CategoryRoutingRule.handler_skill_group),
+            selectinload(CategoryRoutingRule.dispatcher),
+            selectinload(CategoryRoutingRule.owner),
+        )
+    )).scalar_one()
+    return {"data": _serialize_rule(rule)}
+
+
+@routing_router.delete("/routing-rules/{rule_id}")
+async def delete_routing_rule(
+    rule_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+):
+    rule = (await db.execute(
+        select(CategoryRoutingRule).where(CategoryRoutingRule.id == rule_id)
+    )).scalar_one_or_none()
+    if not rule:
+        raise NotFoundError("路由规则", rule_id)
+    await db.delete(rule)
+    await db.flush()
+    return {"data": {"id": rule_id, "deleted": True}}
+
+
+@routing_router.post("/routing-rules/resolve")
+async def resolve_routing_rule(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return the suggested responsibility for a given category id.
+
+    Used by the create-ticket form to autofill after the user picks a final
+    category. The agent can still override manually. If no rule exists or
+    the rule is disabled, returns matched=False with a reason — the form
+    falls back to manual mode.
+    """
+    category_id = body.get("category_id") if isinstance(body, dict) else None
+    return {"data": await resolve_rule(db, category_id)}

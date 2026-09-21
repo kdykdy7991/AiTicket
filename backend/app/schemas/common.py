@@ -112,6 +112,64 @@ class CategoryUpdate(BaseModel):
     is_active: bool | None = None
 
 
+# ── Routing Rules ────────────────────────────────────────────
+
+class RoutingRuleCreate(BaseModel):
+    category_id: int
+    dispatcher_skill_group_id: int
+    dispatcher_id: int
+    handler_skill_group_id: int | None = None
+    owner_id: int | None = None
+    enabled: bool = True
+    note: str | None = Field(None, max_length=500)
+
+
+class RoutingRuleUpdate(BaseModel):
+    dispatcher_skill_group_id: int | None = None
+    dispatcher_id: int | None = None
+    handler_skill_group_id: int | None = None
+    owner_id: int | None = None
+    enabled: bool | None = None
+    note: str | None = Field(None, max_length=500)
+
+
+class RoutingRuleOut(BaseModel):
+    id: int
+    category_id: int
+    category_name: str | None = None
+    category_path: str | None = None
+    dispatcher_skill_group_id: int
+    dispatcher_skill_group_name: str | None = None
+    dispatcher_id: int
+    dispatcher_name: str | None = None
+    handler_skill_group_id: int | None = None
+    handler_skill_group_name: str | None = None
+    owner_id: int | None = None
+    owner_name: str | None = None
+    enabled: bool
+    note: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RoutingResolveOut(BaseModel):
+    """Returned by POST /routing-rules/resolve; what the create-ticket form
+    will prefill when an agent selects a given category."""
+    category_id: int
+    matched: bool
+    reason: str | None = None  # e.g. "该分类尚未配置责任路由"
+    dispatcher_skill_group_id: int | None = None
+    dispatcher_skill_group_name: str | None = None
+    dispatcher_id: int | None = None
+    dispatcher_name: str | None = None
+    handler_skill_group_id: int | None = None
+    handler_skill_group_name: str | None = None
+    owner_id: int | None = None
+    owner_name: str | None = None
+
+
 # ── Region ────────────────────────────────────────────────
 
 class RegionOut(BaseModel):

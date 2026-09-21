@@ -114,6 +114,7 @@ app.include_router(common.categories_router, prefix="/api/v1")
 app.include_router(common.regions_router, prefix="/api/v1")
 app.include_router(common.sla_router, prefix="/api/v1")
 app.include_router(common.stats_router, prefix="/api/v1")
+app.include_router(common.routing_router, prefix="/api/v1")
 
 
 # ── Health ───────────────────────────────────────────────

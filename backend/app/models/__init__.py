@@ -7,6 +7,7 @@ from app.models.ticket import Ticket, Article, TicketStateLog, Reminder
 from app.models.sla import SLAPolicy
 from app.models.notification import DingtalkNotification
 from app.models.audit import AuditLog
+from app.models.routing import CategoryRoutingRule
 
 __all__ = [
     "Group", "SkillGroup", "UserSkillGroup",
@@ -16,4 +17,5 @@ __all__ = [
     "SLAPolicy",
     "DingtalkNotification",
     "AuditLog",
+    "CategoryRoutingRule",
 ]
