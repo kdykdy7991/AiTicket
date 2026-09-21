@@ -844,6 +844,77 @@ async def create_ticket(
             duplicate_reason=body.duplicate_reason,
             is_draft=True,
         )
+    elif body.is_instant_resolve:
+        # 即时办结咨询（Phase 6）：建正式工单，直接进入终态 archived。
+        # 仍然走完整审计：number / SLA / state_log。
+        today = datetime.now().strftime("%Y%m%d")
+        max_q = (
+            select(func.max(Ticket.number))
+            .where(Ticket.number.like(f"{today}-%"))
+        )
+        max_number = (await db.execute(max_q)).scalar()
+        if max_number is None:
+            seq = 1
+        else:
+            seq = int(max_number.split("-")[-1]) + 1
+        number = f"{today}-{seq:04d}"
+
+        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id)
+
+        now = datetime.now(timezone.utc)
+        ticket = Ticket(
+            number=number, description=body.description,
+            priority=body.priority, channel=body.channel,
+            state="archived",
+            customer_type=body.customer_type, customer_name=body.customer_name,
+            customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
+            customer_company=body.customer_company,
+            customer_level=body.customer_level, device_sn=body.device_sn,
+            region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
+            group_id=body.group_id or user.group_id,
+            skill_group_id=body.skill_group_id,
+            handler_skill_group_id=body.handler_skill_group_id,
+            owner_id=None,
+            creator_id=user.id, first_owner_id=None,
+            dispatcher_id=body.dispatcher_id,  # 即时办结可省略协调人
+            is_duplicate=body.is_duplicate,
+            duplicate_reason=body.duplicate_reason,
+            solution_deadline=solution_deadline,
+            resolved=True,
+            resolution=body.instant_resolution or "即时办结咨询",
+            solved_at=now,
+            closed_at=now,
+            closed_duration_minutes=0,
+            callback_required=False,  # 不需要回访
+            is_callbacked=True,
+            is_draft=False,
+        )
+        db.add(ticket)
+        await db.flush()
+        # 一次性审计日志：None → archived
+        db.add(TicketStateLog(
+            ticket_id=ticket.id, from_state=None, to_state="archived",
+            operator_id=user.id, reason="即时办结咨询",
+            **_snapshot_people(ticket, body),
+        ))
+        await db.commit()
+
+        # Reload with relationships
+        result = await db.execute(
+            select(Ticket).options(
+                selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
+                selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
+                selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
+                selectinload(Ticket.group),
+            ).where(Ticket.id == ticket.id)
+        )
+        ticket = result.scalar_one()
+        return TicketCreateResponse(
+            data=_ticket_to_detail(ticket),
+            warnings=DuplicateWarning(
+                auto_match_warning="即时办结咨询：工单已直接归档，无需后续处理与回访",
+            ),
+        )
     else:
         # Formal ticket: generate number, SLA, duplicate check
         # Generate ticket number: YYYYMMDD-XXXX (daily counter from 0001)

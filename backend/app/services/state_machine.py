@@ -21,6 +21,7 @@ from app.core.exceptions import StateTransitionError
 
 # 8 状态流转规则：{from_state: [to_state, ...]}
 TRANSITIONS: dict[str, list[str]] = {
+    # None 是建单的初始态。允许 None → pending（正常建单）和 None → archived（即时办结咨询）
     "pending": ["open", "cancelled", "returned"],
     "open": ["resolved", "on_hold", "pending", "cancelled"],
     "on_hold": ["resolved", "open", "cancelled"],
@@ -30,6 +31,12 @@ TRANSITIONS: dict[str, list[str]] = {
     "archived": [],
     "cancelled": [],
 }
+
+
+def validate_initial_state(to_state: str) -> None:
+    """校验建单时的初始状态。None → pending（默认）、None → archived（即时办结咨询）。"""
+    if to_state not in {"pending", "archived"}:
+        raise StateTransitionError(None, to_state)
 
 # 需要填原因的目标状态：退回 / 暂缓 / 撤销
 # 非 pending 状态退回时目标为「上一状态」；pending 退回时目标为 returned
@@ -47,6 +54,10 @@ TERMINAL_STATES = {"archived", "cancelled"}
 
 def validate_transition(from_state: str, to_state: str) -> None:
     """校验状态流转是否合法，非法则抛 StateTransitionError。"""
+    # from_state 为 None 时走初始状态校验（建单）
+    if from_state is None:
+        validate_initial_state(to_state)
+        return
     if from_state in TERMINAL_STATES:
         raise StateTransitionError(from_state, to_state)
     allowed = TRANSITIONS.get(from_state, [])

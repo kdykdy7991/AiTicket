@@ -27,6 +27,11 @@ class TicketCreate(BaseModel):
     is_duplicate: bool = False
     duplicate_reason: str | None = None
     is_draft: bool = False
+    # Phase 6: 即时办结咨询
+    # 走完整表单，但建单后直接进入 archived（终态），
+    # 工单仍然有 number / SLA 记录与 state_log 审计
+    is_instant_resolve: bool = False
+    instant_resolution: str | None = None  # 即时办结的处理记录 / 答案摘要
 
 
 class TicketUpdate(BaseModel):
