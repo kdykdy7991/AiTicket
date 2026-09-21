@@ -75,6 +75,10 @@ class Ticket(Base):
     root_cause: Mapped[str | None] = mapped_column(Text)
     solution: Mapped[str | None] = mapped_column(Text)
 
+    # 投诉级别（Phase 8）：仅对服务投诉类工单有意义。一般/重要/重大 三档。
+    # 非投诉工单保持 null，不影响既有逻辑。
+    complaint_level: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
     # 退回：记录应退回给哪位处理人（pending/open 退回给 dispatcher，resolved 退回给 owner）
     returned_to_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
 

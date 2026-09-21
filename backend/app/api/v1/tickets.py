@@ -153,6 +153,7 @@ def _ticket_to_detail(t: Ticket, terminal_ops: dict | None = None) -> TicketDeta
         resolution=t.resolution,
         root_cause=t.root_cause,
         solution=t.solution,
+        complaint_level=t.complaint_level,
         group_id=t.group_id,
         group_name=t.group.name if t.group else None,
         returned_to_user_id=t.returned_to_user_id,
@@ -164,9 +165,17 @@ def _ticket_to_detail(t: Ticket, terminal_ops: dict | None = None) -> TicketDeta
     )
 
 
-async def _calculate_sla_deadline(db: AsyncSession, priority: str, skill_group_id: int | None) -> datetime | None:
-    """Look up SLA policy and compute solution deadline."""
+async def _calculate_sla_deadline(
+    db: AsyncSession, priority: str, skill_group_id: int | None,
+    complaint_level: str | None = None,
+) -> datetime | None:
+    """Look up SLA policy and compute solution deadline.
+
+    Phase 8: 当 complaint_level 设置时（如 '重大'/'重要'），按 policy.sla_resolution_multiplier
+    缩短 SLA 截止时间，使重大事件获得更短的处置窗口。
+    """
     # Try group+priority first, then global
+    minutes = None
     for sg_id in [skill_group_id, None]:
         result = await db.execute(
             select(SLAPolicy).where(
@@ -176,8 +185,23 @@ async def _calculate_sla_deadline(db: AsyncSession, priority: str, skill_group_i
         )
         policy = result.scalar_one_or_none()
         if policy:
-            return datetime.now(timezone.utc) + timedelta(minutes=policy.solution_minutes)
-    return None
+            minutes = policy.solution_minutes
+            break
+    if minutes is None:
+        return None
+
+    # Complaint-level multiplier (Phase 8)
+    if complaint_level:
+        from app.models.complaint import ComplaintEscalationPolicy
+        cp = await db.execute(
+            select(ComplaintEscalationPolicy).where(
+                ComplaintEscalationPolicy.complaint_level == complaint_level
+            )
+        )
+        cp_row = cp.scalar_one_or_none()
+        if cp_row and cp_row.sla_resolution_multiplier:
+            minutes = int(minutes * cp_row.sla_resolution_multiplier)
+    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
 
 
 async def _is_dispatcher(db: AsyncSession, user_id: int, skill_group_id: int | None) -> bool:
@@ -846,6 +870,7 @@ async def create_ticket(
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
             solution=body.solution,
+            complaint_level=body.complaint_level,
             is_draft=True,
         )
     elif body.is_instant_resolve:
@@ -863,7 +888,7 @@ async def create_ticket(
             seq = int(max_number.split("-")[-1]) + 1
         number = f"{today}-{seq:04d}"
 
-        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id)
+        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id, body.complaint_level)
 
         now = datetime.now(timezone.utc)
         ticket = Ticket(
@@ -885,6 +910,7 @@ async def create_ticket(
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
             solution=body.solution,
+            complaint_level=body.complaint_level,
             solution_deadline=solution_deadline,
             resolved=True,
             resolution=body.instant_resolution or "即时办结咨询",
@@ -937,7 +963,7 @@ async def create_ticket(
         number = f"{today}-{seq:04d}"
 
         # Calculate SLA deadline
-        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id)
+        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id, body.complaint_level)
 
         # Check duplicates
         dup_result = await db.execute(
@@ -982,6 +1008,7 @@ async def create_ticket(
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
             solution=body.solution,
+            complaint_level=body.complaint_level,
             solution_deadline=solution_deadline,
             is_draft=False,
         )
@@ -1149,7 +1176,7 @@ async def update_ticket(
         ticket.priority = body.priority
         # Recalculate SLA deadline (creation → resolved)
         if ticket.solved_at is None:
-            ticket.solution_deadline = await _calculate_sla_deadline(db, body.priority, ticket.skill_group_id)
+            ticket.solution_deadline = await _calculate_sla_deadline(db, body.priority, ticket.skill_group_id, ticket.complaint_level)
 
     if body.owner_id is not None:
         ticket.owner_id = body.owner_id
@@ -1166,6 +1193,9 @@ async def update_ticket(
         ticket.root_cause = body.root_cause
     if body.solution is not None:
         ticket.solution = body.solution
+    # Phase 8: complaint routing
+    if body.complaint_level is not None:
+        ticket.complaint_level = body.complaint_level
 
     await db.flush()
 

@@ -30,6 +30,9 @@ class TicketCreate(BaseModel):
     # Phase 7: 结构化处理
     root_cause: str | None = None
     solution: str | None = None
+    # Phase 8: 投诉级别（仅对服务投诉类工单有意义）
+    # 取值: "一般" / "重要" / "重大"
+    complaint_level: str | None = None
     # Phase 6: 即时办结咨询
     # 走完整表单，但建单后直接进入 archived（终态），
     # 工单仍然有 number / SLA 记录与 state_log 审计
@@ -54,6 +57,7 @@ class TicketUpdate(BaseModel):
     satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，仅当 is_callbacked=true 时填写
     root_cause: str | None = None  # 根本原因
     solution: str | None = None    # 解决办法
+    complaint_level: str | None = None  # 投诉级别
 
 
 class TicketBatchUpdate(BaseModel):
@@ -145,6 +149,7 @@ class TicketDetail(TicketBrief):
     is_callbacked: bool = False
     root_cause: str | None = None  # 根本原因
     solution: str | None = None    # 解决办法
+    complaint_level: str | None = None  # 投诉级别
 
     model_config = {"from_attributes": True}
 
