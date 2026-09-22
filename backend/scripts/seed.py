@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from app.models.category import TicketCategory as Category
+from app.models.group import SkillGroup, UserSkillGroup
+from app.models.user import User
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://skdy:skdy123@localhost:5433/skdy_ticket")
 
 engine = create_async_engine(DATABASE_URL, future=True)
@@ -427,6 +431,42 @@ V2_CATEGORIES = [
 ]
 
 
+# Phase 9 补丁：组织名称迁移 + 补 3 条 leaf routing rule。
+#
+# 背景：v2 分类树（leaf: 1202/1203/1204）上线时，老的 skill_group
+# 仍叫「品牌公关传播」「产品中心」「市场生态部」；业务侧对外的 v2 名称
+# 调整为「品牌传播与大客户」「产品」「市场生态部」。Phase 9 早期 seed
+# 只插了 v2 协调/处理组，没处理这个名称迁移，也没补 1202/1203/1204
+# 三条 routing rule，导致前端按 name 找不到匹配、走不到 routing 自动填。
+#
+# 处理策略（保留现有 id，仅改 name，按业务属性查 id）：
+#   1) rename：UPDATEs 加 WHERE name=:old 兜底，重复执行幂等
+#   2) 补 routing rule：用 SkillGroup.name / User.name 查实际 id，
+#      避免写死 dispatcher_id=10/12/11 这类数字
+#
+# BUSINES TODO（不动 app 代码）：
+#   - 业务侧需最终确认「品牌传播与大客户」「产品」是否为对外最终名
+#   - 若要求迁移可独立审计，可改为 alembic 数据迁移（data migration）
+V2_LEAF_RENAMES = [
+    # (id, 旧名 → 新名)
+    (1, "品牌公关传播", "品牌传播与大客户"),
+    (3, "产品中心",     "产品"),
+    # 2 市场生态部 不变
+]
+
+# 补的 3 条 leaf 路由（V2_ROUTING_RULES 没覆盖这三个）：
+# (category_name, sg_new_name, dispatcher_name, handler_sg_name=None, owner_name=None)
+# 字段统一用业务属性（name），由 seed 在 DB 里 SELECT 出 id 再 INSERT。
+V2_MISSING_LEAF_RULES = [
+    ("品牌合作",       "品牌传播与大客户", "钟梦茜", None, None,
+     "咨询/非即时-品牌合作 → 品牌传播与大客户/钟梦茜"),
+    ("产品使用/参数咨询", "产品",           "张朝娟", None, None,
+     "咨询/非即时-产品使用 → 产品/张朝娟"),
+    ("渠道/代理合作",   "市场生态部",       "谢志鹏", None, None,
+     "咨询/非即时-渠道代理合作 → 市场生态部/谢志鹏"),
+]
+
+
 async def seed_phase9_base_data(session_factory: async_sessionmaker | None = None) -> None:
     """Phase 9: 给 v2 分类树播种配套组织架构（重复执行幂等）。
 
@@ -541,6 +581,94 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
                     "enabled": enabled, "note": note, "now": now,
                 },
             )
+
+        # ── Phase 9 补丁：组织 rename + 补 1202/1203/1204 三条 leaf 路由 ──
+        # 业务背景：v2 业务侧把「品牌公关传播」→「品牌传播与大客户」、
+        # 「产品中心」→「产品」；但旧 id(1/3) 与 dispatcher 绑定
+        # (钟梦茜→1、张朝娟→3) 都稳定，沿用 RENAME 路径而不是新建组。
+        # 1202/1203/1204 三个 leaf 没被 V2_ROUTING_RULES 覆盖，
+        # 父链上溯也找不到任何祖先 rule，本节按业务期望补全。
+        print("[Phase 9] Renaming legacy skill_groups to v2 names...")
+        for sg_id, old_name, new_name in V2_LEAF_RENAMES:
+            await db.execute(
+                text("""
+                    UPDATE skill_groups
+                    SET name = :new_name, updated_at = :now
+                    WHERE id = :sg_id AND name = :old_name
+                """),
+                {"sg_id": sg_id, "old_name": old_name, "new_name": new_name, "now": now},
+            )
+
+        print("[Phase 9] Seeding missing leaf routing rules (1202/1203/1204)...")
+        for rule in V2_MISSING_LEAF_RULES:
+            cat_name, d_sg_name, d_user_name, h_sg_name, o_user_name, note = rule
+            # 用业务属性查 id，避免写死数字
+            cat_id_row = await db.execute(
+                select(Category.id).where(Category.name == cat_name).limit(1)
+            )
+            cat_id = cat_id_row.scalar_one_or_none()
+            if cat_id is None:
+                print(f"  [skip] category not found: {cat_name}")
+                continue
+            d_sg_row = await db.execute(
+                select(SkillGroup.id).where(SkillGroup.name == d_sg_name).limit(1)
+            )
+            d_sg_id = d_sg_row.scalar_one_or_none()
+            if d_sg_id is None:
+                print(f"  [skip] skill_group not found: {d_sg_name}")
+                continue
+            # dispatcher 必须是对接人（is_dispatcher=true）
+            d_user_row = await db.execute(
+                select(User.id).where(
+                    User.name == d_user_name,
+                    User.is_active == True,  # noqa: E712
+                ).limit(1)
+            )
+            d_user_id = d_user_row.scalar_one_or_none()
+            if d_user_id is None:
+                print(f"  [skip] user not found: {d_user_name}")
+                continue
+            # 校验 dispatcher 归属
+            link_row = await db.execute(
+                select(UserSkillGroup).where(
+                    UserSkillGroup.user_id == d_user_id,
+                    UserSkillGroup.skill_group_id == d_sg_id,
+                    UserSkillGroup.is_dispatcher == True,  # noqa: E712
+                ).limit(1)
+            )
+            if not link_row.scalar_one_or_none():
+                print(f"  [skip] {d_user_name} is not a dispatcher of {d_sg_name}")
+                continue
+
+            h_sg_id = None
+            if h_sg_name:
+                h_sg_row = await db.execute(
+                    select(SkillGroup.id).where(SkillGroup.name == h_sg_name).limit(1)
+                )
+                h_sg_id = h_sg_row.scalar_one_or_none()
+            o_user_id = None
+            if o_user_name:
+                o_user_row = await db.execute(
+                    select(User.id).where(User.name == o_user_name).limit(1)
+                )
+                o_user_id = o_user_row.scalar_one_or_none()
+
+            await db.execute(
+                text("""
+                    INSERT INTO category_routing_rules
+                    (category_id, dispatcher_skill_group_id, dispatcher_id,
+                     handler_skill_group_id, owner_id, enabled, note,
+                     created_at, updated_at)
+                    VALUES (:cat_id, :d_sg, :d_uid, :h_sg, :o_uid, true, :note, :now, :now)
+                    ON CONFLICT (category_id) DO NOTHING
+                """),
+                {
+                    "cat_id": cat_id, "d_sg": d_sg_id, "d_uid": d_user_id,
+                    "h_sg": h_sg_id, "o_uid": o_user_id,
+                    "note": note, "now": now,
+                },
+            )
+            print(f"  [ok] {cat_name} ({cat_id}) → {d_sg_name}({d_sg_id}) / {d_user_name}({d_user_id})")
 
         # 重置序列
         await db.execute(
