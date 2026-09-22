@@ -125,7 +125,72 @@ async def _ensure_v2_categories(engine):
 async def phase9_env(client):
     _, _, engine = client
     await _ensure_v2_categories(engine)
+    # phase9 补种依赖 legacy 1-8 skill_group (品牌传播/产品/市场生态部) 与
+    # 对应 dispatcher 绑定。但 conftest 已经预先插了 admin/test-dispatcher，
+    # 直接调 seed() 会因 users 非空而 early-return；这里走强制补种路径。
+    await _seed_legacy_basics(engine)
     return {"client": client[0], "engine": engine}
+
+
+async def _seed_legacy_basics(engine):
+    """强制补种 legacy skill_groups 1-8 + 关键 dispatcher 绑定。
+
+    复用 scripts/seed.py 顶部常量；只插 SKILL_GROUPS / GROUPS(用于
+    user.group_id 外键) / USERS / USER_SKILL_GROUPS 中与本测试相关的
+    部分。本测试只查 user_skill_groups 的 is_dispatcher 关系,无需登录。
+    """
+    from scripts.seed import (
+        SKILL_GROUPS, GROUPS, USERS, USER_SKILL_GROUPS, _SKDY_HASH,
+    )
+    from app.models.user import User
+    from app.models.group import SkillGroup, UserSkillGroup, Group
+    from datetime import datetime, timezone
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    now = datetime.now(timezone.utc)
+    async with factory() as s:
+        # groups 表 (id=1 默认组,users.group_id 外键依赖)
+        for row in GROUPS:
+            existing = (await s.execute(
+                select(Group).where(Group.id == row[0])
+            )).scalar_one_or_none()
+            if existing is None:
+                s.add(Group(id=row[0], name=row[1],
+                            created_at=now, updated_at=now))
+        # legacy skill_groups 1-8
+        for sg in SKILL_GROUPS:
+            existing = (await s.execute(
+                select(SkillGroup).where(SkillGroup.id == sg[0])
+            )).scalar_one_or_none()
+            if existing is None:
+                s.add(SkillGroup(id=sg[0], name=sg[1],
+                                 created_at=now, updated_at=now))
+        # 关键 dispatcher users (钟梦茜/谢志鹏/张朝娟 + 它们的归属)
+        for u in USERS:
+            uid = u[0]
+            existing = (await s.execute(
+                select(User).where(User.id == uid)
+            )).scalar_one_or_none()
+            if existing is None:
+                s.add(User(
+                    id=uid, username=u[1], name=u[2], role=u[3],
+                    group_id=u[4], is_group_leader=u[5],
+                    password_hash=u[6] or _SKDY_HASH,
+                    is_active=True,
+                    created_at=now, updated_at=now,
+                ))
+        for usg in USER_SKILL_GROUPS:
+            existing = (await s.execute(
+                select(UserSkillGroup).where(
+                    UserSkillGroup.user_id == usg[0],
+                    UserSkillGroup.skill_group_id == usg[1],
+                )
+            )).scalar_one_or_none()
+            if existing is None:
+                s.add(UserSkillGroup(
+                    user_id=usg[0], skill_group_id=usg[1],
+                    is_dispatcher=usg[2],
+                ))
+        await s.commit()
 
 
 async def test_phase9_seed_creates_v2_skill_groups(phase9_env):
@@ -183,5 +248,44 @@ async def test_phase9_seed_idempotent(phase9_env):
         n_rules = len((await s.execute(
             select(CategoryRoutingRule).where(CategoryRoutingRule.category_id >= 1000)
         )).scalars().all())
-    from scripts.seed import V2_ROUTING_RULES
-    assert n_rules == len(V2_ROUTING_RULES)
+    from scripts.seed import V2_ROUTING_RULES, V2_MISSING_LEAF_RULES
+    assert n_rules == len(V2_ROUTING_RULES) + len(V2_MISSING_LEAF_RULES)
+
+
+# ── Phase 9 补丁：rename + 1202/1203/1204 路由 ──────────────────────
+async def test_phase9_renames_legacy_skill_groups(phase9_env):
+    """Phase 9 seed 把 品牌公关传播→品牌传播与大客户、产品中心→产品。"""
+    engine = phase9_env["engine"]
+    await _seed_phase9_directly(engine)
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        names = (await s.execute(
+            select(SkillGroup.id, SkillGroup.name).where(SkillGroup.id.in_([1, 2, 3]))
+        )).all()
+    by_id = {row[0]: row[1] for row in names}
+    assert by_id[1] == "品牌传播与大客户"
+    assert by_id[2] == "市场生态部"   # 不变
+    assert by_id[3] == "产品"
+
+
+async def test_phase9_seed_leaf_rules_make_resolve_match(phase9_env):
+    """Phase 9 补种后,resolve_rule(1202/1203/1204) 都 matched=True。
+
+    走真实 routing resolve 服务,而非直接查表,验证整个链路通。
+    """
+    engine = phase9_env["engine"]
+    await _seed_phase9_directly(engine)
+    from app.services.routing import resolve_rule
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    expectations = [
+        (1202, "品牌传播与大客户", "钟梦茜"),
+        (1203, "产品",             "张朝娟"),
+        (1204, "市场生态部",       "谢志鹏"),
+    ]
+    async with factory() as s:
+        for cat_id, sg_name, user_name in expectations:
+            r = await resolve_rule(s, cat_id)
+            assert r["matched"] is True, f"cat={cat_id}: {r}"
+            assert r["dispatcher_skill_group_name"] == sg_name, r
+            assert r["dispatcher_name"] == user_name, r
