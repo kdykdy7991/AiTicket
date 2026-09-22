@@ -134,6 +134,29 @@ def get_state_logs(
     return body.get("data", []) if isinstance(body, dict) else body
 
 
+def get_state_logs_until(
+    client: httpx.Client,
+    token: str,
+    ticket_id: int,
+    *,
+    predicate,
+    max_attempts: int = 5,
+    interval: float = 0.1,
+) -> list[dict[str, Any]]:
+    """轮询 state-logs 直到 predicate(logs) 为 True。
+
+    解决 PATCH 提交后下一发 GET 偶发看不到刚写入的 state_log 行
+    (异步连接池在同一 transaction 复用导致)。
+    """
+    last: list[dict[str, Any]] = []
+    for _ in range(max_attempts):
+        last = get_state_logs(client, token, ticket_id)
+        if predicate(last):
+            return last
+        time.sleep(interval)
+    return last
+
+
 def patch_ticket(
     client: httpx.Client,
     token: str,
