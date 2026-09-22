@@ -82,7 +82,10 @@ def _run_complaint_scenario(
         "state": "open",
         "owner_id": dispatcher_user["id"],
     })
-    assert after_open["state"] == "open", after_open
+    after_open_detail = helpers.get_ticket_until_state(
+        client, token, ticket_id, target_state="open",
+    )
+    assert after_open_detail["state"] == "open", after_open_detail
 
     # open → resolved(写 root_cause / solution)
     after_resolved = helpers.patch_ticket(client, token, ticket_id, {
@@ -90,8 +93,10 @@ def _run_complaint_scenario(
         "root_cause": f"{scenario_label}:客服响应时长超出客户预期",
         "solution": f"{scenario_label}:已升级处理并补偿客户",
     })
-    assert after_resolved["state"] == "resolved", after_resolved
-    detail = helpers.get_ticket(client, token, ticket_id)
+    detail = helpers.get_ticket_until_state(
+        client, token, ticket_id, target_state="resolved",
+    )
+    assert detail["state"] == "resolved", detail
     assert detail["root_cause"], detail
     assert detail["solution"], detail
 

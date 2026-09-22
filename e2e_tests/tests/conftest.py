@@ -65,8 +65,9 @@ def e2e_client(e2e_base_url) -> httpx.Client:
         yield c
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 def token(e2e_client) -> str:
+    """每个 test 重新登录,避开 token_version 单旋触发的偶发 401。"""
     return helpers.admin_token(e2e_client)
 
 

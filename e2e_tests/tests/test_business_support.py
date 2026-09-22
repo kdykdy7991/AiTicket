@@ -65,8 +65,10 @@ def _run_business_support_scenario(
         "state": "open",
         "owner_id": owner_id,
     })
-    assert after_open["state"] == "open", after_open
-    after_open_detail = helpers.get_ticket(client, token, ticket_id)
+    after_open_detail = helpers.get_ticket_until_state(
+        client, token, ticket_id, target_state="open",
+    )
+    assert after_open_detail["state"] == "open", after_open_detail
     assert after_open_detail["owner_name"] == expected_owner_name, after_open_detail
 
     # 3) 处理: open → resolved
@@ -77,9 +79,11 @@ def _run_business_support_scenario(
         "root_cause": root_cause,
         "solution": solution,
     })
-    assert after_resolved["state"] == "resolved", after_resolved
-    assert after_resolved["solved_at"] is not None, "resolved 应有 solved_at"
-    after_resolved_detail = helpers.get_ticket(client, token, ticket_id)
+    after_resolved_detail = helpers.get_ticket_until_state(
+        client, token, ticket_id, target_state="resolved",
+    )
+    assert after_resolved_detail["state"] == "resolved", after_resolved_detail
+    assert after_resolved_detail["solved_at"] is not None, "resolved 应有 solved_at"
     assert after_resolved_detail["root_cause"] == root_cause, after_resolved_detail
     assert after_resolved_detail["solution"] == solution, after_resolved_detail
 
@@ -91,8 +95,10 @@ def _run_business_support_scenario(
         "callback_required": False,
         "callback_details": "E2E 自动化:无需回访",
     })
-    assert after_archived["state"] == "archived", after_archived
-    after_archived_detail = helpers.get_ticket(client, token, ticket_id)
+    after_archived_detail = helpers.get_ticket_until_state(
+        client, token, ticket_id, target_state="archived",
+    )
+    assert after_archived_detail["state"] == "archived", after_archived_detail
     assert after_archived_detail["closed_at"] is not None, "archived 应有 closed_at"
 
     # 5) state_log 四条完整 — 轮询避免偶发 stale-read

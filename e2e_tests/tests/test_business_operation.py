@@ -56,10 +56,11 @@ def _run_business_op_scenario(
         "state": "open",
         "owner_id": owner_id,
     })
-    assert after_open["state"] == "open", after_open
     assert after_open["owner_id"] == owner_id, after_open
-    # PATCH 响应可能不包含 joined owner_name;重新 GET 拿详情
-    after_open_detail = helpers.get_ticket(client, token, ticket_id)
+    after_open_detail = helpers.get_ticket_until_state(
+        client, token, ticket_id, target_state="open",
+    )
+    assert after_open_detail["state"] == "open", after_open_detail
     assert after_open_detail["owner_name"] == "业务运营处理人", after_open_detail
 
     # 3) 处理: open → resolved (写 root_cause / solution)

@@ -157,6 +157,28 @@ def get_state_logs_until(
     return last
 
 
+def get_ticket_until_state(
+    client: httpx.Client,
+    token: str,
+    ticket_id: int,
+    *,
+    target_state: str,
+    max_attempts: int = 5,
+    interval: float = 0.1,
+) -> dict[str, Any]:
+    """轮询 ticket 详情直到 state == target_state。
+
+    解决 PATCH 后立刻 GET 偶发拿到的还是旧 state 的抢跑。
+    """
+    last = get_ticket(client, token, ticket_id)
+    for _ in range(max_attempts):
+        if last.get("state") == target_state:
+            return last
+        time.sleep(interval)
+        last = get_ticket(client, token, ticket_id)
+    return last
+
+
 def patch_ticket(
     client: httpx.Client,
     token: str,
