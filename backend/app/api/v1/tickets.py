@@ -797,8 +797,8 @@ async def create_ticket(
             resolved=True,
             resolution=body.instant_resolution or "即时办结咨询",
             solved_at=now,
-            closed_at=now,
-            closed_duration_minutes=0,
+            # closed_at / closed_duration_minutes 是终态状态副作用，
+            # 统一由 apply_initial_state（状态流转执行入口）计算，不在构造期重复维护
             callback_required=False,  # 不需要回访
             is_callbacked=True,
             is_draft=False,
@@ -950,13 +950,22 @@ async def update_ticket(
         ticket.callback_details = body.callback_details
     if body.is_callbacked is not None:
         ticket.is_callbacked = body.is_callbacked
-        # 未回访时清空满意度；避免历史脏数据
-        if body.is_callbacked is False:
+        # 未回访时清空满意度；避免历史脏数据。
+        # 例外：已产生的"不满意"回访事实不可被抹掉 —— 只能经"退回重开处理"
+        # 这一合法流程（reopen 副作用清空满意度）重置
+        if body.is_callbacked is False and ticket.satisfaction != "dissatisfied":
             ticket.satisfaction = None
     if body.callback_required is not None:
         ticket.callback_required = body.callback_required
-        if body.callback_required is False:
-            # 无需回访：强制已回访标记为否并清空满意度
+        # callback_required 是"是否要求回访"的流程配置，不是删除既有回访结果的
+        # 开关：仅当尚未产生回访事实（is_callbacked=true）时才同步标记并清空；
+        # 已回访（含 dissatisfied）的 is_callbacked/satisfaction/callback_details
+        # 全部保留，dissatisfied 仍被归档前置拦截
+        if (
+            body.callback_required is False
+            and ticket.is_callbacked is not True
+            and ticket.satisfaction != "dissatisfied"
+        ):
             ticket.is_callbacked = False
             ticket.satisfaction = None
     if body.satisfaction is not None:
@@ -966,6 +975,10 @@ async def update_ticket(
             raise HTTPException(422, detail=f"satisfaction 取值必须是 {sorted(allowed)} 之一")
         if ticket.is_callbacked is False:
             raise HTTPException(422, detail="未回访工单不能设置满意度")
+        # 不满意评价不可原地改写：必须退回重开 → 重新处理 → 新一次回访
+        # （重开副作用已清空 satisfaction），否则改个评分即可绕过归档限制
+        if ticket.satisfaction == "dissatisfied" and body.satisfaction != "dissatisfied":
+            raise HTTPException(422, detail="客户不满意：需退回重新处理并完成新一次回访后才能变更评价")
         ticket.satisfaction = body.satisfaction
 
     # State transition — 唯一执行入口：校验/权限/reason/前置校验/副作用/Flow Log 收口

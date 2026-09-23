@@ -9,14 +9,15 @@
 | Phase | 内容 | 提交 | 结果 |
 | --- | --- | --- | --- |
 | 0 | 流转基线测试（收口前固化现状契约） | `30a27dc` test(ticket): add transition baseline coverage | 27 用例（含 5 个已知缺陷 xfail） |
-| 1 | 状态流转执行收口：单条 PATCH 统一入口 | `515a242` refactor(ticket): centralize single-ticket transition execution | 3 个失败修复为通过（first_owner 等） |
+| 1 | 单条 PATCH 状态流转执行收口 | `515a242` refactor(ticket): centralize single-ticket transition execution | 3 个失败修复为通过（first_owner 等） |
 | 2 | 批量流转走同一执行入口 | `8d650c0` refactor(ticket): route batch transitions through executor | 4 个 xfail 转正 |
-| 3 | 文章回复 / 建单 / 即时办结 / 草稿提交统一初始状态 | `be51196` refactor(ticket): unify reply and initial state transitions | 通过 |
-| 4 | Flow Log `action_type`（目标④） | `77b21e8` feat(ticket): add transition action type to flow logs | 迁移已应用（测试库+dev 库） |
-| 5 | 后端 `allowed_actions` / 能力位（目标②） | `c48521c` feat(ticket): expose allowed actions from backend rules | 通过 |
-| 6 | 前端渲染后端动作元数据（去规则副本） | `712cedd` refactor(frontend): render ticket actions from backend metadata | vue-tsc 与基线一致 |
-| 7 | 客户闭环规则（目标③）：`callback_details` + 不满意禁归档 | `07eb826` fix(ticket): enforce customer callback closure rules | 108 passed |
-| 8 | 全量回归 + 闭环链路测试 + 本报告（Phase 9） | 见提交哈希（本文件所在提交） | 112 passed / E2E 18/18 |
+| 3–4 | 初始状态（建单/即时/草稿）与文章回复统一 | `be51196` refactor(ticket): unify reply and initial state transitions | 通过 |
+| 5 | Flow Log `action_type`（目标④） | `77b21e8` feat(ticket): add transition action type to flow logs | 迁移已应用（测试库+dev 库） |
+| 6 | 后端 `allowed_actions` / 能力位（目标②） | `c48521c` feat(ticket): expose allowed actions from backend rules | 通过 |
+| 7 | 前端渲染后端动作元数据（去规则副本） | `712cedd` refactor(frontend): render ticket actions from backend metadata | vue-tsc 与基线一致 |
+| 8 | 客户闭环规则（目标③）：`callback_details` + 不满意禁归档 | `07eb826` fix(ticket): enforce customer callback closure rules | 通过 |
+| 9 | 全量回归 + 闭环链路测试 + 本报告 | `0c41867` test(ticket): complete workflow architecture regression | 112 passed / E2E 18:18 |
+| 收尾 | 关闭 callback 绕过、即时办结终态副作用收口、Phase 编号修正、本报告更新 | 本报告所在提交 | 113 passed / E2E 18:18 |
 
 四项目标达成情况：
 
@@ -45,8 +46,8 @@
 | `backend/app/schemas/ticket.py` | 新增 `AllowedAction`；`TicketDetail` 增 `allowed_actions/is_terminal/can_reply/can_addition/can_remind` |
 | `backend/app/models/ticket.py` | `TicketStateLog.action_type: String(30) NULL` |
 | `backend/alembic/versions/j2d3e4f5g6h7_add_state_log_action_type.py` | head（`down_revision=i1c2d3e4f5g6`，`sa.inspect` 列守卫幂等） |
-| `backend/tests/test_transition_baseline.py` | 46 用例：单条流转契约 + Phase5/6/8 扩展（sections 1–14） |
-| `backend/tests/test_workflow_regression.py` | 4 用例：标准闭环链 / 异常分支链 / 不满意闭环 / 即时办结动作完整性 |
+| `backend/tests/test_transition_baseline.py` | 47 用例：单条流转契约 + Phase5/6/8 扩展 + 收尾回访回归 (a)(c)（sections 1–14） |
+| `backend/tests/test_workflow_regression.py` | 4 用例：标准闭环链 / 异常分支链 / 不满意闭环(b) / 即时办结副作用分工 |
 | `frontend/src/types/index.ts` | `AllowedAction` + Ticket 元数据字段（含 `callback_details/satisfaction`） |
 | `frontend/src/api/tickets.ts` | 删 `isReturnTransition`；`is_return` 改由后端 `action_type` 决定 |
 | `frontend/src/views/TicketDetailView.vue` | 5 个 canXxx 角色/状态判断 → `allowed_actions` 查找；`resolveReturnTarget` 删除；归档表单接入回访详情与不满意分支 |
@@ -66,8 +67,9 @@
 
 | 层 | 结果 |
 | --- | --- |
-| 后端 pytest 全量 | **112 passed**（存量 62 + 本次新增 50），0 failed |
-| E2E（live dev API :8001） | **18/18 PASS**，rc=0（批 `20260923-172623`，同日早批 `172132` 亦 18/18），alembic head `j2d3e4f5g6h7` |
+| 相关回归（两份流程测试文件） | **51 passed**（baseline 47 + workflow 4） |
+| 后端 pytest 全量 | **113 passed**（存量 62 + 本次新增 51），0 failed |
+| E2E（live dev API :8001） | **18/18 PASS**，rc=0（收尾批 `20260924-073348`；Phase9 批 `20260923-172623`/`172132` 亦 18/18），alembic head `j2d3e4f5g6h7` |
 | 前端 vue-tsc | **58 个错误，与改造前基线逐条一致（无新增）**（58 为既有问题，不在本次范围） |
 | 前端构建 | `npx vite build` ✓ built（`npm run build` 被既有 vue-tsc 错误挡住，非本次引入） |
 | 冒烟链路 | 标准闭环（建单→分派→处理说明→回访满意→归档）、异常分支（暂缓/恢复/打回/退回/重新提交/撤销）、不满意拦截→重开→再处理→满意归档、即时办结、批量跳过非法流转 —— 均由 `test_workflow_regression.py` 与基线用例覆盖并通过 |
@@ -77,25 +79,47 @@
 - 异常分支链 = `[create, dispatch, hold, resume, return, return, resubmit, cancel]`
 - 不满意闭环 = `[create, dispatch, resolve, reopen, resolve, archive]`
 
+`action_type` 写入机制核验（收尾，无代码改动）：
+- **唯一写入点**：全仓 `TicketStateLog(` 构造仅 `state_machine.py` 两处
+  （`apply_initial_state` / `apply_transition`）；业务调用如带显式
+  `action_type` 则 `action_for(from, to, override)` **override 优先**，
+  未显式时在**写入时点**按唯一映射 `TRANSITION_ACTIONS` 落库（新数据恒为非 NULL，
+  由闭环链路用例逐条断言 `in ACTION_TYPES`）。
+- **读取端兜底**：`get_state_logs` 仅对迁移前的 NULL 行执行
+  `log.action_type or action_for(...)` 展示推导（测试
+  `test_action_type_nullable_for_history` 断言 DB 仍为 NULL、接口推导为
+  `resolve`）——`action_for` 不参与新数据生成。
+
 ## 五、保留的既有语义（兼容性）
 
 - 批量：非法流转跳过该工单；403/400/422 整批拒绝并回滚（`get_db` 事务语义）。
 - admin 分派可不选处理人（`check_transition_permission` 中 admin 早退保留原422豁免）。
 - resolved→on_hold 静默改写为 open（`enforce_business_constraints`，日志/动作生成时静默，带 `log_rewrite` 标记）。
 - reopen 保留 `solved_at/resolved=True`（语义=曾解决时间）。
-- `callback_required=false` 清空满意度/回访标记（既有回访语义）。
+- `callback_required` 是"是否要求回访"的流程配置：**仅在尚未产生回访事实
+  （`is_callbacked=true` / 不满意）时**才同步标记并清空满意度；已回访事实
+  （含 `dissatisfied`、`callback_details`）不可被配置字段抹掉（收尾闭环）。
 - 一条 resolved 节点仅一条处理说明的 409 守卫原样保留。
 - API 兼容：`allowed_actions/is_terminal/can_*` 均为**新增字段**，请求/响应既有结构未变。
 
-## 六、剩余的绕过点（诚实记录）
+## 六、绕过点核验记录
 
-1. **`callback_required=false` 绕过不满意拦截**：同请求先按既有语义清空
-   `satisfaction`，归档前置随之放行。属既有"无需回访即清空满意度"规则，
-   本次未加固；测试 `test_no_callback_clears_satisfaction_and_can_archive` 已将其
-   明确记录在案。
-2. **即时办结构造期字段**：`resolved/solved_at/closed_at/resolution/回访标记`
-   在 `Ticket(...)` 构造时写入（属建单业务数据，共享 apply_initial_state 的
-   日志与终态 closed_at），不经过 `apply_transition` 的副作用段。状态本身已收口。
+1. **`callback_required=false` 绕过：已彻底关闭（收尾）**。规则改为
+   "已产生的客户回访事实不可被流程配置抹掉"：`callback_required=false`、
+   显式 `is_callbacked=false` 都不再清空既有 `satisfaction`（尤其
+   `dissatisfied`）与 `callback_details`；`dissatisfied` 也不可原地改写为
+   满意 —— 唯一合法重置路径是 `reopen`（退回重开副作用清空满意度）。
+   归档前置继续拦截 → 必须重开→重新处理→新一次回访→归档。
+   回归覆盖：
+   - (a) `test_callback_config_cannot_erase_callback_facts`（dissatisfied →
+     callback_required=false → 仍 422；含同请求组合与 `is_callbacked=false` 变体）
+   - (b) `test_dissatisfied_closure_loop`（拦截 → reopen → 再处理 → 满意 → 归档）
+   - (c) `test_no_callback_config_behavior_unchanged`（无回访时原行为不回归）
+2. **即时办结终态副作用重复：已最小收口（收尾）**。构造期不再写
+   `closed_at/closed_duration_minutes`，两者与 `TicketStateLog` 唯一归属
+   `apply_initial_state`（执行入口）；`resolved/solved_at/resolution/
+   回访标志/solution_deadline` 属建单初始化数据（执行入口对该路径不产生
+   这些字段），保持现状。SLA breach 标记不被即时办结触碰。
 3. **SLA 领域**（非目标，未改）：`sla_scanner` 不豁免 on_hold；
    批量修改 priority 不重算 `solution_deadline`（单条 PATCH 会重算）；
    `ComplaintEscalationPolicy.required_role` 无消费方。
@@ -135,8 +159,11 @@
 ## 九、验证复现命令
 
 ```bash
+# 相关回归
+cd backend && .venv/bin/pytest -q tests/test_transition_baseline.py tests/test_workflow_regression.py   # 期望51 passed
+
 # 后端全量
-cd backend && .venv/bin/pytest -q                 # 期望112 passed
+.venv/bin/pytest -q                                 # 期望113 passed
 
 # E2E（需 dev 栈 :8001）
 python3 e2e_tests/scripts/run_e2e.py              # 期望 rc=0,18/18
