@@ -229,6 +229,43 @@ async def check_transition_permission(
     raise ForbiddenError("无权执行此状态变更")
 
 
+async def apply_initial_state(
+    db: AsyncSession,
+    ticket: Ticket,
+    *,
+    to_state: str,
+    operator: User,
+    reason: str | None = None,
+    body=None,
+) -> TicketStateLog:
+    """建单 / 草稿提交 / 即时办结的初始状态落库：None → pending / archived。
+
+    与 apply_transition 共享同一套公共实现：
+      - 初始态合法性：validate_initial_state（仅 pending / archived）
+      - 终态副作用：closed_at / closed_duration_minutes（即时办结 → archived）
+      - Flow Log：from_state=None、停留时长为 None、人员快照
+    调用方负责业务数据字段（number / SLA 截止时间 / resolution / 回访标志等）
+    与显式提交；草稿（is_draft=True）不写初始日志，由调用方跳过本方法。
+    """
+    validate_initial_state(to_state)
+    now = datetime.now(timezone.utc)
+
+    if to_state in TERMINAL_STATES:
+        ticket.closed_at = now
+        if ticket.created_at:
+            ticket.closed_duration_minutes = int((now - ticket.created_at).total_seconds() / 60)
+
+    ticket.state = to_state
+    log = TicketStateLog(
+        ticket_id=ticket.id, from_state=None, to_state=to_state,
+        operator_id=operator.id, reason=reason, duration_minutes=None,
+        **snapshot_people(ticket, body),
+    )
+    db.add(log)
+    await db.flush()
+    return log
+
+
 async def apply_transition(
     db: AsyncSession,
     ticket: Ticket,

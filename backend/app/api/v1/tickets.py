@@ -28,8 +28,8 @@ from app.schemas.ticket import (
     DuplicateWarning,
 )
 from app.services.state_machine import (
+    apply_initial_state,
     apply_transition,
-    snapshot_people as _snapshot_people,
 )
 
 router = APIRouter(tags=["tickets"])
@@ -571,11 +571,8 @@ async def submit_draft(
     ticket.is_draft = False
     await db.flush()
 
-    db.add(TicketStateLog(
-        ticket_id=ticket.id, from_state=None, to_state="pending",
-        operator_id=user.id,
-        **_snapshot_people(ticket, None),
-    ))
+    # 初始状态落库（None → pending）：与建单共用执行入口
+    await apply_initial_state(db, ticket, to_state="pending", operator=user)
     await db.commit()
 
     result = await db.execute(
@@ -786,12 +783,11 @@ async def create_ticket(
         )
         db.add(ticket)
         await db.flush()
-        # 一次性审计日志：None → archived
-        db.add(TicketStateLog(
-            ticket_id=ticket.id, from_state=None, to_state="archived",
-            operator_id=user.id, reason="即时办结咨询",
-            **_snapshot_people(ticket, body),
-        ))
+        # 一次性审计日志：None → archived（初始状态执行入口，含终态副作用）
+        await apply_initial_state(
+            db, ticket, to_state="archived",
+            operator=user, reason="即时办结咨询", body=body,
+        )
         await db.commit()
 
         # Reload with relationships
@@ -879,13 +875,9 @@ async def create_ticket(
     db.add(ticket)
     await db.flush()  # to get ticket.id
 
-    # 初始状态日志：仅正式工单记录（→ pending）
+    # 初始状态日志：仅正式工单记录（None → pending），草稿不写日志
     if not body.is_draft:
-        db.add(TicketStateLog(
-            ticket_id=ticket.id, from_state=None, to_state="pending",
-            operator_id=user.id,
-            **_snapshot_people(ticket, body),
-        ))
+        await apply_initial_state(db, ticket, to_state="pending", operator=user, body=body)
 
     await db.refresh(ticket)
 

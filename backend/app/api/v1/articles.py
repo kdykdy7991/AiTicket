@@ -17,7 +17,7 @@ from app.core.exceptions import NotFoundError
 from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
 from app.models.user import User
 from app.services.notification import remind_handler
-from app.services.state_machine import TERMINAL_STATES, validate_transition
+from app.services.state_machine import TERMINAL_STATES, apply_transition
 
 router = APIRouter(tags=["articles"])
 
@@ -228,31 +228,17 @@ async def create_article(
             raise HTTPException(422, detail=f"催办内容最多 {URGE_MAX_LENGTH} 字")
 
     if type == "reply":
-        old_state = ticket.state
-        validate_transition(old_state, "resolved")
-        now = datetime.now(timezone.utc)
+        # 进入 resolved 由统一执行入口完成：合法性/权限/reason/状态副作用/Flow Log
+        # （文章级规则——owner-only、状态集合、角色——在上方已校验）
+        reply_log = await apply_transition(db, ticket, to_state="resolved", operator=user)
 
-        # 计算上一状态停留时长
-        last_log = await db.execute(
+        # 计算上一状态停留时长的最新日志（执行入口已写入），用于同节点查重
+        last_q = await db.execute(
             select(TicketStateLog)
             .where(TicketStateLog.ticket_id == ticket_id)
             .order_by(TicketStateLog.created_at.desc()).limit(1)
         )
-        last = last_log.scalar_one_or_none()
-        duration = int((now - last.created_at).total_seconds() / 60) if last else None
-
-        # 先创建状态日志并 flush，拿到 log.id 作为处理说明的 state_key
-        # 人员快照：reply 时刻工单上的创建者/对接人/处理人
-        reply_log = TicketStateLog(
-            ticket_id=ticket.id, from_state=old_state, to_state="resolved",
-            operator_id=user.id, reason=None, duration_minutes=duration,
-            creator_id_snapshot=ticket.creator_id,
-            dispatcher_id_snapshot=ticket.dispatcher_id,
-            owner_id_snapshot=ticket.owner_id,
-        )
-        db.add(reply_log)
-        await db.flush()
-        await db.refresh(reply_log)
+        last = last_q.scalar_one_or_none()
 
         # 同一 resolved 节点下只能有一条处理说明
         if last and last.to_state == "resolved":
@@ -268,12 +254,6 @@ async def create_article(
                     status.HTTP_409_CONFLICT,
                     detail="当前状态下已存在处理说明"
                 )
-
-        ticket.state = "resolved"
-        ticket.solved_at = now
-        ticket.resolved = True
-        if ticket.solution_deadline and now > ticket.solution_deadline:
-            ticket.sla_solution_breached = True
 
     article = Article(
         ticket_id=ticket_id, type=type, sender_id=user.id,

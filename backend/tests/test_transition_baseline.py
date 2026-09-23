@@ -536,3 +536,85 @@ async def test_batch_terminal_sets_closed_at(env):
     assert tk.state == "cancelled"
     assert tk.closed_at is not None, "batch 撤销应写 closed_at"
     assert tk.closed_duration_minutes is not None
+
+
+# ── 10. 文章回复路径（Phase 4 迁移至执行入口） ────────────
+
+
+async def test_reply_transitions_to_resolved(env):
+    """处理人提交处理说明 → open→resolved 统一走执行入口。"""
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    with as_user(env["handler_id"], "agent"):
+        r = await env["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "已更换模块并复测通过"},
+        )
+    assert r.status_code == 201, r.text
+    # 处理说明挂在新写入的 resolved 日志节点上（state_key = log.id）
+    factory = async_sessionmaker(env["engine"], class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        from app.models.ticket import Article
+        art = (await s.execute(
+            select(Article).where(Article.ticket_id == t["id"], Article.type == "reply")
+        )).scalar_one()
+        assert art.state_key is not None and art.state_key.isdigit()
+
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert d["state"] == "resolved"
+    assert d["solved_at"] is not None
+    assert d["resolved"] is True
+    assert d["owner_id"] == env["handler_id"]
+
+    logs = await db_logs(env, t["id"])
+    assert (logs[-1].from_state, logs[-1].to_state) == ("open", "resolved")
+    assert logs[-1].operator_id == env["handler_id"]
+    assert logs[-1].duration_minutes is not None
+
+
+async def test_reply_rejected_for_non_owner(env):
+    """文章级规则保留：非当前处理人不能提交处理说明（403），且不产生任何流转。"""
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    with as_user(env["dispatcher_id"], "agent"):  # 对接人不是 owner
+        r = await env["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "越权回复"},
+        )
+    assert r.status_code == 403, r.text
+    tk = await db_ticket(env, t["id"])
+    assert tk.state == "open"
+    logs = await db_logs(env, t["id"])
+    assert (logs[-1].from_state, logs[-1].to_state) == ("pending", "open")
+
+
+# ── 11. 草稿提交初始日志（Phase 4 迁移至执行入口） ────────
+
+
+async def test_draft_submit_writes_initial_log(env):
+    c = env["client"]
+    r = await c.post("/api/v1/tickets", json={
+        "description": "草稿",
+        "priority": "p3_normal",
+        "channel": "phone",
+        "customer_type": "personal",
+        "customer_phone": _next_phone(),
+        "dispatcher_id": env["dispatcher_id"],
+        "skill_group_id": env["sg_id"],
+        "is_draft": True,
+    })
+    assert r.status_code == 201, r.text
+    draft = r.json()["data"]
+    assert draft["number"] is None
+    assert await db_logs(env, draft["id"]) == []  # 草稿不写初始日志
+
+    r2 = await c.post(f"/api/v1/tickets/drafts/{draft['id']}/submit")
+    assert r2.status_code == 200, r2.text
+    submitted = r2.json()["data"]
+    assert submitted["number"] is not None
+    assert submitted["state"] == "pending"
+
+    logs = await db_logs(env, draft["id"])
+    assert len(logs) == 1
+    assert logs[0].from_state is None and logs[0].to_state == "pending"
+    assert logs[0].operator_id is not None
