@@ -489,6 +489,11 @@ async def apply_transition(
         elif old_state == "returned":
             # 已退回工单重新提交：保持无处理人，等待再次分派
             ticket.returned_to_user_id = None
+        elif old_state == "resolved":
+            # 退回重开：上一轮回访结果随工单失效，满意度清零等待再次回访
+            # （callback_details 保留为历史记录；不清空则不满意会永久隐藏
+            #  归档动作，重开后再也无法完成闭环）
+            ticket.satisfaction = None
     elif to_state == "pending":
         # open→pending 退回 或 returned→pending 重新提交：待受理无处理人
         if old_state in ("open", "returned"):
