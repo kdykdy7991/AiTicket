@@ -618,3 +618,109 @@ async def test_draft_submit_writes_initial_log(env):
     assert len(logs) == 1
     assert logs[0].from_state is None and logs[0].to_state == "pending"
     assert logs[0].operator_id is not None
+
+
+# ── 12. Flow Log action_type（Phase 5） ────────────────────
+
+
+def test_action_map_covers_all_reachable_transitions():
+    """动作表与真实流转表一一对应，且动作集合封闭。"""
+    from app.services.state_machine import (
+        ACTION_TYPES,
+        TRANSITION_ACTIONS,
+        action_for,
+    )
+    edges = {(None, "pending"), (None, "archived")}
+    edges |= {(frm, to) for frm, tos in TRANSITIONS.items() for to in tos}
+    assert edges == set(TRANSITION_ACTIONS.keys()), "动作表必须覆盖且仅覆盖真实可达流转"
+    assert ACTION_TYPES == {
+        "create", "instant_resolve", "dispatch", "return", "cancel",
+        "resolve", "hold", "resume", "reopen", "archive", "resubmit",
+    }
+    assert action_for("pending", "open") == "dispatch"
+    assert action_for("pending", "open", override="custom") == "custom"
+    assert action_for("unknown", "unknown") is None
+
+
+async def test_action_type_full_chain(env):
+    """一条工单走完常规链路，每步 Flow Log 的 action_type 正确。"""
+    t = await env["create_ticket"]()
+
+    async def last_action():
+        logs = await db_logs(env, t["id"])
+        return logs[-1].action_type
+
+    assert await last_action() == "create"              # None → pending
+    await env["dispatch"](t["id"], env["handler_id"])
+    assert await last_action() == "dispatch"            # pending → open
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "on_hold", "reason": "等待备件"})
+    assert r.status_code == 200 and await last_action() == "hold"        # open → on_hold
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "open", "reason": "备件已到"})
+    assert r.status_code == 200 and await last_action() == "resume"      # on_hold → open
+    await env["resolve"](t["id"])
+    assert await last_action() == "resolve"             # open → resolved
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "open", "reason": "客户反馈未解决"})
+    assert r.status_code == 200 and await last_action() == "reopen"      # resolved → open
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "pending", "reason": "打回重新分派"})
+    assert r.status_code == 200 and await last_action() == "return"      # open → pending
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "returned", "reason": "信息不全"})
+    assert r.status_code == 200 and await last_action() == "return"      # pending → returned
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "pending"})
+    assert r.status_code == 200 and await last_action() == "resubmit"    # returned → pending
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "cancelled", "reason": "客户取消"})
+    assert r.status_code == 200 and await last_action() == "cancel"      # pending → cancelled
+
+
+async def test_action_type_instant_and_archive(env):
+    c = env["client"]
+    # 即时办结：None → archived
+    r = await c.post("/api/v1/tickets", json={
+        "description": "咨询", "priority": "p4_enterprise",
+        "channel": "phone", "customer_type": "personal",
+        "customer_phone": _next_phone(),
+        "is_instant_resolve": True, "instant_resolution": "已答复",
+    })
+    assert r.status_code == 201, r.text
+    iid = r.json()["data"]["id"]
+    ilogs = await db_logs(env, iid)
+    assert ilogs[0].action_type == "instant_resolve"
+
+    # 常规办结后归档：resolved → archived
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    await env["resolve"](t["id"])
+    r2 = await c.patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "archived", "is_callbacked": True, "callback_required": False})
+    assert r2.status_code == 200, r2.text
+    logs = await db_logs(env, t["id"])
+    assert logs[-1].action_type == "archive"
+
+
+async def test_state_logs_endpoint_exposes_action_type(env):
+    t = await env["create_ticket"]()
+    r = await env["client"].get(f"/api/v1/tickets/{t['id']}/state-logs")
+    assert r.status_code == 200, r.text
+    entries = r.json()["data"]
+    assert entries[-1]["action_type"] == "create"
+
+
+async def test_action_type_nullable_for_history(env):
+    """历史日志（迁移前）没有 action_type：保持 NULL，可正常读取。"""
+    t = await env["create_ticket"]()
+    factory = async_sessionmaker(env["engine"], class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        s.add(TicketStateLog(
+            ticket_id=t["id"], from_state="open", to_state="resolved",
+            operator_id=env["dispatcher_id"], reason=None,
+            # action_type 缺省 → NULL（模拟历史数据）
+            creator_id_snapshot=env["dispatcher_id"],
+        ))
+        await s.commit()
+    logs = await db_logs(env, t["id"])
+    assert logs[-1].action_type is None

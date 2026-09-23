@@ -82,6 +82,42 @@ STATES_REQUIRE_REASON_FROM: dict[str, set[str]] = {
 # 终态（不可再流转）
 TERMINAL_STATES = {"archived", "cancelled"}
 
+# ── Flow Log 动作类型 ─────────────────────────────────────────────
+# 由 (from_state, to_state) 推导"这次流转是什么业务动作"。
+# 集合完全来自上面的 TRANSITIONS 真实流转表（每条可达边恰好一票），
+# 不在路由/前端另立动作清单。
+TRANSITION_ACTIONS: dict[tuple[str | None, str], str] = {
+    (None, "pending"): "create",            # 建单 / 草稿提交
+    (None, "archived"): "instant_resolve",  # 即时办结咨询
+    ("pending", "open"): "dispatch",        # 分派
+    ("pending", "returned"): "return",      # 待受理退回
+    ("pending", "cancelled"): "cancel",
+    ("open", "resolved"): "resolve",        # 提交处理说明 / 手动办结
+    ("open", "on_hold"): "hold",            # 暂缓
+    ("open", "pending"): "return",          # 处理人打回
+    ("open", "cancelled"): "cancel",
+    ("on_hold", "resolved"): "resolve",
+    ("on_hold", "open"): "resume",          # 恢复处理
+    ("on_hold", "cancelled"): "cancel",
+    ("resolved", "archived"): "archive",    # 归档
+    ("resolved", "open"): "reopen",         # 退回重开
+    ("resolved", "on_hold"): "reopen",      # 被 enforce_business_constraints 改写为 open，实际不可达
+    ("returned", "pending"): "resubmit",    # 退回后重新提交
+    ("returned", "cancelled"): "cancel",
+}
+
+# 全量动作类型（文档 / 测试断言用）
+ACTION_TYPES: set[str] = set(TRANSITION_ACTIONS.values())
+
+
+def action_for(
+    from_state: str | None, to_state: str, override: str | None = None
+) -> str | None:
+    """推导 Flow Log 的 action_type；调用方可显式 override（未来特殊入口用）。"""
+    if override is not None:
+        return override
+    return TRANSITION_ACTIONS.get((from_state, to_state))
+
 
 def validate_transition(from_state: str, to_state: str) -> None:
     """校验状态流转是否合法，非法则抛 StateTransitionError。"""
@@ -237,13 +273,14 @@ async def apply_initial_state(
     operator: User,
     reason: str | None = None,
     body=None,
+    action_type: str | None = None,
 ) -> TicketStateLog:
     """建单 / 草稿提交 / 即时办结的初始状态落库：None → pending / archived。
 
     与 apply_transition 共享同一套公共实现：
       - 初始态合法性：validate_initial_state（仅 pending / archived）
       - 终态副作用：closed_at / closed_duration_minutes（即时办结 → archived）
-      - Flow Log：from_state=None、停留时长为 None、人员快照
+      - Flow Log：from_state=None、停留时长为 None、人员快照、action_type
     调用方负责业务数据字段（number / SLA 截止时间 / resolution / 回访标志等）
     与显式提交；草稿（is_draft=True）不写初始日志，由调用方跳过本方法。
     """
@@ -259,6 +296,7 @@ async def apply_initial_state(
     log = TicketStateLog(
         ticket_id=ticket.id, from_state=None, to_state=to_state,
         operator_id=operator.id, reason=reason, duration_minutes=None,
+        action_type=action_for(None, to_state, action_type),
         **snapshot_people(ticket, body),
     )
     db.add(log)
@@ -276,6 +314,7 @@ async def apply_transition(
     owner_id: int | None = None,
     dispatcher_id: int | None = None,
     hold_until: str | None = None,
+    action_type: str | None = None,
 ) -> TicketStateLog | None:
     """单条工单状态流转的唯一执行入口。
 
@@ -373,10 +412,11 @@ async def apply_transition(
     last = last_log.scalar_one_or_none()
     duration = int((now - last.created_at).total_seconds() / 60) if last else None
 
-    # Flow Log（快照取的是 ticket 已应用新值后的人员）
+    # Flow Log（快照取的是 ticket 已应用新值后的人员；action_type 由流转边推导）
     log = TicketStateLog(
         ticket_id=ticket.id, from_state=old_state, to_state=to_state,
         operator_id=operator.id, reason=reason, duration_minutes=duration,
+        action_type=action_for(old_state, to_state, action_type),
         **snapshot_people(ticket),
     )
     db.add(log)

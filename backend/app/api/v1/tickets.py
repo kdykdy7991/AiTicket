@@ -1092,6 +1092,9 @@ async def get_state_logs(
             "owner_id_snapshot": log.owner_id_snapshot,
             "owner_name_snapshot": _name(log.owner_id_snapshot),
             "reason": log.reason, "duration_minutes": log.duration_minutes,
+            # 动作类型：create/dispatch/hold/resume/resolve/reopen/return/
+            # resubmit/archive/cancel/instant_resolve（历史日志为 null）
+            "action_type": log.action_type,
             "created_at": log.created_at.isoformat() if log.created_at else None,
         })
     return {"data": data}
