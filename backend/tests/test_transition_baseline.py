@@ -9,7 +9,8 @@
   6. returned → pending : 清理 owner / 无需 reason / has_returned 复位
   7. open ↔ on_hold     : reason 必填 / hold_until 落库
   8. archived / cancelled : closed_at / closed_duration_minutes
-  9. batch-update       : 合法性（现状）+ 三个已知缺口（xfail 暴露，Phase 3 修复）
+  9. batch-update       : 合法性 + 权限 + reason + 状态副作用（Phase 3 起与单条
+                          PATCH 同源走 apply_transition，原 4 个缺口 xfail 已转正）
 
 约定:
 - 标注 xfail 的用例表达"期望的正确行为"，用于暴露已知缺陷，
@@ -470,11 +471,6 @@ async def test_batch_state_change_writes_log(env):
     assert logs[-1].owner_id_snapshot == env["handler_id"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="[已知缺口·Phase 3] batch-update 无 transition 权限校验："
-           "非对接人/非处理人的 agent 也能批量流转他人工单（单条 PATCH 会 403）。",
-)
 async def test_batch_dispatch_requires_permission(env):
     """期望：与单条 PATCH 一致——无权限者 batch 分派被拒绝(403)。"""
     # 一个与该工单无关的 agent
@@ -496,11 +492,6 @@ async def test_batch_dispatch_requires_permission(env):
     assert tk.state == "pending"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="[已知缺口·Phase 3] batch-update 无 reason 校验："
-           "requires_reason 的流转（如 pending→returned）缺 reason 也放行，单条 PATCH 会 400。",
-)
 async def test_batch_return_requires_reason(env):
     t = await env["create_ticket"]()
     r = await env["client"].post("/api/v1/tickets/batch-update", json={
@@ -511,11 +502,6 @@ async def test_batch_return_requires_reason(env):
     assert tk.state == "pending"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="[已知缺口·Phase 3] batch-update 缺状态副作用："
-           "批量 open→resolved 不写 solved_at/resolved/SLA breach，与单条 PATCH 结果不一致。",
-)
 async def test_batch_resolve_side_effects_match_patch(env):
     """同一流转从 PATCH 与 batch 执行，最终业务结果必须一致。"""
     ta = await env["create_ticket"]()
@@ -540,10 +526,6 @@ async def test_batch_resolve_side_effects_match_patch(env):
     assert len(logs_b) == len(logs_a)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="[已知缺口·Phase 3] batch-update 到终态不写 closed_at/closed_duration_minutes。",
-)
 async def test_batch_terminal_sets_closed_at(env):
     t = await env["create_ticket"]()
     r = await env["client"].post("/api/v1/tickets/batch-update", json={

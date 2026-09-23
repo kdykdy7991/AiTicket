@@ -28,11 +28,8 @@ from app.schemas.ticket import (
     DuplicateWarning,
 )
 from app.services.state_machine import (
-    RETURN_TRANSITIONS,
     apply_transition,
-    enforce_business_constraints as _enforce_business_constraints,
     snapshot_people as _snapshot_people,
-    validate_transition,
 )
 
 router = APIRouter(tags=["tickets"])
@@ -1008,15 +1005,21 @@ async def batch_update_tickets(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role("admin", "agent")),
 ):
-    """Batch update tickets."""
+    """Batch update tickets.
+
+    状态流转与单条 PATCH 同源：统一走 apply_transition（权限 / reason / 状态副作用 /
+    Flow Log 全在执行入口内完成）。语义：
+      - 非法流转：跳过该工单（保留批量接口原有的容错语义）
+      - 无权限 / 缺 reason：整批拒绝（403 / 400），事务回滚，不做部分提交
+    """
     result = await db.execute(
         select(Ticket).where(Ticket.id.in_(body.ticket_ids))
     )
     tickets = result.scalars().all()
     updated = 0
     for ticket in tickets:
-        # 先应用非 state 字段（owner/dsp/group/skill_group/priority），这样 state_log
-        # 写快照时 ticket 已携带新值
+        # 先应用非 state 字段（owner/dsp/group/skill_group/priority），这样流转快照
+        # 写入时 ticket 已携带新值
         if body.updates.priority is not None:
             ticket.priority = body.updates.priority
         if body.updates.group_id is not None:
@@ -1030,20 +1033,16 @@ async def batch_update_tickets(
         if body.updates.dispatcher_id is not None:
             ticket.dispatcher_id = body.updates.dispatcher_id
         if body.updates.state is not None and body.updates.state != ticket.state:
-            # 业务约束：resolved → on_hold 改写为 resolved → open（与 update_ticket 一致）
-            to_state = _enforce_business_constraints(ticket, body.updates.state)
             try:
-                validate_transition(ticket.state, to_state)
-                from_state = ticket.state
-                log = TicketStateLog(
-                    ticket_id=ticket.id, from_state=from_state, to_state=to_state,
-                    operator_id=user.id, reason=body.updates.reason,
-                    **_snapshot_people(ticket, body.updates),
+                await apply_transition(
+                    db, ticket,
+                    to_state=body.updates.state,
+                    operator=user,
+                    reason=body.updates.reason,
+                    owner_id=body.updates.owner_id,
+                    dispatcher_id=body.updates.dispatcher_id,
+                    hold_until=body.updates.hold_until,
                 )
-                db.add(log)
-                ticket.state = to_state
-                # has_returned 跟随"最新一次动作"同步
-                ticket.has_returned = (from_state, to_state) in RETURN_TRANSITIONS
             except StateTransitionError:
                 continue  # skip invalid transitions
         updated += 1
