@@ -212,13 +212,9 @@ async def test_dispatch_pending_to_open(env):
     assert last.duration_minutes is not None
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="[已知 BUG·Phase 2 修复] first_owner_id 在 body.owner_id 应用之前取值，"
-           "记成了操作人(对接人/admin)而不是被指派的首任处理人。"
-           "语义见 docs/07_requirements_supplement.md:42 与 PPT_Part1:138「first_owner=王工」。",
-)
 async def test_dispatch_records_first_owner_as_assigned_handler(env):
+    """first_owner = 被指派的首任处理人（语义见 docs/07_requirements_supplement.md:42、
+    PPT_Part1:138「first_owner=王工」）。Phase 2 起由 apply_transition 收口保证。"""
     t = await env["create_ticket"]()
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "open", "owner_id": env["handler_id"],

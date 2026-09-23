@@ -27,64 +27,15 @@ from app.schemas.ticket import (
     TicketUpdate,
     DuplicateWarning,
 )
-from app.services.state_machine import validate_transition
+from app.services.state_machine import (
+    RETURN_TRANSITIONS,
+    apply_transition,
+    enforce_business_constraints as _enforce_business_constraints,
+    snapshot_people as _snapshot_people,
+    validate_transition,
+)
 
 router = APIRouter(tags=["tickets"])
-
-# Chinese labels for states
-STATE_LABELS = {
-    "pending": "待受理", "open": "处理中", "resolved": "已处理",
-    "on_hold": "暂缓处理", "returned": "退回",
-    "archived": "已归档", "cancelled": "已撤销",
-}
-
-
-# 哪些状态转换算"退回"动作，写完 state_log 后用来同步 has_returned
-# - (pending, returned): 客户/客服 退回给创建人
-# - (open, pending):     处理人退回给团队负责人（重新分派）
-RETURN_TRANSITIONS: set[tuple[str, str]] = {
-    ("pending", "returned"),
-    ("open", "pending"),
-}
-
-
-def _snapshot_people(ticket: Ticket, body=None) -> dict:
-    """写入 state_log 时的人员快照：进入新状态那一刻工单上的创建者/对接人/处理人。
-
-    body 字段优先（代表正在应用的新值），未提供则回退到 ticket 当前值。
-    - creator_id 永不变，直接取 ticket
-    - dispatcher / owner：resubmit / 重新指派等场景下 body 会带新值
-    - body 可能是 TicketCreate（无 owner_id 字段）或 TicketUpdate，用 getattr 兜底，
-      避免直接属性访问抛 AttributeError
-    """
-    dispatcher_id = getattr(body, "dispatcher_id", None) if body is not None else None
-    owner_id = getattr(body, "owner_id", None) if body is not None else None
-    return {
-        "creator_id_snapshot": ticket.creator_id,
-        "dispatcher_id_snapshot": dispatcher_id if dispatcher_id is not None else ticket.dispatcher_id,
-        "owner_id_snapshot": owner_id if owner_id is not None else ticket.owner_id,
-    }
-
-
-def _enforce_business_constraints(ticket: Ticket, target_state: str) -> str:
-    """业务约束：已处理工单不允许直接退回到 on_hold（暂停位）。
-
-    退回 resolved 工单的目标若为 on_hold，自动改写为 open。
-    原因：on_hold 是暂停位，没人主动 unpause 就一直卡着；客服本意是
-    "打回让处理人重做"，open 才是直接去处。
-
-    改写对权限无影响（resolved→open 和 resolved→on_hold 的权限规则一致，
-    都是 creator/agent 可操作）。
-    """
-    if ticket.state == "resolved" and target_state == "on_hold":
-        import logging
-        ticket_id = getattr(ticket, "id", None)
-        logging.getLogger(__name__).warning(
-            f"[resolved→on_hold rewrite] ticket_id={ticket_id} "
-            f"requested=on_hold → effective=open"
-        )
-        return "open"
-    return target_state
 
 
 def _ticket_to_brief(t: Ticket, terminal_ops: dict | None = None) -> TicketBrief:
@@ -204,21 +155,6 @@ async def _calculate_sla_deadline(
     return datetime.now(timezone.utc) + timedelta(minutes=minutes)
 
 
-async def _is_dispatcher(db: AsyncSession, user_id: int, skill_group_id: int | None) -> bool:
-    """检查用户是否为某对接部门的部门对接人。"""
-    if not skill_group_id:
-        return False
-    from app.models.group import UserSkillGroup
-    result = await db.execute(
-        select(UserSkillGroup).where(
-            UserSkillGroup.user_id == user_id,
-            UserSkillGroup.skill_group_id == skill_group_id,
-            UserSkillGroup.is_dispatcher == True,
-        )
-    )
-    return result.scalar_one_or_none() is not None
-
-
 async def _is_dispatcher_anywhere(db: AsyncSession, user_id: int) -> bool:
     """检查用户是否为任意对接部门的部门对接人（用于列表可见性判断）。"""
     from app.models.group import UserSkillGroup
@@ -270,78 +206,8 @@ async def _get_terminal_operators(
     return result
 
 
-async def check_transition_permission(db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None):
-    """校验当前用户是否有权执行该状态变更。
-
-    权限矩阵：
-      pending→open（分派）: 部门对接人 / admin
-      open→resolved / on_hold, on_hold→resolved: 处理人（owner）/ admin
-      pending/open/on_hold/resolved→cancelled（撤销）: 创建者 / 部门对接人 / admin
-      resolved→archived（归档）: 客服团队(agent) / admin
-      退回：
-        pending→returned: 部门对接人 / admin
-        open→pending: 处理人（owner）/ admin
-        on_hold→open: 处理人（owner）/ admin
-        resolved→open/on_hold: 处理人（owner）/ admin
-      returned→pending/cancelled: 创建者 / admin
-    """
-    from app.core.exceptions import ForbiddenError
-    if user.role == "admin":
-        return  # admin 全权限
-
-    from_state = ticket.state
-
-    # 分派：部门对接人
-    if from_state == "pending" and to_state == "open":
-        if not await _is_dispatcher(db, user.id, ticket.skill_group_id):
-            raise ForbiddenError("只有该部门的对接人可分派工单")
-        # 分派时必须指定处理人
-        if not owner_id:
-            raise HTTPException(422, detail="分派时必须指定处理人")
-        return
-
-    # 处理人操作：已处理 / 暂缓 / 确认 / 退回上一状态
-    if (from_state, to_state) in [
-        ("open", "resolved"), ("open", "on_hold"), ("on_hold", "resolved"),
-        ("open", "pending"), ("on_hold", "open"),
-    ]:
-        if ticket.owner_id != user.id:
-            raise ForbiddenError("只有当前处理人可执行此操作")
-        return
-
-    # 已处理状态退回：业务上已回到客服侧，由创建者或客服团队退回
-    if (from_state, to_state) in [("resolved", "open"), ("resolved", "on_hold")]:
-        if ticket.creator_id == user.id:
-            return
-        if user.role == "agent":
-            return
-        raise ForbiddenError("只有创建者或客服团队可退回已处理工单")
-
-    # 撤销：仅创建者（发起人）
-    if to_state == "cancelled" and from_state in ("pending", "open", "on_hold", "returned"):
-        if ticket.creator_id == user.id:
-            return
-        raise ForbiddenError("只有工单发起人可撤销工单")
-
-    # 客服团队操作：归档
-    if (from_state, to_state) in [("resolved", "archived")]:
-        if user.role != "agent":
-            raise ForbiddenError("只有客服团队可执行归档操作")
-        return
-
-    # 待受理退回：部门对接人 → 已退回，处理人给创建者
-    if from_state == "pending" and to_state == "returned":
-        if await _is_dispatcher(db, user.id, ticket.skill_group_id):
-            return
-        raise ForbiddenError("只有部门对接人可退回待受理工单")
-
-    # 已退回工单：创建者可重新提交或撤销
-    if from_state == "returned" and to_state in ("pending", "cancelled"):
-        if ticket.creator_id == user.id:
-            return
-        raise ForbiddenError("只有创建者可处理已退回工单")
-
-    raise ForbiddenError("无权执行此状态变更")
+# 注：状态流转权限矩阵已收口至 app.services.state_machine.check_transition_permission
+# （apply_transition 的第 3 步统一执行），路由层不再自行实现权限判断。
 
 
 @router.get("/tickets")
@@ -1063,94 +929,18 @@ async def update_ticket(
     if not ticket:
         raise NotFoundError("工单", ticket_id)
 
-    now = datetime.now(timezone.utc)
-
-    # State transition
+    # State transition — 唯一执行入口：校验/权限/reason/副作用/Flow Log 全部收口
+    # （业务约束改写、resolved→on_hold 兜底等见 app.services.state_machine.apply_transition）
     if body.state is not None and body.state != ticket.state:
-        # 业务约束：resolved → on_hold 自动改写为 resolved → open
-        # （前端按钮走的是 resolveReturnTarget 算出的目标，此处是兜底，
-        #  防非前端路径误发"把已处理工单退回暂缓"）
-        body = body.model_copy(update={"state": _enforce_business_constraints(ticket, body.state)})
-
-        validate_transition(ticket.state, body.state)
-
-        # 权限校验：不同操作限定不同角色
-        await check_transition_permission(db, ticket, body.state, user, body.owner_id)
-
-        from app.services.state_machine import requires_reason
-        if requires_reason(ticket.state, body.state) and not body.reason:
-            raise HTTPException(400, detail=f"从「{STATE_LABELS.get(ticket.state, ticket.state)}」变更为「{STATE_LABELS.get(body.state, body.state)}」需要填写原因")
-
-        old_state = ticket.state
-
-        # 先把"新状态"的人员字段调整到 ticket 上（owner/dsp 等），再写 state_log 取快照
-        # 注意：state-based 副作用和 body 字段都在这里应用，body 中显式提供的字段优先
-        if body.state == "open":
-            if old_state == "pending":
-                # 分派处理人：pending→open 时由对接人指定 owner_id
-                ticket.first_owner_id = ticket.owner_id or user.id
-            elif old_state == "returned":
-                # 已退回工单重新提交：保持无处理人，等待再次分派
-                ticket.returned_to_user_id = None
-        elif body.state == "pending":
-            # open→pending 退回 或 returned→pending 重新提交：待受理无处理人
-            if old_state in ("open", "returned"):
-                ticket.owner_id = None
-                ticket.returned_to_user_id = None
-        elif body.state == "on_hold":
-            # on_hold←open（暂缓）/ on_hold←resolved（退回）：处理人保持不变
-            # TODO(sla-policy): SLA 策略未定，暂不在进/出 on_hold 时调整 solution_deadline
-            pass
-        elif body.state == "resolved":
-            ticket.solved_at = now
-            ticket.resolved = True
-            if ticket.solution_deadline and now > ticket.solution_deadline:
-                ticket.sla_solution_breached = True
-        elif body.state == "returned":
-            # 仅 pending→returned：分配给创建工单的客服人员
-            if old_state == "pending":
-                ticket.returned_to_user_id = ticket.creator_id
-                ticket.owner_id = ticket.creator_id
-        elif body.state in ("archived", "cancelled"):
-            # 终态：记录结案时间
-            ticket.closed_at = now
-            if ticket.created_at:
-                ticket.closed_duration_minutes = int((now - ticket.created_at).total_seconds() / 60)
-
-        # 应用 body 中显式提供的人员/部门字段（覆盖上面的副作用）
-        if body.owner_id is not None:
-            ticket.owner_id = body.owner_id
-        if body.dispatcher_id is not None:
-            ticket.dispatcher_id = body.dispatcher_id
-
-        # 暂缓：存 hold_until
-        if body.state == "on_hold" and body.hold_until:
-            from datetime import datetime as dt
-            ticket.hold_until = dt.fromisoformat(body.hold_until).replace(tzinfo=timezone.utc)
-
-        # has_returned 跟随"最新一次动作"：本次转换属于 RETURN_TRANSITIONS 才置 true
-        ticket.has_returned = (old_state, body.state) in RETURN_TRANSITIONS
-        ticket.state = body.state
-
-        # Calculate duration in old state
-        last_log = await db.execute(
-            select(TicketStateLog)
-            .where(TicketStateLog.ticket_id == ticket_id)
-            .order_by(TicketStateLog.created_at.desc()).limit(1)
+        await apply_transition(
+            db, ticket,
+            to_state=body.state,
+            operator=user,
+            reason=body.reason,
+            owner_id=body.owner_id,
+            dispatcher_id=body.dispatcher_id,
+            hold_until=body.hold_until,
         )
-        last = last_log.scalar_one_or_none()
-        duration = None
-        if last:
-            duration = int((now - last.created_at).total_seconds() / 60)
-
-        # Record state log（快照此时 ticket 已是"新状态"下的人员值）
-        log = TicketStateLog(
-            ticket_id=ticket.id, from_state=old_state, to_state=body.state,
-            operator_id=user.id, reason=body.reason, duration_minutes=duration,
-            **_snapshot_people(ticket, body),
-        )
-        db.add(log)
-        # 注：has_returned 已在写 state_log 处按 RETURN_TRANSITIONS 同步，此处不再覆盖
     if body.archive_notes is not None:
         ticket.archive_notes = body.archive_notes
     if body.is_callbacked is not None:
