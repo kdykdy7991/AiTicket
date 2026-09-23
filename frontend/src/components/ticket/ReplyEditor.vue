@@ -161,9 +161,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useTicketStore } from '@/stores/ticket'
-import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
-import type { Article, ArticleCreatePayload, TicketDetail } from '@/types'
+import type { Article, ArticleCreatePayload, TicketDetail, AllowedAction } from '@/types'
 
 const props = defineProps<{
   ticket: TicketDetail
@@ -172,7 +171,6 @@ const props = defineProps<{
 const emit = defineEmits<{ submitted: [] }>()
 
 const ticketStore = useTicketStore()
-const authStore = useAuthStore()
 const activeTab = ref<'reply' | 'addition' | 'reminder'>('reply')
 const body = ref('')
 const appendReason = ref('')
@@ -182,17 +180,20 @@ const attachmentFiles = ref<File[]>([])
 const previewUrls = ref<string[]>([])
 
 const currentStateKey = computed(() => (props.ticket as any).state_key || '')
-const allowedAdditionStates = ['pending', 'open', 'on_hold']
-const replyAllowedStates = ['open', 'on_hold']
-const reminderAllowedStates = ['pending', 'open', 'on_hold']
 
-const currentUserId = computed(() => (authStore.user as any)?.id)
-const isOwner = computed(() => (props.ticket as any).owner_id === currentUserId.value)
+// ── V0.86：能力位/动作全部来自后端详情接口（唯一事实来源）──
+// 后端按 articles 端点同一份规则生成 can_*；hold 等状态动作用 allowed_actions。
+const canReply = computed(() => (props.ticket as any).can_reply === true)
+const canAppend = computed(() => (props.ticket as any).can_addition === true)
+const canRemind = computed(() => (props.ticket as any).can_remind === true)
 
-// 是否具备提交处理说明权限：当前处理人，且工单处于处理中/暂缓
-const canReply = computed(() =>
-  isOwner.value && replyAllowedStates.includes(currentStateKey.value)
+const allowedActions = computed<AllowedAction[]>(
+  () => (props.ticket as any).allowed_actions ?? [],
 )
+const holdAction = computed<AllowedAction | undefined>(
+  () => allowedActions.value.find(a => a.action === 'hold'),
+)
+const canHold = computed(() => !!holdAction.value)
 
 // 当前状态对应的状态日志节点 id（后端用 state_log id 作为处理说明的 state_key）
 const currentStateLogId = computed(() => {
@@ -204,23 +205,6 @@ const currentStateLogId = computed(() => {
 // 是否已存在处理说明（当前状态下已有 reply）
 const hasSummary = computed(() =>
   props.articles.some(a => a.type === 'reply' && a.state_key === currentStateLogId.value)
-)
-
-// 是否具备追加权限：admin / agent，且工单状态在已处理之前
-const canAppend = computed(() =>
-  authStore.isAgent && allowedAdditionStates.includes(currentStateKey.value)
-)
-
-// 是否具备催办权限：客服团队（admin / agent），且工单处于待受理/处理中/暂缓，且未催办过
-const canRemind = computed(() =>
-  authStore.isAgent &&
-  reminderAllowedStates.includes(currentStateKey.value) &&
-  !(props.ticket as any).urged_at
-)
-
-// 是否可暂缓处理：当前处理人，且工单处于处理中
-const canHold = computed(() =>
-  isOwner.value && currentStateKey.value === 'open'
 )
 
 const inputDisabled = computed(() =>
@@ -376,7 +360,7 @@ async function confirmHold() {
   holding.value = true
   try {
     await ticketStore.updateTicket((props.ticket as any).id, {
-      state: 'on_hold',
+      state: holdAction.value?.target_state || 'on_hold',
       reason: holdReason.value.trim(),
     } as any)
     ElMessage.success('工单已暂缓')

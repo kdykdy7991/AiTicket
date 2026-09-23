@@ -129,6 +129,15 @@ export interface TicketPriority {
 
 export type TicketChannel = 'web' | 'email' | 'phone' | 'wechat' | 'app'
 
+/** V0.86：后端生成的状态动作元数据（详情接口 allowed_actions，前端按钮唯一渲染依据） */
+export interface AllowedAction {
+  action: string             // dispatch/return/cancel/resolve/hold/resume/reopen/resubmit/archive
+  target_state: string       // 执行后的目标状态（已含后端业务约束改写）
+  requires_reason: boolean   // 必须填写原因
+  requires_owner: boolean    // 前置要求：分派时先选择处理人
+  label: string              // 中文按钮文案
+}
+
 export interface Ticket {
   id: number
   number: string | null
@@ -179,6 +188,12 @@ export interface Ticket {
   archived_by_name?: string | null
   cancelled_by_id?: number | null
   cancelled_by_name?: string | null
+  // —— V0.86 后端动作/能力元数据（仅详情接口返回；前端不再自算业务规则）——
+  allowed_actions?: AllowedAction[]
+  is_terminal?: boolean
+  can_reply?: boolean
+  can_addition?: boolean
+  can_remind?: boolean
 }
 
 export interface ArticleAttachment {

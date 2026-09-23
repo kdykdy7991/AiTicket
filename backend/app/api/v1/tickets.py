@@ -29,6 +29,7 @@ from app.schemas.ticket import (
 )
 from app.services.state_machine import (
     TERMINAL_STATES,
+    action_for,
     apply_initial_state,
     apply_transition,
     compute_allowed_actions,
@@ -1114,8 +1115,9 @@ async def get_state_logs(
             "owner_name_snapshot": _name(log.owner_id_snapshot),
             "reason": log.reason, "duration_minutes": log.duration_minutes,
             # 动作类型：create/dispatch/hold/resume/resolve/reopen/return/
-            # resubmit/archive/cancel/instant_resolve（历史日志为 null）
-            "action_type": log.action_type,
+            # resubmit/archive/cancel/instant_resolve。
+            # 历史日志列值为 null 时按真实流转表推导（前端不再自算流转规则）
+            "action_type": log.action_type or action_for(log.from_state, log.to_state),
             "created_at": log.created_at.isoformat() if log.created_at else None,
         })
     return {"data": data}

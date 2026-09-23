@@ -43,26 +43,6 @@ export const PRIORITY_ID_TO_KEY: Record<number, string> = {
   1: 'p1_urgent', 2: 'p2_high', 3: 'p3_normal', 4: 'p4_enterprise',
 }
 
-/** 判断是否为退回/回退类流转（目标状态比源状态更靠前） */
-function isReturnTransition(fromState: string | undefined | null, toState: string | undefined | null): boolean {
-  if (!fromState || !toState) return false
-  // 按工单流程顺序定义状态权重：越靠前数值越小
-  const order: Record<string, number> = {
-    returned: 0,
-    pending: 1,
-    open: 2,
-    on_hold: 2.5,
-    resolved: 3,
-    archived: 4,
-    cancelled: 4,
-  }
-  const fromOrder = order[fromState]
-  const toOrder = order[toState]
-  if (fromOrder == null || toOrder == null) return false
-  // 目标状态权重小于源状态权重，即回退
-  return toOrder < fromOrder
-}
-
 /** 后端状态日志数组 → 前端 StateLogTimeline 期望的结构
  *  后端每条日志：{ from_state, to_state, operator_id, operator_name, reason, duration_minutes, created_at }
  *  组件期望：{ from_state, to_state, changed_by, entered_at, left_at, duration_seconds }
@@ -96,7 +76,9 @@ function adaptStateLogs(logs: any[]): any[] {
       left_at: leftAt,
       duration_seconds: durationSeconds,
       reason: log.reason,
-      is_return: isReturnTransition(fromKey, toKey),
+      // 是否"退回类"动作：由后端 Flow Log 的 action_type 决定（唯一事实来源）。
+      // return=退回/打回，reopen=已处理退回重开；resume(恢复处理) 不算退回。
+      is_return: ['return', 'reopen'].includes(log.action_type || ''),
       // 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人
       creator_id_snapshot: log.creator_id_snapshot ?? null,
       creator_name_snapshot: log.creator_name_snapshot ?? null,

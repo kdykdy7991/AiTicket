@@ -158,7 +158,7 @@
 
           <ArticleTimeline :articles="ticket.articles" />
           <ReplyEditor
-            v-if="!isTerminalState && currentStateKey !== 'returned'"
+            v-if="!isTerminalState && (ticket.can_reply || ticket.can_addition || ticket.can_remind)"
             :ticket="ticket"
             :articles="ticket.articles"
             @submitted="onRefresh"
@@ -201,10 +201,9 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
-import { useAuthStore } from '@/stores/auth'
 import { metaApi } from '@/api/overviews'
 import { ElMessage } from 'element-plus'
-import type { Group } from '@/types'
+import type { Group, AllowedAction } from '@/types'
 import StateTag from '@/components/common/StateTag.vue'
 import ArticleTimeline from '@/components/ticket/ArticleTimeline.vue'
 import ReplyEditor from '@/components/ticket/ReplyEditor.vue'
@@ -214,71 +213,35 @@ import StateLogTimeline from '@/components/ticket/StateLogTimeline.vue'
 const route = useRoute()
 const router = useRouter()
 const ticketStore = useTicketStore()
-const authStore = useAuthStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
 
-const TERMINAL_STATES = new Set(['archived', 'cancelled'])
-const isTerminalState = computed(() => {
-  const key = (ticket.value as any)?.state_key || ''
-  return TERMINAL_STATES.has(key)
-})
+// ── V0.86：所有按钮可见性来自后端 allowed_actions（唯一事实来源）──
+// 后端按 TRANSITIONS + 权限矩阵 + requires_reason + 业务约束改写生成；
+// 前端只做渲染与取 target_state，不再自行判断状态/角色/人员规则。
+const allowedActions = computed<AllowedAction[]>(
+  () => (ticket.value as any)?.allowed_actions ?? [],
+)
+const findAction = (name: string): AllowedAction | undefined =>
+  allowedActions.value.find(a => a.action === name)
 
-const currentStateKey = computed(() => (ticket.value as any)?.state_key || '')
-const currentUserId = computed(() => (authStore.user as any)?.id)
+const isTerminalState = computed(() => (ticket.value as any)?.is_terminal ?? false)
 
-// 是否显示「指派处理人」入口：待受理 + 部门对接人（或 admin）
-const canDispatch = computed(() => {
-  if (currentStateKey.value !== 'pending') return false
-  const t = ticket.value as any
-  if (!t) return false
-  if (authStore.isAdmin) return true
-  return t.dispatcher_id === currentUserId.value
-})
+// 显示「指派处理人」卡片：后端允许 dispatch（对接人/admin + 目标状态由后端给出）
+const canDispatch = computed(() => !!findAction('dispatch'))
 
-// 状态操作权限
-const canReturn = computed(() => {
-  const t = ticket.value as any
-  if (!t) return false
-  const state = currentStateKey.value
-  if (authStore.isAdmin) return ['pending', 'open', 'on_hold', 'resolved'].includes(state)
-  if (state === 'pending') {
-    return t.dispatcher_id === currentUserId.value
-  }
-  if (state === 'open' || state === 'on_hold') {
-    return t.owner_id === currentUserId.value
-  }
-  if (state === 'resolved') {
-    // 已处理状态业务上已回到客服侧，创建者或客服均可退回
-    return t.creator_id === currentUserId.value || authStore.isAgent
-  }
-  return false
-})
+// 顶部「退回」按钮承载三种后端动作：
+//   return  —— pending→returned / open→pending（打回）
+//   reopen  —— resolved→open（已处理退回重开）
+//   resume  —— on_hold→open（恢复处理，沿用原退回弹窗与原因必填）
+const returnAction = computed<AllowedAction | undefined>(
+  () => findAction('return') || findAction('reopen') || findAction('resume'),
+)
+const canReturn = computed(() => !!returnAction.value)
 
-const canCancel = computed(() => {
-  const t = ticket.value as any
-  if (!t) return false
-  const state = currentStateKey.value
-  if (!['pending', 'open', 'on_hold', 'returned'].includes(state)) return false
-  if (authStore.isAdmin) return true
-  // 只有工单发起人（创建者）可撤销
-  return t.creator_id === currentUserId.value
-})
-
-const canArchiveFromResolved = computed(() => {
-  const t = ticket.value as any
-  if (!t) return false
-  if (currentStateKey.value !== 'resolved') return false
-  return authStore.isAdmin || authStore.isAgent
-})
-
-const canResubmit = computed(() => {
-  const t = ticket.value as any
-  if (!t) return false
-  if (currentStateKey.value !== 'returned') return false
-  if (authStore.isAdmin) return true
-  return t.creator_id === currentUserId.value
-})
+const canCancel = computed(() => !!findAction('cancel'))
+const canArchiveFromResolved = computed(() => !!findAction('archive'))
+const canResubmit = computed(() => !!findAction('resubmit'))
 
 async function loadTicket() {
   const id = Number(route.params.id)
@@ -330,7 +293,7 @@ async function confirmDispatch() {
   dispatching.value = true
   try {
     await ticketStore.updateTicket((ticket.value as any).id, {
-      state: 'open',
+      state: findAction('dispatch')?.target_state || 'open',
       owner_id: dispatchOwnerId.value,
     } as any)
     ElMessage.success('已指派处理人')
@@ -382,7 +345,7 @@ async function submitArchive() {
   archiving.value = true
   try {
     await ticketStore.updateTicket(t.id, {
-      state: 'archived',
+      state: findAction('archive')?.target_state || 'archived',
       archive_notes: archiveNotes.value.trim(),
       callback_required: callBacked,  // 已回访→true(需要回访已落实)；无需回访→false
       is_callbacked: callBacked,
@@ -471,7 +434,7 @@ async function submitResubmit() {
       })
     }
     await ticketStore.updateTicket(t.id, {
-      state: 'pending',
+      state: findAction('resubmit')?.target_state || 'pending',
       skill_group_id: resubmitSkillGroupId.value,
       dispatcher_id: resubmitDispatcherId.value,
       reason,
@@ -492,42 +455,21 @@ function openReturnDialog() {
   returnDialogVisible.value = true
 }
 
-// 根据当前状态确定退回目标状态
-// 约束：resolved → on_hold 不允许（on_hold 是暂停位，回退后无人 unpause
-// 就会卡住）。如果上一步是 on_hold，跳过它，退回到进入 on_hold 之前的状态。
-// 后端 _enforce_business_constraints 也会兜底做相同改写，防非前端路径绕过。
-function resolveReturnTarget(): string {
-  const state = currentStateKey.value
-  if (state === 'pending') return 'returned'
-  if (state === 'open') return 'pending'
-  if (state === 'on_hold') return 'open'
-  if (state === 'resolved') {
-    const logs: any[] = (ticket.value as any)?.state_logs || []
-    // 倒序找最近一次进入 resolved 的 log
-    const resolvedLog = [...logs].reverse().find((l: any) => l.to_state_key === 'resolved')
-    let target = resolvedLog?.from_state_key
-    // 如果上一步是 on_hold，跳过它，找"进入 on_hold 之前"的状态
-    if (target === 'on_hold' && resolvedLog) {
-      const onHoldLog = [...logs].reverse().find(
-        (l: any) => l.to_state_key === 'on_hold' && l.created_at < resolvedLog.created_at
-      )
-      target = onHoldLog?.from_state_key
-    }
-    return target || 'open'
-  }
-  return state
-}
-
 async function confirmReturn() {
   if (!returnReason.value.trim()) {
     ElMessage.warning('请填写退回原因')
     return
   }
+  const action = returnAction.value
+  if (!action) {
+    ElMessage.warning('当前状态不允许退回')
+    return
+  }
   returning.value = true
   try {
-    const targetState = resolveReturnTarget()
+    // 目标状态由后端 allowed_actions 给出（含 resolved→on_hold→open 业务约束改写）
     await ticketStore.updateTicket((ticket.value as any).id, {
-      state: targetState,
+      state: action.target_state,
       reason: returnReason.value.trim(),
     } as any)
     ElMessage.success('工单已退回')
@@ -555,7 +497,7 @@ async function confirmCancel() {
   cancelling.value = true
   try {
     await ticketStore.updateTicket((ticket.value as any).id, {
-      state: 'cancelled',
+      state: findAction('cancel')?.target_state || 'cancelled',
       reason: cancelReason.value.trim(),
     } as any)
     ElMessage.success('工单已撤销')

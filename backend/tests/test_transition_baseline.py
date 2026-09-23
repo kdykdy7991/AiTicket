@@ -711,7 +711,7 @@ async def test_state_logs_endpoint_exposes_action_type(env):
 
 
 async def test_action_type_nullable_for_history(env):
-    """历史日志（迁移前）没有 action_type：保持 NULL，可正常读取。"""
+    """历史日志（迁移前）没有 action_type：DB 保持 NULL；接口按流转表推导兜底。"""
     t = await env["create_ticket"]()
     factory = async_sessionmaker(env["engine"], class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
@@ -723,7 +723,11 @@ async def test_action_type_nullable_for_history(env):
         ))
         await s.commit()
     logs = await db_logs(env, t["id"])
-    assert logs[-1].action_type is None
+    assert logs[-1].action_type is None            # 列值仍为 NULL（不回填）
+    # 接口层兜底：由 action_for(from,to) 推导，前端不再自算流转规则
+    r = await env["client"].get(f"/api/v1/tickets/{t['id']}/state-logs")
+    entries = r.json()["data"]
+    assert entries[-1]["action_type"] == "resolve"
 
 
 # ── 13. allowed_actions / 能力位（Phase 6 后端唯一事实来源） ──
