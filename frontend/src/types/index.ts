@@ -175,6 +175,8 @@ export interface Ticket {
   archive_notes: string | null
   is_callbacked: boolean
   callback_required?: boolean  // 是否需要回访（false=无需回访）；仅详情接口返回
+  callback_details?: string | null  // 回访详情/不满意原因（V0.86 贯通）
+  satisfaction?: string | null      // 满意度：satisfied/average/dissatisfied/unrated
   // 催办
   urged_at: string | null
   urged_by: User | null

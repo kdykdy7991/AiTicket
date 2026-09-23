@@ -147,6 +147,17 @@ URGE_ALLOWED_STATES = {"pending", "open", "on_hold"}
 URGE_ALLOWED_ROLES = {"admin", "agent"}
 
 
+def transition_precondition_error(ticket: Ticket, to_state: str) -> str | None:
+    """状态无关的业务前置校验（领域闭环规则）。
+
+    执行入口（apply_transition）与动作生成（compute_allowed_actions）共用，
+    保证"按钮可见性"与"执行结果"永远一致。返回 None 表示无前置约束。
+    """
+    if to_state == "archived" and ticket.satisfaction == "dissatisfied":
+        return "客户满意度为「不满意」，需退回重新处理并完成回访后才能归档"
+    return None
+
+
 async def compute_allowed_actions(
     db: AsyncSession, ticket: Ticket, user: User
 ) -> list[dict]:
@@ -169,6 +180,8 @@ async def compute_allowed_actions(
             continue
         if await transition_permission_error(db, ticket, effective, user) is not None:
             continue
+        if transition_precondition_error(ticket, effective) is not None:
+            continue   # 业务前置未满足（如 dissatisfied 不可归档）→ 不出按钮
         seen.add((action, effective))
         actions.append({
             "action": action,
@@ -429,10 +442,11 @@ async def apply_transition(
       2. validate_transition（合法性）
       3. check_transition_permission（角色/身份权限 + 分派须指定处理人）
       4. requires_reason（退回/暂缓/撤销必须填原因）
-      5. 状态副作用（first_owner/solved_at/resolved/SLA breach/owner 清理/
+      5. transition_precondition_error（业务前置校验：如 dissatisfied 不可归档）
+      6. 状态副作用（first_owner/solved_at/resolved/SLA breach/owner 清理/
          returned_to_user/closed_at/closed_duration_minutes/hold_until）
-      6. 应用调用方给出的人员字段（显式值优先于副作用）
-      7. has_returned 同步 + 写 Flow Log（含上一状态停留时长与人员快照）
+      7. 应用调用方给出的人员字段（显式值优先于副作用）
+      8. has_returned 同步 + 写 Flow Log（含上一状态停留时长与人员快照、action_type）
 
     返回写入的 TicketStateLog；to_state 与当前状态相同（no-op）时返回 None。
     不负责 commit——由调用方按各自的请求边界提交。
@@ -458,10 +472,15 @@ async def apply_transition(
             ),
         )
 
+    # 5. 业务前置校验（客户闭环规则，与 allowed_actions 同一份判定）
+    precondition = transition_precondition_error(ticket, to_state)
+    if precondition is not None:
+        raise HTTPException(422, detail=precondition)
+
     old_state = ticket.state
     now = datetime.now(timezone.utc)
 
-    # 5. 状态副作用
+    # 6. 状态副作用
     if to_state == "open":
         if old_state == "pending":
             # 分派处理人：pending→open 时由对接人指定 owner_id；
@@ -495,7 +514,7 @@ async def apply_transition(
         if ticket.created_at:
             ticket.closed_duration_minutes = int((now - ticket.created_at).total_seconds() / 60)
 
-    # 6. 显式人员字段（覆盖副作用，与原 PATCH 语义一致）
+    # 7. 显式人员字段（覆盖副作用，与原 PATCH 语义一致）
     if owner_id is not None:
         ticket.owner_id = owner_id
     if dispatcher_id is not None:

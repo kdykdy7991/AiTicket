@@ -940,20 +940,14 @@ async def update_ticket(
     if not ticket:
         raise NotFoundError("工单", ticket_id)
 
-    # State transition — 唯一执行入口：校验/权限/reason/副作用/Flow Log 全部收口
-    # （业务约束改写、resolved→on_hold 兜底等见 app.services.state_machine.apply_transition）
-    if body.state is not None and body.state != ticket.state:
-        await apply_transition(
-            db, ticket,
-            to_state=body.state,
-            operator=user,
-            reason=body.reason,
-            owner_id=body.owner_id,
-            dispatcher_id=body.dispatcher_id,
-            hold_until=body.hold_until,
-        )
+    # 回访/归档闭环字段先于状态流转应用：apply_transition 的归档前置校验
+    # （satisfaction=dissatisfied 不得归档）必须基于同一请求中"应用后"的
+    # 最终值判定，否则 state+满意度同发会绕过规则。
     if body.archive_notes is not None:
         ticket.archive_notes = body.archive_notes
+    if body.callback_details is not None:
+        # 回访详情：不满意原因 / 回访记录（V0.86 贯通前后端）
+        ticket.callback_details = body.callback_details
     if body.is_callbacked is not None:
         ticket.is_callbacked = body.is_callbacked
         # 未回访时清空满意度；避免历史脏数据
@@ -973,6 +967,19 @@ async def update_ticket(
         if ticket.is_callbacked is False:
             raise HTTPException(422, detail="未回访工单不能设置满意度")
         ticket.satisfaction = body.satisfaction
+
+    # State transition — 唯一执行入口：校验/权限/reason/前置校验/副作用/Flow Log 收口
+    # （业务约束改写、resolved→on_hold 兜底、归档闭环校验见 state_machine.apply_transition）
+    if body.state is not None and body.state != ticket.state:
+        await apply_transition(
+            db, ticket,
+            to_state=body.state,
+            operator=user,
+            reason=body.reason,
+            owner_id=body.owner_id,
+            dispatcher_id=body.dispatcher_id,
+            hold_until=body.hold_until,
+        )
     if body.priority is not None:
         ticket.priority = body.priority
         # Recalculate SLA deadline (creation → resolved)

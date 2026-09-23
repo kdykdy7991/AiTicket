@@ -113,14 +113,29 @@
                 <el-radio :label="'dissatisfied'">不满意</el-radio>
                 <el-radio :label="'unrated'">未评价</el-radio>
               </el-radio-group>
+              <!-- 回访详情（不满意原因为其中必填场景），后端 callback_details 字段 -->
+              <el-input
+                v-if="callbackChoice === 'call_backed'"
+                v-model="callbackDetails"
+                type="textarea"
+                :rows="2"
+                :placeholder="satisfaction === 'dissatisfied' ? '请填写客户不满意原因 / 回访记录（必填）' : '回访详情 / 客户反馈（可选）'"
+                maxlength="500"
+                show-word-limit
+              />
+              <!-- 闭环规则：不满意不能直接归档（后端 enforced + allowed_actions 不下发） -->
+              <p v-if="callbackChoice === 'call_backed' && satisfaction === 'dissatisfied'" class="dissatisfied-hint">
+                客户不满意不能直接归档。点击「保存回访结果」记录后，请通过顶部「退回」让处理人重新处理，
+                处理完成并再次回访后才能归档。
+              </p>
               <div class="archive-actions">
                 <el-button
                   type="success"
                   :loading="archiving"
-                  :disabled="callbackChoice === 'call_backed' && !satisfaction"
+                  :disabled="archiveDisabled"
                   @click="submitArchive"
                 >
-                  归档
+                  {{ satisfaction === 'dissatisfied' && callbackChoice === 'call_backed' ? '保存回访结果' : '归档' }}
                 </el-button>
               </div>
             </div>
@@ -325,33 +340,62 @@ const archiveNotes = ref('')
 // 回访选择：'call_backed'=已回访（is_callbacked=true），'no_need'=无需回访（callback_required=false）
 const callbackChoice = ref<'call_backed' | 'no_need'>('no_need')
 const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | 'unrated' | ''>('')
+// 回访详情（不满意原因）：后端 callback_details 字段，不满意时必填
+const callbackDetails = ref('')
+
+// 归档按钮禁用条件：已回访必须选满意度；不满意必须填写回访详情
+const archiveDisabled = computed(() => {
+  if (callbackChoice.value === 'call_backed' && !satisfaction.value) return true
+  if (
+    callbackChoice.value === 'call_backed'
+    && satisfaction.value === 'dissatisfied'
+    && !callbackDetails.value.trim()
+  ) return true
+  return false
+})
 
 watch(canArchiveFromResolved, (visible) => {
   if (!visible) {
     archiveNotes.value = ''
     callbackChoice.value = 'no_need'
     satisfaction.value = ''
+    callbackDetails.value = ''
   } else {
     const t = ticket.value as any
     archiveNotes.value = t?.archive_notes || ''
     callbackChoice.value = t?.is_callbacked ? 'call_backed' : 'no_need'
     satisfaction.value = t?.satisfaction || ''
+    callbackDetails.value = t?.callback_details || ''
   }
 }, { immediate: true })
 
 async function submitArchive() {
   const t = ticket.value as any
   const callBacked = callbackChoice.value === 'call_backed'
+  const isDissatisfied = callBacked && satisfaction.value === 'dissatisfied'
   archiving.value = true
   try {
-    await ticketStore.updateTicket(t.id, {
-      state: findAction('archive')?.target_state || 'archived',
-      archive_notes: archiveNotes.value.trim(),
-      callback_required: callBacked,  // 已回访→true(需要回访已落实)；无需回访→false
-      is_callbacked: callBacked,
-      satisfaction: callBacked ? satisfaction.value : undefined,
-    } as any)
-    ElMessage.success('工单已归档')
+    if (isDissatisfied) {
+      // 闭环规则：不满意不能直接归档 —— 只保存回访结果（含不满意原因），
+      // 保存后后端 allowed_actions 将隐藏归档动作，需通过「退回」重开处理
+      await ticketStore.updateTicket(t.id, {
+        is_callbacked: true,
+        callback_required: true,
+        satisfaction: satisfaction.value,
+        callback_details: callbackDetails.value.trim(),
+      } as any)
+      ElMessage.warning('已记录回访结果：客户不满意，请通过「退回」让处理人重新处理')
+    } else {
+      await ticketStore.updateTicket(t.id, {
+        state: findAction('archive')?.target_state || 'archived',
+        archive_notes: archiveNotes.value.trim(),
+        callback_required: callBacked,  // 已回访→true(需要回访已落实)；无需回访→false
+        is_callbacked: callBacked,
+        satisfaction: callBacked ? satisfaction.value : undefined,
+        callback_details: callBacked ? callbackDetails.value.trim() : undefined,
+      } as any)
+      ElMessage.success('工单已归档')
+    }
     ticketStore.refreshCurrentInList()
     await loadTicket()
   } catch (e: any) {
@@ -753,6 +797,12 @@ async function confirmCancel() {
   color: var(--color-text-tertiary);
   font-size: 12.5px;
   margin-right: 6px;
+}
+.dissatisfied-hint {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #e6a23c;
 }
 
 .header-action-btn {

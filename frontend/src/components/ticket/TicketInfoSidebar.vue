@@ -136,6 +136,26 @@
       </div>
     </div>
 
+    <!-- 回访闭环：是否回访 / 满意度 / 回访详情（callback_details 贯通展示） -->
+    <template v-if="ticket.is_callbacked || ticket.callback_details || ticket.satisfaction">
+      <div class="sidebar-divider" />
+      <div class="sidebar-section">
+        <h4 class="section-title">回访</h4>
+        <div class="info-row">
+          <span class="info-label">状态</span>
+          <span class="info-value">{{ ticket.is_callbacked ? '已回访' : '未回访' }}</span>
+        </div>
+        <div class="info-row" v-if="ticket.satisfaction">
+          <span class="info-label">满意度</span>
+          <span :class="['info-value', `sat-${ticket.satisfaction}`]">{{ satisfactionLabel(ticket.satisfaction) }}</span>
+        </div>
+        <div v-if="ticket.callback_details" class="resolution-block">
+          <div class="resolution-label">回访详情</div>
+          <div class="resolution-body">{{ ticket.callback_details }}</div>
+        </div>
+      </div>
+    </template>
+
     <template v-if="ticket.escalation_at">
       <div class="sidebar-divider" />
       <div class="sidebar-section">
@@ -196,6 +216,13 @@ function channelLabel(c: TicketChannel): string {
     web: 'Web', email: '邮件', phone: '电话', wechat: '微信', app: 'App',
   }
   return map[c]
+}
+
+function satisfactionLabel(v: string): string {
+  const map: Record<string, string> = {
+    satisfied: '满意', average: '一般', dissatisfied: '不满意', unrated: '未评价',
+  }
+  return map[v] || v
 }
 </script>
 
@@ -270,6 +297,11 @@ function channelLabel(c: TicketChannel): string {
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 12.5px;
 }
+/* 回访满意度着色 */
+.info-value.sat-satisfied { color: #67c23a; }
+.info-value.sat-average { color: #e6a23c; }
+.info-value.sat-dissatisfied { color: #f56c6c; font-weight: 600; }
+.info-value.sat-unrated { color: var(--color-text-tertiary); }
 .muted { color: var(--color-text-tertiary); font-weight: 400; }
 .symptom {
   font-size: 12.5px;

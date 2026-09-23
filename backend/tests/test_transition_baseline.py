@@ -863,3 +863,114 @@ async def test_remind_capability_once_only(env):
         data={"type": "reminder", "body": "再催一次"},
     )
     assert r2.status_code == 422
+
+
+# ── 14. 客户回访闭环（Phase 8） ─────────────────────────────
+
+
+async def test_callback_details_roundtrip(env):
+    """callback_details 端到端：PATCH 写入 → 详情/列表读取（不依赖状态流转）。"""
+    t = await env["create_ticket"]()
+    detail_text = "客户反馈：更换的模块仍偶发重启，已记录复现步骤与日志"
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "is_callbacked": True,
+        "callback_required": True,
+        "callback_details": detail_text,
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["callback_details"] == detail_text
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert d["callback_details"] == detail_text
+    tk = await db_ticket(env, t["id"])
+    assert tk.callback_details == detail_text       # 真正落库
+
+
+async def test_dissatisfied_cannot_archive(env):
+    """satisfaction=dissatisfied 不能直接归档：动作不下发 + 执行被 422 拦截。"""
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    await env["resolve"](t["id"])
+
+    # 回访结果：不满意（带不满意原因）
+    r1 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "is_callbacked": True, "callback_required": True,
+        "satisfaction": "dissatisfied",
+        "callback_details": "重启问题仍未解决，客户要求再次上门",
+    })
+    assert r1.status_code == 200, r1.text
+
+    # 详情：archive 动作不再下发，reopen 仍在（正确出口是退回重开）
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    acts = _action_map(d)
+    assert "archive" not in acts, "不满意工单不应下发归档动作"
+    assert "reopen" in acts
+
+    # 直接调归档（绕过 UI）→ 422，状态与日志不变
+    before = len(await db_logs(env, t["id"]))
+    r2 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "archived"})
+    assert r2.status_code == 422, r2.text
+    assert "不满意" in r2.text
+    tk = await db_ticket(env, t["id"])
+    assert tk.state == "resolved"
+    assert len(await db_logs(env, t["id"])) == before
+
+    # 同请求内 state+满意度一起发也不能绕过（闭环字段先于流转应用）
+    t2 = await env["create_ticket"]()
+    await env["dispatch"](t2["id"], env["handler_id"])
+    await env["resolve"](t2["id"])
+    r3 = await env["client"].patch(f"/api/v1/tickets/{t2['id']}", json={
+        "state": "archived", "is_callbacked": True, "satisfaction": "dissatisfied",
+    })
+    assert r3.status_code == 422, r3.text
+    assert (await db_ticket(env, t2["id"])).state == "resolved"
+
+    # 批量归档同样被拦截（执行入口同源）
+    r4 = await env["client"].post("/api/v1/tickets/batch-update", json={
+        "ticket_ids": [t["id"]], "updates": {"state": "archived"},
+    })
+    assert r4.status_code == 422, r4.status_code
+    assert (await db_ticket(env, t["id"])).state == "resolved"
+
+
+async def test_satisfied_can_archive_with_details(env):
+    """满意（或未评价）可正常归档，回访详情保留。"""
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    await env["resolve"](t["id"])
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "archived",
+        "is_callbacked": True, "callback_required": True,
+        "satisfaction": "satisfied",
+        "callback_details": "回访确认已解决，客户认可",
+        "archive_notes": "闭环归档",
+    })
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["state"] == "archived"
+    assert d["satisfaction"] == "satisfied"
+    assert d["callback_details"] == "回访确认已解决，客户认可"
+    assert d["archive_notes"] == "闭环归档"
+
+
+async def test_no_callback_clears_satisfaction_and_can_archive(env):
+    """既有回访语义（保留）：callback_required=false 清空满意度 → 可归档。
+
+    已知绕过点（记录在案，Phase 9 报告中说明）：一张"不满意"的工单通过
+    同请求改 callback_required=false 会先清空满意度，从而绕过不满意拦截。
+    这是既有"无需回访即清空满意度"的回访语义，本次改造不改变它。
+    """
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    await env["resolve"](t["id"])
+    r1 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "is_callbacked": True, "satisfaction": "dissatisfied",
+    })
+    assert r1.status_code == 200, r1.text
+    r2 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "archived", "callback_required": False,
+    })
+    assert r2.status_code == 200, r2.text
+    d = r2.json()
+    assert d["state"] == "archived"
+    assert d["satisfaction"] is None
+    assert d["is_callbacked"] is False
