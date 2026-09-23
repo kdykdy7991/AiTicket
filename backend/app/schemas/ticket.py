@@ -117,6 +117,15 @@ class TicketBrief(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class AllowedAction(BaseModel):
+    """后端生成的状态动作元数据——前端按钮的唯一渲染依据。"""
+    action: str            # dispatch/return/cancel/resolve/hold/resume/reopen/resubmit/archive
+    target_state: str      # 执行该动作后的目标状态（已含业务约束改写）
+    requires_reason: bool = False   # 点击后必须填写原因
+    requires_owner: bool = False    # 动作前置要求：分派时须先选择处理人
+    label: str = ""        # 中文按钮文案
+
+
 class TicketDetail(TicketBrief):
     description: str
     customer_company: str | None = None
@@ -150,6 +159,13 @@ class TicketDetail(TicketBrief):
     root_cause: str | None = None  # 根本原因
     solution: str | None = None    # 解决办法
     complaint_level: str | None = None  # 投诉级别
+
+    # V0.86：后端生成的动作/能力元数据（前端只渲染，不再自算业务规则）
+    allowed_actions: list[AllowedAction] = []   # 当前用户在当前状态可执行的状态动作
+    is_terminal: bool = False                   # 终态（archived/cancelled）
+    can_reply: bool = False                     # 可提交处理说明（会触发 →resolved 流转）
+    can_addition: bool = False                  # 可追加说明
+    can_remind: bool = False                    # 可催办（且尚未催办过）
 
     model_config = {"from_attributes": True}
 

@@ -119,6 +119,93 @@ def action_for(
     return TRANSITION_ACTIONS.get((from_state, to_state))
 
 
+# 动作的中文按钮文案（前端按 action 渲染，不再自配文案映射）
+ACTION_LABELS: dict[str, str] = {
+    "dispatch": "分派",
+    "return": "退回",
+    "cancel": "撤销",
+    "resolve": "标记已处理",
+    "hold": "暂缓处理",
+    "resume": "恢复处理",
+    "reopen": "退回重开",
+    "resubmit": "重新提交",
+    "archive": "归档",
+}
+
+
+# ── 文章（沟通记录）级状态/角色规则 ────────────────────────────
+# 与状态机同源：articles 端点的服务端校验与详情页能力位（can_*）共用。
+# 允许追加的工单状态：已处理之前（不包括已处理），以及退回后补充阶段
+ADDITION_ALLOWED_STATES = {"pending", "open", "on_hold", "returned"}
+# 允许追加的角色
+ADDITION_ALLOWED_ROLES = {"admin", "agent"}
+# 可提交处理说明的工单状态（处理人提交即流转到已处理）
+REPLY_ALLOWED_STATES = {"open", "on_hold"}
+# 允许催办的状态
+URGE_ALLOWED_STATES = {"pending", "open", "on_hold"}
+# 允许催办的角色（客服团队）
+URGE_ALLOWED_ROLES = {"admin", "agent"}
+
+
+async def compute_allowed_actions(
+    db: AsyncSession, ticket: Ticket, user: User
+) -> list[dict]:
+    """生成工单在当前状态下"该用户可执行的状态动作"——后端唯一事实来源。
+
+    完全由既有真实规则推导（不新增 if/else 业务规则）：
+      候选目标 = TRANSITIONS[ticket.state]
+      有效目标 = enforce_business_constraints（resolved→on_hold 改写为 open 并去重）
+      动作     = action_for(from, effective)
+      可执行   = transition_permission_error(...) is None（权限矩阵与执行入口同源）
+      附加     = requires_reason（是否需填原因）/ requires_owner（分派须选处理人）
+    终态返回 []。前端据此渲染按钮，点击后直接调用后端，不再自行判断。
+    """
+    actions: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for to_state in TRANSITIONS.get(ticket.state, []):
+        effective = enforce_business_constraints(ticket, to_state, log_rewrite=False)
+        action = action_for(ticket.state, effective)
+        if action is None or (action, effective) in seen:
+            continue
+        if await transition_permission_error(db, ticket, effective, user) is not None:
+            continue
+        seen.add((action, effective))
+        actions.append({
+            "action": action,
+            "target_state": effective,
+            "requires_reason": requires_reason(ticket.state, effective),
+            "requires_owner": (ticket.state, effective) == ("pending", "open"),
+            "label": ACTION_LABELS.get(action, action),
+        })
+    return actions
+
+
+def compute_article_actions(ticket: Ticket, user: User) -> dict[str, bool]:
+    """详情页沟通记录能力位：与 articles 端点的服务端规则逐条对应。"""
+    if ticket.state in TERMINAL_STATES:
+        # 终态工单不接受任何沟通记录（与 create_article 的终态 422 对应）
+        return {"can_reply": False, "can_addition": False, "can_remind": False}
+    return {
+        # 处理说明：仅当前处理人 + open/on_hold
+        "can_reply": (
+            ticket.owner_id is not None
+            and user.id == ticket.owner_id
+            and ticket.state in REPLY_ALLOWED_STATES
+        ),
+        # 追加：指定角色 + 已处理之前的状态
+        "can_addition": (
+            user.role in ADDITION_ALLOWED_ROLES
+            and ticket.state in ADDITION_ALLOWED_STATES
+        ),
+        # 催办：客服团队 + 非终态前三种状态 + 整个生命周期只能催办一次
+        "can_remind": (
+            user.role in URGE_ALLOWED_ROLES
+            and ticket.state in URGE_ALLOWED_STATES
+            and ticket.urged_at is None
+        ),
+    }
+
+
 def validate_transition(from_state: str, to_state: str) -> None:
     """校验状态流转是否合法，非法则抛 StateTransitionError。"""
     # from_state 为 None 时走初始状态校验（建单）
@@ -137,7 +224,7 @@ def requires_reason(from_state: str, to_state: str) -> bool:
     return to_state in STATES_REQUIRE_REASON_FROM and from_state in STATES_REQUIRE_REASON_FROM[to_state]
 
 
-def enforce_business_constraints(ticket: Ticket, target_state: str) -> str:
+def enforce_business_constraints(ticket: Ticket, target_state: str, log_rewrite: bool = True) -> str:
     """业务约束：已处理工单不允许直接退回到 on_hold（暂停位）。
 
     退回 resolved 工单的目标若为 on_hold，自动改写为 open。
@@ -148,12 +235,13 @@ def enforce_business_constraints(ticket: Ticket, target_state: str) -> str:
     都是 creator/agent 可操作）。
     """
     if ticket.state == "resolved" and target_state == "on_hold":
-        import logging
-        ticket_id = getattr(ticket, "id", None)
-        logging.getLogger(__name__).warning(
-            f"[resolved→on_hold rewrite] ticket_id={ticket_id} "
-            f"requested=on_hold → effective=open"
-        )
+        if log_rewrite:  # 执行流转时记录一次；allowed_actions 推导时静默
+            import logging
+            ticket_id = getattr(ticket, "id", None)
+            logging.getLogger(__name__).warning(
+                f"[resolved→on_hold rewrite] ticket_id={ticket_id} "
+                f"requested=on_hold → effective=open"
+            )
         return "open"
     return target_state
 
@@ -190,12 +278,76 @@ async def is_dispatcher(db: AsyncSession, user_id: int, skill_group_id: int | No
     return result.scalar_one_or_none() is not None
 
 
+async def transition_permission_error(
+    db: AsyncSession, ticket: Ticket, to_state: str, user: User
+) -> str | None:
+    """身份/角色层面是否允许该状态变更：允许返回 None，否则返回错误文案。
+
+    与 check_transition_permission 共用同一套矩阵（只定义一次）；
+    allowed_actions 的生成也调用它，路由/前端不再另写 if/else。
+    分派场景"必须指定处理人"属于输入要求，由 check_transition_permission 判定。
+    """
+    if user.role == "admin":
+        return None  # admin 全权限
+
+    from_state = ticket.state
+
+    # 分派：部门对接人
+    if (from_state, to_state) == ("pending", "open"):
+        if not await is_dispatcher(db, user.id, ticket.skill_group_id):
+            return "只有该部门的对接人可分派工单"
+        return None
+
+    # 处理人操作：已处理 / 暂缓 / 确认 / 退回上一状态
+    if (from_state, to_state) in [
+        ("open", "resolved"), ("open", "on_hold"), ("on_hold", "resolved"),
+        ("open", "pending"), ("on_hold", "open"),
+    ]:
+        if ticket.owner_id != user.id:
+            return "只有当前处理人可执行此操作"
+        return None
+
+    # 已处理状态退回：业务上已回到客服侧，由创建者或客服团队退回
+    if (from_state, to_state) in [("resolved", "open"), ("resolved", "on_hold")]:
+        if ticket.creator_id == user.id:
+            return None
+        if user.role == "agent":
+            return None
+        return "只有创建者或客服团队可退回已处理工单"
+
+    # 撤销：仅创建者（发起人）
+    if to_state == "cancelled" and from_state in ("pending", "open", "on_hold", "returned"):
+        if ticket.creator_id == user.id:
+            return None
+        return "只有工单发起人可撤销工单"
+
+    # 客服团队操作：归档
+    if (from_state, to_state) in [("resolved", "archived")]:
+        if user.role != "agent":
+            return "只有客服团队可执行归档操作"
+        return None
+
+    # 待受理退回：部门对接人 → 已退回，处理人给创建者
+    if (from_state, to_state) == ("pending", "returned"):
+        if await is_dispatcher(db, user.id, ticket.skill_group_id):
+            return None
+        return "只有部门对接人可退回待受理工单"
+
+    # 已退回工单：创建者可重新提交或撤销
+    if from_state == "returned" and to_state in ("pending", "cancelled"):
+        if ticket.creator_id == user.id:
+            return None
+        return "只有创建者可处理已退回工单"
+
+    return "无权执行此状态变更"
+
+
 async def check_transition_permission(
     db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None
 ) -> None:
-    """校验当前用户是否有权执行该状态变更。
+    """校验当前用户是否有权执行该状态变更（非法则抛 ForbiddenError / 422）。
 
-    权限矩阵：
+    权限矩阵（唯一定义处 → transition_permission_error）：
       pending→open（分派）: 部门对接人 / admin
       open→resolved / on_hold, on_hold→resolved: 处理人（owner）/ admin
       pending/open/on_hold/resolved→cancelled（撤销）: 创建者 / 部门对接人 / admin
@@ -206,63 +358,17 @@ async def check_transition_permission(
         on_hold→open: 处理人（owner）/ admin
         resolved→open/on_hold: 处理人（owner）/ admin
       returned→pending/cancelled: 创建者 / admin
+    分派的输入要求：非 admin 分派必须指定处理人（422）。
     """
-    if user.role == "admin":
-        return  # admin 全权限
-
-    from_state = ticket.state
-
-    # 分派：部门对接人
-    if from_state == "pending" and to_state == "open":
-        if not await is_dispatcher(db, user.id, ticket.skill_group_id):
-            raise ForbiddenError("只有该部门的对接人可分派工单")
-        # 分派时必须指定处理人
-        if not owner_id:
-            raise HTTPException(422, detail="分派时必须指定处理人")
-        return
-
-    # 处理人操作：已处理 / 暂缓 / 确认 / 退回上一状态
-    if (from_state, to_state) in [
-        ("open", "resolved"), ("open", "on_hold"), ("on_hold", "resolved"),
-        ("open", "pending"), ("on_hold", "open"),
-    ]:
-        if ticket.owner_id != user.id:
-            raise ForbiddenError("只有当前处理人可执行此操作")
-        return
-
-    # 已处理状态退回：业务上已回到客服侧，由创建者或客服团队退回
-    if (from_state, to_state) in [("resolved", "open"), ("resolved", "on_hold")]:
-        if ticket.creator_id == user.id:
-            return
-        if user.role == "agent":
-            return
-        raise ForbiddenError("只有创建者或客服团队可退回已处理工单")
-
-    # 撤销：仅创建者（发起人）
-    if to_state == "cancelled" and from_state in ("pending", "open", "on_hold", "returned"):
-        if ticket.creator_id == user.id:
-            return
-        raise ForbiddenError("只有工单发起人可撤销工单")
-
-    # 客服团队操作：归档
-    if (from_state, to_state) in [("resolved", "archived")]:
-        if user.role != "agent":
-            raise ForbiddenError("只有客服团队可执行归档操作")
-        return
-
-    # 待受理退回：部门对接人 → 已退回，处理人给创建者
-    if from_state == "pending" and to_state == "returned":
-        if await is_dispatcher(db, user.id, ticket.skill_group_id):
-            return
-        raise ForbiddenError("只有部门对接人可退回待受理工单")
-
-    # 已退回工单：创建者可重新提交或撤销
-    if from_state == "returned" and to_state in ("pending", "cancelled"):
-        if ticket.creator_id == user.id:
-            return
-        raise ForbiddenError("只有创建者可处理已退回工单")
-
-    raise ForbiddenError("无权执行此状态变更")
+    error = await transition_permission_error(db, ticket, to_state, user)
+    if error is not None:
+        raise ForbiddenError(error)
+    if (
+        user.role != "admin"
+        and (ticket.state, to_state) == ("pending", "open")
+        and not owner_id
+    ):
+        raise HTTPException(422, detail="分派时必须指定处理人")
 
 
 async def apply_initial_state(

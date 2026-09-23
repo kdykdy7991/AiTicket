@@ -17,21 +17,21 @@ from app.core.exceptions import NotFoundError
 from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
 from app.models.user import User
 from app.services.notification import remind_handler
-from app.services.state_machine import TERMINAL_STATES, apply_transition
+from app.services.state_machine import (
+    ADDITION_ALLOWED_ROLES,
+    ADDITION_ALLOWED_STATES,
+    REPLY_ALLOWED_STATES,
+    TERMINAL_STATES,
+    URGE_ALLOWED_ROLES,
+    URGE_ALLOWED_STATES,
+    apply_transition,
+)
 
 router = APIRouter(tags=["articles"])
 
-# 允许追加的工单状态：已处理之前（不包括已处理），以及退回后补充阶段
-ADDITION_ALLOWED_STATES = {"pending", "open", "on_hold", "returned"}
-# 允许追加的角色
-ADDITION_ALLOWED_ROLES = {"admin", "agent"}
-# 可提交处理说明的工单状态（处理人提交即流转到已处理）
-REPLY_ALLOWED_STATES = {"open", "on_hold"}
-# 允许催办的状态
-URGE_ALLOWED_STATES = {"pending", "open", "on_hold"}
-# 允许催办的角色（客服团队）
-URGE_ALLOWED_ROLES = {"admin", "agent"}
-# 催办内容最大长度
+# 状态/角色集合已下沉到 app.services.state_machine（与状态机同源，
+# 详情页能力位 can_reply/can_addition/can_remind 复用同一份规则）。
+# 催办内容最大长度（内容规则，非状态规则）
 URGE_MAX_LENGTH = 200
 
 

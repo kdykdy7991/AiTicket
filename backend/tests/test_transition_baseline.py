@@ -724,3 +724,138 @@ async def test_action_type_nullable_for_history(env):
         await s.commit()
     logs = await db_logs(env, t["id"])
     assert logs[-1].action_type is None
+
+
+# ── 13. allowed_actions / 能力位（Phase 6 后端唯一事实来源） ──
+
+
+def _action_map(detail) -> dict:
+    return {a["action"]: a for a in detail["allowed_actions"]}
+
+
+async def test_allowed_actions_pending_admin(env):
+    t = await env["create_ticket"]()
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    acts = _action_map(d)
+    assert set(acts) == {"dispatch", "return", "cancel"}
+    assert acts["dispatch"]["target_state"] == "open"
+    assert acts["dispatch"]["requires_reason"] is False
+    assert acts["dispatch"]["requires_owner"] is True
+    assert acts["dispatch"]["label"] == "分派"
+    assert acts["return"]["target_state"] == "returned"
+    assert acts["return"]["requires_reason"] is True   # pending→returned 必填原因
+    assert acts["cancel"]["requires_reason"] is True
+    assert d["is_terminal"] is False
+    assert all(a["label"] for a in d["allowed_actions"])
+
+
+async def test_allowed_actions_open_owner_and_capabilities(env):
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    with as_user(env["handler_id"], "agent"):
+        d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    acts = _action_map(d)
+    # 当前处理人：可处理/暂缓/打回；撤销只给创建者 → 不出现
+    assert set(acts) == {"resolve", "return", "hold"}
+    assert acts["resolve"]["requires_reason"] is False
+    assert acts["hold"]["requires_reason"] is True
+    assert acts["return"]["requires_reason"] is True
+    # 文章能力位（owner 身份）
+    assert d["can_reply"] is True
+    assert d["can_addition"] is True
+    assert d["can_remind"] is True
+
+    # 非 owner（admin 本人不是处理人）看不到处理说明能力
+    d_admin = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert d_admin["can_reply"] is False
+    assert d_admin["can_addition"] is True
+
+
+async def test_allowed_actions_terminal_empty(env):
+    t = await env["create_ticket"]()
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "cancelled", "reason": "关闭"})
+    assert r.status_code == 200
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert d["allowed_actions"] == []
+    assert d["is_terminal"] is True
+    assert d["can_reply"] is False and d["can_addition"] is False and d["can_remind"] is False
+
+
+async def test_allowed_actions_exclude_unpermitted_and_api_rejects(env):
+    """没出现在 allowed_actions 的动作，直接调 API 也会被拒（同一份矩阵）。"""
+    factory = async_sessionmaker(env["engine"], class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        outsider = User(username="tb-outsider2", name="无关客服2", password_hash="x", role="agent")
+        s.add(outsider)
+        await s.commit()
+        await s.refresh(outsider)
+        oid, orole, ogid = outsider.id, outsider.role, outsider.group_id
+
+    t = await env["create_ticket"]()
+    with as_user(oid, orole, ogid):
+        d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+        assert d["allowed_actions"] == []          # 既非创建者也非对接人
+        r = await env["client"].patch(
+            f"/api/v1/tickets/{t['id']}",
+            json={"state": "open", "owner_id": env["handler_id"]},
+        )
+    assert r.status_code == 403                    # 不可绕过
+    tk = await db_ticket(env, t["id"])
+    assert tk.state == "pending"
+
+
+async def test_allowed_action_executes_successfully(env):
+    """列表里的动作按其 target_state/requires_* 调 API 必然成功。"""
+    t = await env["create_ticket"]()
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    acts = _action_map(d)
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": acts["dispatch"]["target_state"],
+        "owner_id": env["handler_id"],             # requires_owner
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "open"
+
+    with as_user(env["handler_id"], "agent"):
+        d2 = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    acts2 = _action_map(d2)
+    # requires_reason 的动作不带 reason 必须 400，带 reason 才 200
+    r_bad = await env["client"].patch(
+        f"/api/v1/tickets/{t['id']}", json={"state": acts2["hold"]["target_state"]}
+    )
+    assert r_bad.status_code == 400
+    r_ok = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": acts2["hold"]["target_state"], "reason": "等待备件"})
+    assert r_ok.status_code == 200
+
+
+async def test_allowed_actions_resolved_dedupes_rewritten_on_hold(env):
+    """resolved 的候选里 on_hold 被业务约束改写为 open：去重后只剩 archive/reopen。"""
+    t = await env["create_ticket"]()
+    await env["dispatch"](t["id"], env["handler_id"])
+    await env["resolve"](t["id"])
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    acts = _action_map(d)
+    assert set(acts) == {"archive", "reopen"}
+    assert acts["reopen"]["target_state"] == "open"
+    assert acts["archive"]["requires_reason"] is False
+    assert acts["reopen"]["requires_reason"] is True   # resolved→open 必填原因
+
+
+async def test_remind_capability_once_only(env):
+    t = await env["create_ticket"]()
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert d["can_remind"] is True
+    r = await env["client"].post(
+        f"/api/v1/tickets/{t['id']}/articles",
+        data={"type": "reminder", "body": "请尽快处理"},
+    )
+    assert r.status_code == 201, r.text
+    d2 = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert d2["can_remind"] is False                  # 生命周期只能催办一次
+    r2 = await env["client"].post(
+        f"/api/v1/tickets/{t['id']}/articles",
+        data={"type": "reminder", "body": "再催一次"},
+    )
+    assert r2.status_code == 422

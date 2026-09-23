@@ -28,8 +28,11 @@ from app.schemas.ticket import (
     DuplicateWarning,
 )
 from app.services.state_machine import (
+    TERMINAL_STATES,
     apply_initial_state,
     apply_transition,
+    compute_allowed_actions,
+    compute_article_actions,
 )
 
 router = APIRouter(tags=["tickets"])
@@ -77,10 +80,25 @@ def _ticket_to_brief(t: Ticket, terminal_ops: dict | None = None) -> TicketBrief
     )
 
 
-def _ticket_to_detail(t: Ticket, terminal_ops: dict | None = None) -> TicketDetail:
+def _ticket_to_detail(
+    t: Ticket,
+    terminal_ops: dict | None = None,
+    *,
+    allowed_actions: list[dict] | None = None,
+    can_reply: bool = False,
+    can_addition: bool = False,
+    can_remind: bool = False,
+) -> TicketDetail:
     brief = _ticket_to_brief(t, terminal_ops)
     return TicketDetail(
         **brief.model_dump(),
+        # V0.86 动作/能力元数据：只有 GET 详情会传入计算结果，
+        # 建单等复用路径留默认值（前端跳详情页会重新 GET）
+        allowed_actions=allowed_actions or [],
+        is_terminal=t.state in TERMINAL_STATES,
+        can_reply=can_reply,
+        can_addition=can_addition,
+        can_remind=can_remind,
         description=t.description,
         customer_company=t.customer_company,
         customer_level=t.customer_level,
@@ -675,7 +693,10 @@ async def get_ticket(
     if not ticket:
         raise NotFoundError("工单", ticket_id)
     terminal_ops = await _get_terminal_operators(db, [ticket_id])
-    return _ticket_to_detail(ticket, terminal_ops)
+    # 后端唯一事实来源：动作/能力元数据全部由 state_machine 的真实规则生成
+    allowed_actions = await compute_allowed_actions(db, ticket, user)
+    article_actions = compute_article_actions(ticket, user)
+    return _ticket_to_detail(ticket, terminal_ops, allowed_actions=allowed_actions, **article_actions)
 
 
 @router.post("/tickets", response_model=TicketCreateResponse, status_code=status.HTTP_201_CREATED)
