@@ -44,6 +44,11 @@ frontend/example/
 # E2E 测试报告（运行时生成，不入库）
 e2e_tests/artifacts/
 
+# 根目录客户参考资料 / 工作笔记（不入库）
+/责任部门*.md
+/*改造交付说明.md
+/pending
+
 # 上传的附件文件（本地开发和 Docker 均通过 volume/目录挂载，不入库）
 backend/uploads/
 
