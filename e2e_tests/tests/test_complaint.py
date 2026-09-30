@@ -1,7 +1,10 @@
 """Scenarios 10-12 — 投诉分级 (一般 / 重要 / 重大)。
 
-2102 一般投诉、2103 重要投诉、2104 重大投诉:都父链上溯到 2101 服务投诉。
-期望 dispatcher=服务投诉协调人 / sg=服务投诉协调组。
+V0.21 责任路由(V0.21 dispatch_chains 双轨):
+  2102 一般投诉 → 自带链 [值班组] (值班组承接,人员按班次维护)
+  2103/2104 重要/重大投诉 → 无链,回退旧规则父链上溯 2101 服务投诉
+期望责任从 /routing-rules/resolve 动态取(链路径按 dispatcher_id
+join 姓名),不硬编码。
 
 注意:`sla_policies` 表当前为空(用户已知,"SLA 策略未定暂不修"),
 本测试不断言 solution_deadline 的具体数值;只验证:
@@ -56,6 +59,12 @@ def _run_complaint_scenario(
     cat = helpers.find_category_by_name(client, token, category_name)
     assert cat is not None, f"未找到 leaf 分类:{category_name}"
 
+    # 期望责任动态取:链路径(2102)或旧规则回退(2103/2104)
+    resp = helpers.resolve_routing(client, token, cat["id"])
+    assert resp.get("matched") is True, resp
+    expected_sg_name = resp["dispatcher_skill_group_name"]
+    expected_dispatcher_name = helpers.expected_dispatcher_name(client, token, resp)
+
     customer_name = f"E2E-{customer_suffix}-{batch_id}"
     description = f"[E2E][{batch_id}] {scenario_label} 投诉分级+责任路由"
 
@@ -69,18 +78,20 @@ def _run_complaint_scenario(
     ticket = helpers.create_ticket(client, token, payload)
     ticket_id = ticket["id"]
     assert ticket["state"] == "pending", ticket["state"]
-    assert ticket["dispatcher_name"] == "服务投诉协调人", ticket
-    assert ticket["skill_group_name"] == "服务投诉协调组", ticket
+    assert ticket["dispatcher_id"] == resp["dispatcher_id"], ticket
+    assert ticket["dispatcher_name"] == expected_dispatcher_name, ticket
+    assert ticket["skill_group_name"] == expected_sg_name, ticket
     assert ticket["complaint_level"] == complaint_level, (
         f"complaint_level 字段应保留:实际={ticket.get('complaint_level')!r}"
     )
 
-    # pending → open (分派给 dispatcher 当 owner,因为 2101 路由无 owner)
-    dispatcher_user = helpers.find_user_by_name(client, token, "服务投诉协调人")
-    assert dispatcher_user is not None, "未找到 服务投诉协调人"
+    # pending → open (owner=链处方默认处理人,或规则里的 dispatcher 兜底)
+    owner_id = resp.get("owner_id") or resp.get("dispatcher_id")
+    owner_user = helpers.find_user_by_id(client, token, owner_id)
+    assert owner_user is not None, f"owner_id={owner_id} 不存在"
     after_open = helpers.patch_ticket(client, token, ticket_id, {
         "state": "open",
-        "owner_id": dispatcher_user["id"],
+        "owner_id": owner_user["id"],
     })
     after_open_detail = helpers.get_ticket_until_state(
         client, token, ticket_id, target_state="open",
@@ -117,11 +128,13 @@ def _run_complaint_scenario(
         ticket_id=ticket_id,
         category=f"{cat['id']} {cat['name']}",
         state=after_resolved["state"],
-        dispatcher="服务投诉协调人",
-        owner="(投诉协调,无独立 owner)",
+        dispatcher=expected_dispatcher_name,
+        owner=owner_user["name"],
         result="PASS",
         extra={
             "complaint_level": complaint_level,
+            "via": resp.get("via"),
+            "skill_group": expected_sg_name,
             "expected_multiplier": EXPECTED_MULTIPLIER[complaint_level],
             "transitions": [f"{a or 'None'}->{b}" for a, b in transition_chain],
         },

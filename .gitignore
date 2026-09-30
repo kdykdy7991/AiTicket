@@ -41,6 +41,9 @@ frontend/example/
 *.doc
 *.xlsx
 
+# E2E 测试报告（运行时生成，不入库）
+e2e_tests/artifacts/
+
 # 上传的附件文件（本地开发和 Docker 均通过 volume/目录挂载，不入库）
 backend/uploads/
 

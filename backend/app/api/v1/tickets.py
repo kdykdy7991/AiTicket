@@ -24,16 +24,22 @@ from app.schemas.ticket import (
     TicketCreate,
     TicketCreateResponse,
     TicketDetail,
+    TicketRefine,
+    TicketTransfer,
     TicketUpdate,
     DuplicateWarning,
 )
+from app.services.dispatch_chain import INSTANT_RESOLVE_CATEGORY_IDS
 from app.services.state_machine import (
     TERMINAL_STATES,
     action_for,
     apply_initial_state,
+    apply_refine,
+    apply_transfer,
     apply_transition,
     compute_allowed_actions,
     compute_article_actions,
+    refine_capability,
 )
 
 router = APIRouter(tags=["tickets"])
@@ -89,6 +95,9 @@ def _ticket_to_detail(
     can_reply: bool = False,
     can_addition: bool = False,
     can_remind: bool = False,
+    can_refine: bool = False,
+    refine_options: list[dict] | None = None,
+    refine_denied_reason: str | None = None,
 ) -> TicketDetail:
     brief = _ticket_to_brief(t, terminal_ops)
     return TicketDetail(
@@ -100,6 +109,9 @@ def _ticket_to_detail(
         can_reply=can_reply,
         can_addition=can_addition,
         can_remind=can_remind,
+        can_refine=can_refine,
+        refine_options=refine_options or [],
+        refine_denied_reason=refine_denied_reason,
         description=t.description,
         customer_company=t.customer_company,
         customer_level=t.customer_level,
@@ -129,6 +141,9 @@ def _ticket_to_detail(
         callback_details=t.callback_details,
         archive_notes=t.archive_notes,
         satisfaction=t.satisfaction,
+        unsatisfied_reason=t.unsatisfied_reason,
+        dispatch_chain_steps=t.dispatch_chain_steps,
+        dispatch_step_index=t.dispatch_step_index,
     )
 
 
@@ -697,7 +712,84 @@ async def get_ticket(
     # 后端唯一事实来源：动作/能力元数据全部由 state_machine 的真实规则生成
     allowed_actions = await compute_allowed_actions(db, ticket, user)
     article_actions = compute_article_actions(ticket, user)
-    return _ticket_to_detail(ticket, terminal_ops, allowed_actions=allowed_actions, **article_actions)
+    refine = await refine_capability(db, ticket, user)
+    return _ticket_to_detail(
+        ticket, terminal_ops,
+        allowed_actions=allowed_actions,
+        **article_actions,
+        can_refine=refine["can_refine"],
+        refine_options=refine["refine_options"],
+        refine_denied_reason=refine["refine_denied_reason"],
+    )
+
+
+async def _detail_after_mutation(db: AsyncSession, ticket_id: int, user: User) -> TicketCreateResponse:
+    """域动作（分诊/转派）commit 后重建详情响应。
+
+    expire_on_commit=False 时 session 里的 ticket 持有突变前的关系对象，
+    必须 populate_existing 才能让 selectinload 覆盖——否则序列化触发
+    同步懒加载（MissingGreenlet 500）。
+    """
+    result = await db.execute(
+        select(Ticket).options(
+            selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
+            selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
+            selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
+            selectinload(Ticket.category).selectinload(TicketCategory.parent),
+            selectinload(Ticket.group), selectinload(Ticket.urged_by),
+        ).where(Ticket.id == ticket_id).execution_options(populate_existing=True)
+    )
+    ticket = result.scalar_one()
+    terminal_ops = await _get_terminal_operators(db, [ticket.id])
+    allowed_actions = await compute_allowed_actions(db, ticket, user)
+    article_actions = compute_article_actions(ticket, user)
+    refine = await refine_capability(db, ticket, user)
+    return TicketCreateResponse(
+        data=_ticket_to_detail(
+            ticket, terminal_ops,
+            allowed_actions=allowed_actions,
+            **article_actions,
+            can_refine=refine["can_refine"],
+            refine_options=refine["refine_options"],
+            refine_denied_reason=refine["refine_denied_reason"],
+        )
+    )
+
+
+@router.post("/tickets/{ticket_id}/refine", response_model=TicketCreateResponse)
+async def refine_ticket_category(
+    ticket_id: int,
+    body: TicketRefine,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """分诊：判断人把工单分类细化一级（权限/校验/链重算收口在 apply_refine）。"""
+    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+    ticket = result.scalar_one_or_none()
+    if not ticket:
+        raise NotFoundError("工单", ticket_id)
+
+    await apply_refine(db, ticket, new_category_id=body.category_id, operator=user)
+    await db.commit()
+    return await _detail_after_mutation(db, ticket_id, user)
+
+
+@router.post("/tickets/{ticket_id}/transfer", response_model=TicketCreateResponse)
+async def transfer_ticket_to_next_dept(
+    ticket_id: int,
+    body: TicketTransfer,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """转派：多步链本步完成，推进到链的下一部门（收口在 apply_transfer）。"""
+    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
+    ticket = result.scalar_one_or_none()
+    if not ticket:
+        raise NotFoundError("工单", ticket_id)
+
+    await apply_transfer(db, ticket, operator=user, reason=body.reason)
+    await db.commit()
+    return await _detail_after_mutation(db, ticket_id, user)
 
 
 @router.post("/tickets", response_model=TicketCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -709,27 +801,44 @@ async def create_ticket(
     """Create a new ticket."""
     warnings = None
 
-    # Auto-match responsibility from category routing rule (Phase 5).
-    # body.* wins; routing rule fills in any field the caller left blank.
+    # Auto-match responsibility：分派链（表A dispatch_chains）优先，
+    # 无链回退旧 category_routing_rules（双轨过渡，设计 §8.3）。
+    # body.* wins; 规则/链只填调用方留空的字段。
     auto_match_warning: str | None = None
+    chain_steps: list[dict] | None = None
     if body.category_id is not None:
-        from app.services.routing import resolve_rule
-        rule_result = await resolve_rule(db, body.category_id)
-        if rule_result.get("matched"):
-            if body.skill_group_id is None and rule_result.get("dispatcher_skill_group_id"):
-                body.skill_group_id = rule_result["dispatcher_skill_group_id"]
+        from app.services.dispatch_chain import resolve_responsibility
+        resp = await resolve_responsibility(db, body.category_id)
+        chain_steps = resp.get("chain_steps")
+        if resp.get("matched"):
+            if body.skill_group_id is None and resp.get("dispatcher_skill_group_id"):
+                body.skill_group_id = resp["dispatcher_skill_group_id"]
             if body.handler_skill_group_id is None:
                 # Even when the rule has no professional department we still
                 # leave handler_skill_group_id as the caller set it.
-                body.handler_skill_group_id = rule_result.get("handler_skill_group_id")
-            if body.dispatcher_id is None and rule_result.get("dispatcher_id"):
-                body.dispatcher_id = rule_result["dispatcher_id"]
-            # Note: owner_id is NOT auto-assigned here; the rule's default
+                body.handler_skill_group_id = resp.get("handler_skill_group_id")
+            if body.dispatcher_id is None and resp.get("dispatcher_id"):
+                body.dispatcher_id = resp["dispatcher_id"]
+            # Note: owner_id is NOT auto-assigned here; the chain's default
             # owner is used by the dispatcher's "分派" step, not at creation.
-            if rule_result.get("reason"):
-                auto_match_warning = rule_result["reason"]
+            if resp.get("reason"):
+                auto_match_warning = resp["reason"]
         else:
-            auto_match_warning = rule_result.get("reason")
+            auto_match_warning = resp.get("reason")
+
+    # 即办结分类预置（设计 §8 小改：套餐查询建单预置 instant_resolve）：
+    # 1102 即时办结咨询 / 2202 套餐查询 → 建单即归档，保留工单记录、
+    # 不进分派链。草稿仍按草稿存，提交（正式建单）时才生效。
+    instant_default_resolution: str | None = None
+    if body.category_id in INSTANT_RESOLVE_CATEGORY_IDS and not body.is_draft:
+        cat_name = (
+            await db.execute(
+                select(TicketCategory.name).where(TicketCategory.id == body.category_id)
+            )
+        ).scalar_one_or_none() or "即办结咨询"
+        body.is_instant_resolve = True
+        instant_default_resolution = f"{cat_name}（客服即时办结）"
+        auto_match_warning = f"「{cat_name}」为即办结分类，工单创建后直接归档，无需分派与回访"
 
     if body.is_draft:
         # Draft: no number, no SLA, no duplicate check, relaxed validation
@@ -753,6 +862,8 @@ async def create_ticket(
             root_cause=body.root_cause,
             solution=body.solution,
             complaint_level=body.complaint_level,
+            dispatch_chain_steps=chain_steps,
+            dispatch_step_index=0 if chain_steps else None,
             is_draft=True,
         )
     elif body.is_instant_resolve:
@@ -795,7 +906,7 @@ async def create_ticket(
             complaint_level=body.complaint_level,
             solution_deadline=solution_deadline,
             resolved=True,
-            resolution=body.instant_resolution or "即时办结咨询",
+            resolution=body.instant_resolution or instant_default_resolution or "即时办结咨询",
             solved_at=now,
             # closed_at / closed_duration_minutes 是终态状态副作用，
             # 统一由 apply_initial_state（状态流转执行入口）计算，不在构造期重复维护
@@ -825,7 +936,8 @@ async def create_ticket(
         return TicketCreateResponse(
             data=_ticket_to_detail(ticket),
             warnings=DuplicateWarning(
-                auto_match_warning="即时办结咨询：工单已直接归档，无需后续处理与回访",
+                auto_match_warning=auto_match_warning
+                or "即时办结咨询：工单已直接归档，无需后续处理与回访",
             ),
         )
     else:
@@ -891,6 +1003,8 @@ async def create_ticket(
             solution=body.solution,
             complaint_level=body.complaint_level,
             solution_deadline=solution_deadline,
+            dispatch_chain_steps=chain_steps,
+            dispatch_step_index=0 if chain_steps else None,
             is_draft=False,
         )
 
@@ -955,6 +1069,7 @@ async def update_ticket(
         # 这一合法流程（reopen 副作用清空满意度）重置
         if body.is_callbacked is False and ticket.satisfaction != "dissatisfied":
             ticket.satisfaction = None
+            ticket.unsatisfied_reason = None  # 随满意度一起清（未回访/未产生不满意事实）
     if body.callback_required is not None:
         ticket.callback_required = body.callback_required
         # callback_required 是"是否要求回访"的流程配置，不是删除既有回访结果的
@@ -968,6 +1083,11 @@ async def update_ticket(
         ):
             ticket.is_callbacked = False
             ticket.satisfaction = None
+            ticket.unsatisfied_reason = None
+    if body.unsatisfied_reason is not None:
+        # 不满意原因（设计 §8.2 #9）：dissatisfied 时必填；允许对已有不满意
+        # 回访补录/修正原因（与满意度不同，原因不走"不可原地改写"限制）
+        ticket.unsatisfied_reason = body.unsatisfied_reason.strip() or None
     if body.satisfaction is not None:
         # 校验：satisfaction 仅在 is_callbacked=true 时有意义
         allowed = {"satisfied", "average", "dissatisfied", "unrated"}
@@ -980,6 +1100,14 @@ async def update_ticket(
         if ticket.satisfaction == "dissatisfied" and body.satisfaction != "dissatisfied":
             raise HTTPException(422, detail="客户不满意：需退回重新处理并完成新一次回访后才能变更评价")
         ticket.satisfaction = body.satisfaction
+        if body.satisfaction != "dissatisfied":
+            # 新一轮回访为非不满意：不满意原因随之清空（模型注释的生命周期约定）
+            ticket.unsatisfied_reason = None
+
+    # 不满意原因一致性校验：最终满意度为 dissatisfied 时必须有原因。
+    # 置于状态流转之前，保证 state+满意度+原因同发时先拦截（422）。
+    if ticket.satisfaction == "dissatisfied" and not (ticket.unsatisfied_reason or "").strip():
+        raise HTTPException(422, detail="客户不满意：必须填写不满意原因")
 
     # State transition — 唯一执行入口：校验/权限/reason/前置校验/副作用/Flow Log 收口
     # （业务约束改写、resolved→on_hold 兜底、归档闭环校验见 state_machine.apply_transition）

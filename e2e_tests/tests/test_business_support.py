@@ -1,19 +1,22 @@
 """Scenarios 06-09 — 业务保障 full flow (pending → open → resolved → archived)。
 
-06 核心网系统 (2311) → 核心网组 / 核心网处理人
-07 测运控系统 (2312) → 测运控组 / 测运控处理人
-08 卫星系统   (2313) → 卫星组   / 卫星处理人
-09 终端软件   (2321) → 父链上溯到 2301 业务保障组 / 业务保障处理人
-                  (2321 在 dev DB 没有 leaf 路由,验证父链继承)
+06 核心网系统 (2311) → 链 [软件开发组]
+07 测运控系统 (2312) → 链 [测运控组]
+08 卫星系统   (2313) → 链 [整星产品]
+09 终端软件   (2321) → 链 [终端研发] (V0.21 自带链直达,不再父链上溯 2301)
+
+V0.21 链语义:建单时链首部门 = skill_group = handler_skill_group,
+dispatcher = 链首部门对接人(prescribe_dept),并写链快照
+(dispatch_chain_steps / dispatch_step_index=0)。期望值全部从
+ /routing-rules/resolve 动态取,不硬编码姓名。
 
 完整链路:
   pending (建单,自动匹配 dispatcher / handler_skill_group)
-  → open (分派 + owner_id)
+  → open (分派 + owner=链处方默认处理人)
   → resolved (root_cause + solution)
   → archived (admin 全权限)
 
-每场景断言 dispatcher / handler_skill_group / owner 与 routing rule 一致,
-state_log 四条完整。
+每场景断言责任字段与链一致,state_log 四条完整。
 """
 from __future__ import annotations
 
@@ -32,13 +35,18 @@ def _run_business_support_scenario(
     token,
     result_collector: list,
     customer_suffix: str,
-    expected_sg_name: str,
-    expected_dispatcher_name: str,
-    expected_handler_sg_name: str,
-    expected_owner_name: str,
+    expected_chain: list[str],
 ):
     cat = helpers.find_category_by_name(client, token, category_name)
     assert cat is not None, f"未找到 leaf 分类:{category_name}"
+
+    # 期望责任从链解析动态取(V0.21 dispatch_chains)
+    resp = helpers.resolve_routing(client, token, cat["id"])
+    assert resp.get("matched") is True, resp
+    assert resp.get("via") == "chain", resp
+    assert [s["department_code"] for s in resp["chain_steps"]] == expected_chain, resp
+    dept = expected_chain[0]
+    expected_dispatcher_name = helpers.expected_dispatcher_name(client, token, resp)
 
     customer_name = f"E2E-{customer_suffix}-{batch_id}"
     description = f"[E2E][{batch_id}] {scenario_label} 业务保障全流程"
@@ -53,13 +61,17 @@ def _run_business_support_scenario(
     ticket = helpers.create_ticket(client, token, payload)
     ticket_id = ticket["id"]
     assert ticket["state"] == "pending", ticket["state"]
+    assert ticket["dispatcher_id"] == resp["dispatcher_id"], ticket
     assert ticket["dispatcher_name"] == expected_dispatcher_name, ticket
-    assert ticket["skill_group_name"] == expected_sg_name, ticket
-    assert ticket["handler_skill_group_name"] == expected_handler_sg_name, ticket
+    assert ticket["skill_group_name"] == dept, ticket
+    assert ticket["handler_skill_group_name"] == dept, ticket
+    # 链快照已写入
+    assert ticket.get("dispatch_chain_steps") == resp["chain_steps"], ticket
+    assert ticket.get("dispatch_step_index") == 0, ticket
 
-    # 2) 分派: pending → open,owner 按期望查
-    owner_user = helpers.find_user_by_name(client, token, expected_owner_name)
-    assert owner_user is not None, f"未找到 owner:{expected_owner_name}"
+    # 2) 分派: pending → open,owner=链处方默认处理人
+    owner_user = helpers.find_user_by_id(client, token, resp["owner_id"])
+    assert owner_user is not None, f"链处方 owner_id={resp['owner_id']} 不存在"
     owner_id = owner_user["id"]
     after_open = helpers.patch_ticket(client, token, ticket_id, {
         "state": "open",
@@ -69,7 +81,7 @@ def _run_business_support_scenario(
         client, token, ticket_id, target_state="open",
     )
     assert after_open_detail["state"] == "open", after_open_detail
-    assert after_open_detail["owner_name"] == expected_owner_name, after_open_detail
+    assert after_open_detail["owner_name"] == owner_user["name"], after_open_detail
 
     # 3) 处理: open → resolved
     root_cause = f"{scenario_label}:链路告警触发条件未对齐"
@@ -121,11 +133,11 @@ def _run_business_support_scenario(
         category=f"{cat['id']} {cat['name']}",
         state=after_archived["state"],
         dispatcher=expected_dispatcher_name,
-        owner=expected_owner_name,
+        owner=owner_user["name"],
         result="PASS",
         extra={
-            "dispatcher_skill_group": expected_sg_name,
-            "handler_skill_group": expected_handler_sg_name,
+            "chain": expected_chain,
+            "handler_skill_group": dept,
             "transitions": [f"{a or 'None'}->{b}" for a, b in transition_chain],
         },
     ))
@@ -135,7 +147,7 @@ def _run_business_support_scenario(
 def test_core_network_business_support(
     e2e_client, token, batch_id, result_collector
 ):
-    """Scenario 06 — 核心网系统 (2311) → 核心网组 / 核心网处理人。"""
+    """Scenario 06 — 核心网系统 (2311) → 链 [软件开发组]。"""
     _run_business_support_scenario(
         scenario_label="06 核心网系统",
         category_name="核心网系统",
@@ -143,10 +155,7 @@ def test_core_network_business_support(
         client=e2e_client, token=token,
         result_collector=result_collector,
         customer_suffix="核心网",
-        expected_sg_name="业务保障组",
-        expected_dispatcher_name="业务保障协调人",
-        expected_handler_sg_name="核心网组",
-        expected_owner_name="核心网处理人",
+        expected_chain=["软件开发组"],
     )
 
 
@@ -154,7 +163,7 @@ def test_core_network_business_support(
 def test_tt_and_control_business_support(
     e2e_client, token, batch_id, result_collector
 ):
-    """Scenario 07 — 测运控系统 (2312) → 测运控组 / 测运控处理人。"""
+    """Scenario 07 — 测运控系统 (2312) → 链 [测运控组]。"""
     _run_business_support_scenario(
         scenario_label="07 测运控系统",
         category_name="测运控系统",
@@ -162,10 +171,7 @@ def test_tt_and_control_business_support(
         client=e2e_client, token=token,
         result_collector=result_collector,
         customer_suffix="测运控",
-        expected_sg_name="业务保障组",
-        expected_dispatcher_name="业务保障协调人",
-        expected_handler_sg_name="测运控组",
-        expected_owner_name="测运控处理人",
+        expected_chain=["测运控组"],
     )
 
 
@@ -173,7 +179,7 @@ def test_tt_and_control_business_support(
 def test_satellite_business_support(
     e2e_client, token, batch_id, result_collector
 ):
-    """Scenario 08 — 卫星系统 (2313) → 卫星组 / 卫星处理人。"""
+    """Scenario 08 — 卫星系统 (2313) → 链 [整星产品]。"""
     _run_business_support_scenario(
         scenario_label="08 卫星系统",
         category_name="卫星系统",
@@ -181,10 +187,7 @@ def test_satellite_business_support(
         client=e2e_client, token=token,
         result_collector=result_collector,
         customer_suffix="卫星",
-        expected_sg_name="业务保障组",
-        expected_dispatcher_name="业务保障协调人",
-        expected_handler_sg_name="卫星组",
-        expected_owner_name="卫星处理人",
+        expected_chain=["整星产品"],
     )
 
 
@@ -192,20 +195,17 @@ def test_satellite_business_support(
 def test_terminal_software_parent_walk(
     e2e_client, token, batch_id, result_collector
 ):
-    """Scenario 09 — 终端软件 (2321),无 leaf 路由 → 父链上溯到 2301。
+    """Scenario 09 — 终端软件 (2321),V0.21 自带链 [终端研发] 直达。
 
-    期望 dispatcher_skill_group=业务保障组、owner=业务保障处理人(2311/2312/2313
-    有独立 routing rule,所以这一例是验证父链继承路径而非 leaf 直匹配)。
+    老设计是父链上溯到 2301 业务保障组;V0.21 每类一条链后
+    2321 直接命中自己的链,验证链优先于继承。
     """
     _run_business_support_scenario(
-        scenario_label="09 终端软件(父链上溯)",
+        scenario_label="09 终端软件(自带链直达)",
         category_name="终端软件",
         batch_id=batch_id,
         client=e2e_client, token=token,
         result_collector=result_collector,
         customer_suffix="终端软件",
-        expected_sg_name="业务保障组",
-        expected_dispatcher_name="业务保障协调人",
-        expected_handler_sg_name="业务保障组",
-        expected_owner_name="业务保障处理人",
+        expected_chain=["终端研发"],
     )

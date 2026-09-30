@@ -67,7 +67,10 @@ function adaptCategory(c: any): TicketCategory {
     name: c.name,
     parent_id: c.parent_id,
     sort_order: c.sort_order ?? 0,
-    active: true,
+    active: c.active !== false,
+    // V0.21：建单可选判断终点 + 通道（chain/instant/manual/none）
+    create_selectable: !!c.create_selectable,
+    channel: c.channel,
   }
 }
 
@@ -167,6 +170,12 @@ export const metaApi = {
   async getCategories(): Promise<TicketCategory[]> {
     const res: ListResp<any> = await api.get('/categories')
     return flattenCategories(res.data)
+  },
+
+  /** 建单责任预填：链优先（含 chain_steps，可展示"将按链流转：A → B"），无链回退旧规则 */
+  async resolveRouting(categoryId: number): Promise<any> {
+    const res: any = await api.post('/routing-rules/resolve', { category_id: categoryId })
+    return res.data
   },
 
   async getRegions(): Promise<Region[]> {

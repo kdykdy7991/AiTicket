@@ -55,6 +55,7 @@ class TicketUpdate(BaseModel):
     is_callbacked: bool | None = None  # 是否已回访
     callback_required: bool | None = None  # 是否需要回访（false=无需回访）
     satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，仅当 is_callbacked=true 时填写
+    unsatisfied_reason: str | None = None  # 不满意原因（satisfaction=dissatisfied 时必填，设计 §8.2 #9）
     root_cause: str | None = None  # 根本原因
     solution: str | None = None    # 解决办法
     complaint_level: str | None = None  # 投诉级别
@@ -67,6 +68,16 @@ class TicketBatchUpdate(BaseModel):
 
 class TicketCancel(BaseModel):
     reason: str | None = None
+
+
+class TicketRefine(BaseModel):
+    """分诊请求：把工单分类细化到当前分类的直下级。"""
+    category_id: int
+
+
+class TicketTransfer(BaseModel):
+    """转派请求（多步链）：本步完成，推进到链的下一部门。"""
+    reason: str | None = None  # 留空自动填"本步完成，转派「下一部门」"
 
 
 class TicketBrief(BaseModel):
@@ -155,6 +166,7 @@ class TicketDetail(TicketBrief):
     callback_details: str | None = None
     archive_notes: str | None = None
     satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'
+    unsatisfied_reason: str | None = None  # 不满意原因（dissatisfied 时非空）
     is_callbacked: bool = False
     root_cause: str | None = None  # 根本原因
     solution: str | None = None    # 解决办法
@@ -166,6 +178,16 @@ class TicketDetail(TicketBrief):
     can_reply: bool = False                     # 可提交处理说明（会触发 →resolved 流转）
     can_addition: bool = False                  # 可追加说明
     can_remind: bool = False                    # 可催办（且尚未催办过）
+
+    # 分派链快照（V0.21）：steps 同构 dispatch_chains.steps；index=当前步骤（0 起）；
+    # null = 不走链（旧路由/即时办结）。前端渲染链进度与转派按钮用。
+    dispatch_chain_steps: list | None = None
+    dispatch_step_index: int | None = None
+
+    # 分诊能力位（V0.21 §2）：判断人把分类细化一级的入口元数据
+    can_refine: bool = False
+    refine_options: list[dict] = []              # [{"id","name","level"}] 下级分类
+    refine_denied_reason: str | None = None      # 无权/不可分诊的原因（前端提示用）
 
     model_config = {"from_attributes": True}
 

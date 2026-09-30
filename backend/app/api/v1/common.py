@@ -10,6 +10,7 @@ from app.core.deps import get_current_user, require_role
 from app.core.exceptions import NotFoundError
 from app.core.security import hash_password
 from app.models.category import TicketCategory, Region
+from app.models.dispatch import DispatchChain
 from app.models.group import Group, SkillGroup, UserSkillGroup
 from app.models.routing import CategoryRoutingRule
 from app.models.sla import SLAPolicy
@@ -466,6 +467,53 @@ async def list_categories(
         path_chain.reverse()
         paths[c.id] = " / ".join(path_chain)
 
+    # 建单通道标注（V0.21 §4 表A，设计的表单放宽依据）：
+    # - channel:     chain=按分派链自动落位；instant=建单即办结；manual=无链人工分派
+    # - create_selectable: 客服建单可选的"判断终点"——自身有通道（链/即办结/
+    #   链末叶子），且祖先里没有判断链节点：业务保障/星座大系统这类判断节点
+    #   的下级由处理侧分诊产生，不进客服建单表单。
+    from app.services.dispatch_chain import (
+        INSTANT_RESOLVE_CATEGORY_IDS,
+    )
+
+    chain_cat_ids = set(
+        (await db.execute(
+            select(DispatchChain.category_id).where(DispatchChain.enabled == True)  # noqa: E712
+        )).scalars()
+    )
+
+    def _has_chain(cid: int | None) -> bool:
+        """沿父链上溯，任一祖先（含自身）配有启用链即算有链。"""
+        seen: set[int] = set()
+        while cid is not None and cid not in seen:
+            seen.add(cid)
+            if cid in chain_cat_ids:
+                return True
+            parent = by_id.get(cid)
+            cid = parent.parent_id if parent else None
+        return False
+
+    active_children: dict[int, int] = {}
+    for c in all_cats:
+        if c.parent_id is not None:
+            active_children[c.parent_id] = active_children.get(c.parent_id, 0) + 1
+
+    channels: dict[int, str] = {}
+    selectable: dict[int, bool] = {}
+    for c in all_cats:
+        has_chain = _has_chain(c.id)
+        is_instant = c.id in INSTANT_RESOLVE_CATEGORY_IDS
+        is_leaf = active_children.get(c.id, 0) == 0
+        ancestor_chain = False
+        p = by_id.get(c.parent_id) if c.parent_id else None
+        while p is not None:
+            if _has_chain(p.id):
+                ancestor_chain = True
+                break
+            p = by_id.get(p.parent_id) if p.parent_id else None
+        channels[c.id] = "instant" if is_instant else ("chain" if has_chain else ("manual" if is_leaf else "none"))
+        selectable[c.id] = (has_chain or is_instant or is_leaf) and not ancestor_chain
+
     # Build tree.
     node_map: dict[int, dict] = {}
     for c in all_cats:
@@ -477,6 +525,8 @@ async def list_categories(
             "sort_order": c.sort_order,
             "is_active": c.is_active,
             "path": paths[c.id],
+            "channel": channels[c.id],
+            "create_selectable": selectable[c.id],
             "children": [],
         }
     tree = []
@@ -1380,9 +1430,11 @@ async def resolve_routing_rule(
     """Return the suggested responsibility for a given category id.
 
     Used by the create-ticket form to autofill after the user picks a final
-    category. The agent can still override manually. If no rule exists or
-    the rule is disabled, returns matched=False with a reason — the form
-    falls back to manual mode.
+    category. The agent can still override manually.
+
+    分派链（dispatch_chains）优先；无链回退旧 category_routing_rules。
+    链命中时额外返回 chain_steps（前端可展示"将按链流转：A → B"）。
     """
     category_id = body.get("category_id") if isinstance(body, dict) else None
-    return {"data": await resolve_rule(db, category_id)}
+    from app.services.dispatch_chain import resolve_responsibility
+    return {"data": await resolve_responsibility(db, category_id)}

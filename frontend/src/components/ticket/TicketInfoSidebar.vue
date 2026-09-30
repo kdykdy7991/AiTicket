@@ -149,6 +149,11 @@
           <span class="info-label">满意度</span>
           <span :class="['info-value', `sat-${ticket.satisfaction}`]">{{ satisfactionLabel(ticket.satisfaction) }}</span>
         </div>
+        <!-- 不满意原因（V0.87 收尾：unsatisfied_reason，dissatisfied 时非空） -->
+        <div v-if="ticket.satisfaction === 'dissatisfied' && ticket.unsatisfied_reason" class="resolution-block">
+          <div class="resolution-label">不满意原因</div>
+          <div class="resolution-body">{{ ticket.unsatisfied_reason }}</div>
+        </div>
         <div v-if="ticket.callback_details" class="resolution-block">
           <div class="resolution-label">回访详情</div>
           <div class="resolution-body">{{ ticket.callback_details }}</div>

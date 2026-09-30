@@ -184,6 +184,7 @@ async def test_dissatisfied_closure_loop(env):
     # 回访：不满意（带原因）
     await env["patch"](t["id"], {
         "is_callbacked": True, "satisfaction": "dissatisfied",
+        "unsatisfied_reason": "处理后问题仍复现",
         "callback_details": "问题仍复现，客户不满意",
     })
 

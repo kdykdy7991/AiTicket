@@ -39,6 +39,10 @@ export interface TicketCategory {
   parent_id: number | null
   sort_order: number
   active: boolean
+  /** 建单表单可选的"判断终点"（V0.21 §4）；容器/分诊侧节点为 false */
+  create_selectable?: boolean
+  /** 通道：chain=按分派链自动落位；instant=建单即办结；manual=无链人工分派；none=容器 */
+  channel?: string
 }
 
 export interface Region {
@@ -69,6 +73,8 @@ export interface TicketStateLog {
   reason?: string | null
   /** 是否为退回/回退类流转 */
   is_return?: boolean
+  /** Flow Log 动作类型（后端 state_logs 唯一事实来源）：dispatch/refine/transfer/... */
+  action_type?: string | null
   /** 写入 state_log 那一刻工单上的人员快照（创建者/对接人/处理人）。
    *  旧数据可能为空，为空时前端回退到工单当前值。 */
   creator_id_snapshot?: number | null
@@ -177,6 +183,7 @@ export interface Ticket {
   callback_required?: boolean  // 是否需要回访（false=无需回访）；仅详情接口返回
   callback_details?: string | null  // 回访详情/不满意原因（V0.86 贯通）
   satisfaction?: string | null      // 满意度：satisfied/average/dissatisfied/unrated
+  unsatisfied_reason?: string | null  // 不满意原因（dissatisfied 必填，V0.87 收尾）
   // 催办
   urged_at: string | null
   urged_by: User | null
@@ -196,6 +203,13 @@ export interface Ticket {
   can_reply?: boolean
   can_addition?: boolean
   can_remind?: boolean
+
+  // —— V0.21 分派链快照与分诊能力位（仅详情接口返回）——
+  dispatch_chain_steps?: { order: number; department_code: string }[] | null
+  dispatch_step_index?: number | null
+  can_refine?: boolean
+  refine_options?: { id: number; name: string; level?: number }[]
+  refine_denied_reason?: string | null
 }
 
 export interface ArticleAttachment {

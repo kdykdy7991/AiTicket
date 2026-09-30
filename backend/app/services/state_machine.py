@@ -106,8 +106,10 @@ TRANSITION_ACTIONS: dict[tuple[str | None, str], str] = {
     ("returned", "cancelled"): "cancel",
 }
 
-# 全量动作类型（文档 / 测试断言用）
-ACTION_TYPES: set[str] = set(TRANSITION_ACTIONS.values())
+# 全量动作类型（文档 / 测试断言用）。
+# refine/transfer 不是状态流转边（from==to 的域动作，见 apply_refine /
+# apply_transfer），故不在 TRANSITION_ACTIONS，单独并入。
+ACTION_TYPES: set[str] = set(TRANSITION_ACTIONS.values()) | {"refine", "transfer"}
 
 
 def action_for(
@@ -130,6 +132,8 @@ ACTION_LABELS: dict[str, str] = {
     "reopen": "退回重开",
     "resubmit": "重新提交",
     "archive": "归档",
+    "refine": "分诊",     # 判断人细化分类一级（域动作，不改状态）
+    "transfer": "转派",   # 多步链推进到下一部门（open→pending 的链语义）
 }
 
 
@@ -189,6 +193,16 @@ async def compute_allowed_actions(
             "requires_reason": requires_reason(ticket.state, effective),
             "requires_owner": (ticket.state, effective) == ("pending", "open"),
             "label": ACTION_LABELS.get(action, action),
+        })
+    # 多步链推进（转派）：与"处理人打回"同为 open→pending 边，但语义是
+    # 链前进，执行走 /transfer 端点——单独下发按钮元数据，与边推导的动作并存
+    if ticket.state == "open" and await transfer_permission_error(db, ticket, user) is None:
+        actions.append({
+            "action": "transfer",
+            "target_state": "pending",
+            "requires_reason": False,   # 留空自动填"本步完成，转派下一部门"
+            "requires_owner": False,
+            "label": ACTION_LABELS.get("transfer", "转派"),
         })
     return actions
 
@@ -419,6 +433,243 @@ async def apply_initial_state(
         **snapshot_people(ticket, body),
     )
     db.add(log)
+    await db.flush()
+    return log
+
+
+# ── 分诊（refine_category）：判断人细化分类一级 → 按新链重新派单 ──
+# 设计：docs/ticket_dispatch_design.md §2「分诊动作的语义」。
+# 域动作而非状态流转：from==to 自环 Flow Log，action_type=refine。
+# 权限与执行仍收口在本模块（与 apply_transition 同一入口纪律）。
+
+
+async def refine_capability(
+    db: AsyncSession, ticket: Ticket, user: User
+) -> dict:
+    """详情页分诊能力位：can_refine + 可细化到的下级分类 + 拒绝原因。
+
+    规则（设计 §2）：
+      - 仅 pending/open 可分诊（on_hold 先恢复；终态/已处理不可回溯）；
+      - 判断人 = 当前分类链的第 1 步部门的生效成员（admin 越权豁免）；
+      - 当前分类必须有下级（已是判断末级则无可细化对象）。
+    """
+    from app.services.dispatch_chain import (
+        category_children,
+        is_dept_member,
+        judging_department,
+    )
+
+    out: dict = {
+        "can_refine": False,
+        "refine_options": [],
+        "refine_denied_reason": None,
+    }
+    if ticket.state not in ("pending", "open"):
+        out["refine_denied_reason"] = "仅待受理/处理中的工单可分诊"
+        return out
+    if ticket.category_id is None:
+        out["refine_denied_reason"] = "工单未选择分类，无法分诊"
+        return out
+    if user.role != "admin":
+        dept = await judging_department(db, ticket.category_id)
+        if dept is None:
+            out["refine_denied_reason"] = "该分类未配置判断链，无法分诊"
+            return out
+        if not await is_dept_member(db, user.id, dept):
+            out["refine_denied_reason"] = f"仅「{dept}」的判断人可分诊"
+            return out
+    children = await category_children(db, ticket.category_id)
+    if not children:
+        out["refine_denied_reason"] = "该分类已是判断末级，无需分诊"
+        return out
+    out["can_refine"] = True
+    out["refine_options"] = [
+        {"id": c.id, "name": c.name, "level": c.level} for c in children
+    ]
+    return out
+
+
+async def refine_permission_error(
+    db: AsyncSession, ticket: Ticket, user: User
+) -> str | None:
+    """分诊权限/前置：允许返回 None，否则返回错误文案。"""
+    cap = await refine_capability(db, ticket, user)
+    if cap["can_refine"]:
+        return None
+    return cap["refine_denied_reason"] or "无权执行分诊"
+
+
+async def apply_refine(
+    db: AsyncSession,
+    ticket: Ticket,
+    *,
+    new_category_id: int,
+    operator: User,
+) -> TicketStateLog:
+    """分诊执行入口：分类细化一级 → 按新分类链重算快照并落位部门/处理人。
+
+    收口顺序（与 apply_transition 同纪律）：
+      1. 权限/前置（refine_permission_error：状态、判断人、有下级）
+      2. 目标校验：必须是当前分类的直下级且启用（不能跳级、不能凭空改）
+      3. 链重算（resolve_chain 按新分类查配置）+ 接续规则：
+         - 新链首步 == 当前判断部门 → 跳过该步（无下一步则落位不变，
+           即"判断方=处理方"的硬件故障场景）
+         - 否则 → 落位到新链首步部门
+      4. 人员处方：skill_group/dispatcher 切到目标部门；open 状态下
+         owner 一并切换（"当前节点的处理人分给谁就是谁"）
+      5. Flow Log：from==to 自环，action_type=refine，reason 记录分类变化
+
+    不负责 commit——由调用方按请求边界提交。
+    """
+    from app.models.category import TicketCategory
+    from app.services.dispatch_chain import (
+        judging_department,
+        prescribe_dept,
+        resolve_chain,
+    )
+
+    err = await refine_permission_error(db, ticket, operator)
+    if err is not None:
+        raise ForbiddenError(err)
+
+    target = (
+        await db.execute(
+            select(TicketCategory).where(TicketCategory.id == new_category_id)
+        )
+    ).scalar_one_or_none()
+    if target is None or not target.is_active:
+        raise HTTPException(404, detail=f"目标分类不存在或已停用: {new_category_id}")
+    if target.parent_id != ticket.category_id:
+        raise HTTPException(
+            400, detail="分诊只能细化到当前分类的直下级（不能跳级或改往其他分支）"
+        )
+
+    old_category = ticket.category
+    old_name = old_category.name if old_category else str(ticket.category_id)
+    new_name = target.name
+
+    judging_dept = await judging_department(db, ticket.category_id)
+    new_chain = await resolve_chain(db, target.id)
+    steps = new_chain["steps"] if new_chain else []
+
+    # 接续规则（设计 §4）：新链首步 == 判断部门 → 跳过；无下一步 → 落位不变
+    step_index = 0
+    move_dept: str | None = None
+    if steps:
+        if judging_dept is not None and steps[0]["department_code"] == judging_dept:
+            if len(steps) > 1:
+                step_index = 1
+                move_dept = steps[1]["department_code"]
+            else:
+                step_index = 0
+                move_dept = None  # 判断方=处理方：部门/处理人保持
+        else:
+            step_index = 0
+            move_dept = steps[0]["department_code"]
+
+    ticket.category_id = target.id
+    ticket.dispatch_chain_steps = steps or ticket.dispatch_chain_steps
+    ticket.dispatch_step_index = step_index if steps else ticket.dispatch_step_index
+
+    if move_dept is not None:
+        rx = await prescribe_dept(db, move_dept)
+        if rx is not None:
+            ticket.skill_group_id = rx["skill_group_id"]
+            ticket.handler_skill_group_id = rx["skill_group_id"]
+            if rx["dispatcher_id"] is not None:
+                ticket.dispatcher_id = rx["dispatcher_id"]
+            # open 态：直接把处理人切到目标部门处方（链规定，不是自由选择）
+            if ticket.state == "open" and rx["owner_id"] is not None:
+                ticket.owner_id = rx["owner_id"]
+
+    log = TicketStateLog(
+        ticket_id=ticket.id,
+        from_state=ticket.state,
+        to_state=ticket.state,
+        operator_id=operator.id,
+        reason=f"分诊：{old_name} → {new_name}",
+        duration_minutes=None,
+        action_type="refine",
+        **snapshot_people(ticket),
+    )
+    db.add(log)
+    await db.flush()
+    return log
+
+
+async def transfer_permission_error(
+    db: AsyncSession, ticket: Ticket, user: User
+) -> str | None:
+    """转派权限/前置：允许返回 None，否则返回错误文案。
+
+    转派 = 多步链本步完成、推进到链的下一部门（设计 §4）：
+      - 仅处理中（open）可转派——pending 等对接人分派、终态不可回溯；
+      - 工单必须走链且还有下一步（链末步/无链工单无处可转）；
+      - 触发人 = 当前处理人自己（与 open→pending 退回同一身份口径）/ admin。
+    """
+    if ticket.state != "open":
+        return "仅处理中的工单可转派"
+    steps = ticket.dispatch_chain_steps
+    idx = ticket.dispatch_step_index
+    if not steps or idx is None:
+        return "该工单未走分派链，无法转派"
+    if idx + 1 >= len(steps):
+        return "当前已是链上最后一步，无需转派"
+    if user.role != "admin" and ticket.owner_id != user.id:
+        return "只有当前处理人可转派"
+    return None
+
+
+async def apply_transfer(
+    db: AsyncSession,
+    ticket: Ticket,
+    *,
+    operator: User,
+    reason: str | None = None,
+) -> TicketStateLog:
+    """转派执行入口：链快照推进一步 → 工单落到下一部门的待受理。
+
+    收口顺序（与 apply_refine / apply_transition 同纪律）：
+      1. 前置（transfer_permission_error：状态、链上有下一步、处理人身份）
+      2. 下一步部门处方（部门代称 → skill_group/dispatcher）
+      3. 步骤推进 + 部门落位（先改人员，Flow Log 快照记新部门）
+      4. 状态推进复用 apply_transition 唯一入口（open→pending：清 owner、
+         记停留时长、原因校验），action_type 覆盖为 "transfer"——
+         与"处理人打回"同一条边但语义是链前进
+      5. has_returned 归位：转派是前进不是打回（同边不同义，转派不置退回标记）
+
+    不负责 commit——由调用方按请求边界提交。
+    """
+    from app.services.dispatch_chain import prescribe_dept
+
+    err = await transfer_permission_error(db, ticket, operator)
+    if err is not None:
+        raise ForbiddenError(err)
+
+    steps = ticket.dispatch_chain_steps or []
+    next_index = (ticket.dispatch_step_index or 0) + 1
+    next_dept = steps[next_index]["department_code"]
+    rx = await prescribe_dept(db, next_dept)
+    if rx is None:
+        raise HTTPException(422, detail=f"链上下一步部门不存在：{next_dept}")
+
+    # 步骤推进 + 部门落位（owner 由下面 open→pending 的副作用清空，
+    # 下一部门对接人在 pending→open 分派时指定处理人）
+    ticket.dispatch_step_index = next_index
+    ticket.skill_group_id = rx["skill_group_id"]
+    ticket.handler_skill_group_id = rx["skill_group_id"]
+    if rx["dispatcher_id"] is not None:
+        ticket.dispatcher_id = rx["dispatcher_id"]
+
+    log = await apply_transition(
+        db,
+        ticket,
+        to_state="pending",
+        operator=operator,
+        reason=reason or f"本步完成，转派「{next_dept}」",
+        action_type="transfer",
+    )
+    ticket.has_returned = False  # 最新动作是转派不是退回（RETURN_TRANSITIONS 同边改写）
     await db.flush()
     return log
 

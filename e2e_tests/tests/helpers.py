@@ -278,6 +278,31 @@ def find_user_by_name(
     return None
 
 
+def find_user_by_id(
+    client: httpx.Client, token: str, user_id: int
+) -> dict[str, Any] | None:
+    users = list_users(client, token)
+    for u in users:
+        if u.get("id") == user_id:
+            return u
+    return None
+
+
+def expected_dispatcher_name(
+    client: httpx.Client, token: str, resp: dict[str, Any]
+) -> str | None:
+    """resolve 响应 → 工单详情里应出现的 dispatcher_name。
+
+    V0.21 链路径只回 dispatcher_id（预填只用 id，名字由工单详情 join），
+    旧规则路径直接带名字。按 id 动态取人，不硬编码姓名。
+    """
+    if resp.get("dispatcher_id"):
+        u = find_user_by_id(client, token, resp["dispatcher_id"])
+        assert u is not None, f"dispatcher_id={resp['dispatcher_id']} 不存在"
+        return u["name"]
+    return resp.get("dispatcher_name")
+
+
 def find_skill_group_by_name(
     client: httpx.Client, token: str, name: str
 ) -> dict[str, Any] | None:

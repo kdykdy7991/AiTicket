@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -45,6 +45,13 @@ class Ticket(Base):
     creator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     first_owner_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
     dispatcher_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))  # 部门对接人
+
+    # 分派链快照（分派设计 V0.21 §3）：建单/分诊时从 dispatch_chains 展开写入，
+    # 后续按快照推进——链规则改动不影响在途工单。
+    # steps 与 dispatch_chains.steps 同构 [{"order":1,"department_code":"售后"},...]
+    # index = 当前步骤（0 起）；两者同时为 null 表示该单不走链（旧路由/即时办结）。
+    dispatch_chain_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    dispatch_step_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # 重复/升级
     is_draft: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -101,6 +108,11 @@ class Ticket(Base):
     # 回访满意度：仅当 is_callbacked=true 时填写
     # 值：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，未回访时为 null
     satisfaction: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    # 不满意原因（设计 §8.2 #9：回访双分支"收集不满意原因"）：
+    # satisfaction=dissatisfied 时必填；退回重开后保留（处理人要看到改什么），
+    # 新一轮回访若为非不满意则随之清空。
+    unsatisfied_reason: Mapped[str | None] = mapped_column(Text)
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())

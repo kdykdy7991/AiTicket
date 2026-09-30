@@ -82,7 +82,7 @@ async def _ensure_v2_categories(engine):
         # Inline the v2 categories (mirrors f2a3b4c5d6e7)
         # (id, parent_id, name, level, sort_order)
         V2_CATEGORIES = [
-            (1001, None, "咨询", 1, 1),
+            (1001, None, "客户咨询", 1, 1),
             (1002, None, "客户服务", 1, 2),
             (1101, 1001, "即时", 2, 1),
             (1102, 1101, "即时办结咨询", 3, 1),

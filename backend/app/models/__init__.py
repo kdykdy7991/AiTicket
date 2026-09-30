@@ -8,6 +8,7 @@ from app.models.sla import SLAPolicy
 from app.models.notification import DingtalkNotification
 from app.models.audit import AuditLog
 from app.models.routing import CategoryRoutingRule
+from app.models.dispatch import DispatchChain
 from app.models.complaint import ComplaintEscalationPolicy
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "DingtalkNotification",
     "AuditLog",
     "CategoryRoutingRule",
+    "DispatchChain",
 ]

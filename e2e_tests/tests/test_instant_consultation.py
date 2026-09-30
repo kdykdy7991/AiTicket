@@ -1,6 +1,6 @@
 """Scenario 01 — 即时办结咨询。
 
-分类:咨询 / 即时 / 即时办结咨询 (1102)
+分类:客户咨询 / 即时 / 即时办结咨询 (1102)
 期望:create_ticket with is_instant_resolve=true → state=archived,
        solved_at != null, closed_at != null, resolution 非空, state_log 1 条。
 """

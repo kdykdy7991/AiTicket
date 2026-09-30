@@ -31,6 +31,10 @@
               <span class="state-name">
                 <StateTag :state="node.log.to_state" :compact="true" />
                 <span v-if="node.log.is_return && node.log.to_state_key !== 'returned'" class="return-badge">退回</span>
+                <!-- V0.21 域动作徽标：分诊（自环）/ 转派（链推进） -->
+                <span v-if="actionBadge(node.log)" class="action-badge" :class="`action-${node.log.action_type}`">
+                  {{ actionBadge(node.log) }}
+                </span>
               </span>
               <span v-if="!node.log.left_at" class="duration current">当前</span>
             </div>
@@ -72,6 +76,10 @@
                   <span class="badge-emoji">{{ satisfactionEmoji(ticket.satisfaction) }}</span>
                   {{ satisfactionLabel(ticket.satisfaction) }}
                 </span>
+              </div>
+              <!-- 不满意原因（V0.87 收尾：unsatisfied_reason） -->
+              <div v-if="ticket?.satisfaction === 'dissatisfied' && ticket?.unsatisfied_reason" class="unsatisfied-reason">
+                不满意原因：{{ ticket.unsatisfied_reason }}
               </div>
             </div>
           </template>
@@ -198,6 +206,15 @@ function senderName(article: Article): string {
   const u = article.origin_by as any
   if (!u) return ''
   return u.firstname || u.name || ''
+}
+
+/** Flow Log 动作类型 → 徽标文案（refine/transfer 是 V0.21 新增域动作，其余不加徽标） */
+function actionBadge(log: TicketStateLog): string {
+  const map: Record<string, string> = {
+    refine: '分诊',
+    transfer: '转派',
+  }
+  return map[log.action_type || ''] || ''
 }
 
 /** 后端 enum → 中文标签 */
@@ -413,6 +430,38 @@ function repliesForState(log: TicketStateLog): Article[] {
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
+}
+
+/* 域动作徽标（分诊 / 转派） */
+.action-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.action-refine {
+  background: #EEF2FF;
+  color: #4338CA;
+}
+.action-transfer {
+  background: #EFF6FF;
+  color: #1D4ED8;
+}
+
+.unsatisfied-reason {
+  margin-top: 8px;
+  padding: 6px 10px;
+  background: #FEF2F2;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  border-radius: var(--radius-sm);
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #B91C1C;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .addition-name {

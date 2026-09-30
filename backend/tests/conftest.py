@@ -29,6 +29,7 @@ from app.main import app  # noqa: E402
 from app.models import (  # noqa: E402,F401  注册所有表到 Base.metadata
     audit,
     category,
+    dispatch,
     group,
     notification,
     sla,

@@ -5,10 +5,11 @@ Safe to run multiple times (uses ON CONFLICT DO NOTHING).
 """
 
 import asyncio
+import json
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.models.category import TicketCategory as Category
@@ -404,7 +405,7 @@ V2_ROUTING_RULES = [
 # 测试环境的 TRUNCATE 会清掉数据但 alembic_version 仍是 head，
 # 所以这里在 phase9 重新插一次以保持幂等。
 V2_CATEGORIES = [
-    (1001, None, "咨询", 1, 1),
+    (1001, None, "客户咨询", 1, 1),
     (1002, None, "客户服务", 1, 2),
     (1101, 1001, "即时", 2, 1),
     (1102, 1101, "即时办结咨询", 3, 1),
@@ -464,6 +465,81 @@ V2_MISSING_LEAF_RULES = [
      "咨询/非即时-产品使用 → 产品/张朝娟"),
     ("渠道/代理合作",   "市场生态部",       "谢志鹏", None, None,
      "咨询/非即时-渠道代理合作 → 市场生态部/谢志鹏"),
+]
+
+# ── dispatch_chains：分派设计 V0.21（docs/ticket_dispatch_design.md §4）──
+# (category_id, [部门代称...], note)
+#
+# 判断层级（设计 §2）：客服判到 L1（业务保障等）→ 售后判 L2 →
+# 星座大系统负责人判 L3。链的起点 = 分类落位后接续的部门；
+# 判断节点所在部门写进链里作为下一步（如 2301→售后）。
+#
+# 不配链的分类（走其他通道，勿补）：
+#   1102 即时办结咨询 / 2202 套餐查询 —— 建单即办结（instant_resolve）
+#   2103 重要投诉 / 2104 重大投诉     —— 走 complaint_escalation_policies
+DISPATCH_CHAINS: list[tuple[int, list[str], str]] = [
+    (1202, ["品牌传播与大客户"],   "咨询/品牌合作：单步直达"),
+    (1203, ["产品"],               "咨询/产品使用/参数咨询：单步直达"),
+    (1204, ["市场生态部"],         "咨询/渠道/代理合作：单步直达"),
+    (2102, ["值班组"],             "一般投诉：值班组承接（人员按班次维护）"),
+    (2203, ["市场生态部", "业务支撑组"], "套餐变更：审核→执行，两步"),
+    (2204, ["经营管理部", "财务"],       "业财对账：审核→开票，两步"),
+    (2301, ["售后"],               "业务保障：客服判到此级，售后在此分诊（L2 四选一）"),
+    (2302, ["平台运维组"],         "售后分诊后直达"),
+    (2310, ["星座大系统负责人"],   "售后分诊到此，负责人在此再判断（L3 三选一）"),
+    (2311, ["软件开发组"],         "L3 判断结束，直达"),
+    (2312, ["测运控组"],           "L3 判断结束，直达"),
+    (2313, ["整星产品"],           "L3 判断结束，直达"),
+    (2321, ["终端研发"],           "售后分诊后直达"),
+    (2322, ["售后"],               "硬件故障：判断方=处理方；含故障排查/寄修子流程"),
+]
+
+# ── 分派设计 V0.21 §4 表A/表B 补齐（链部门代称 → skill_groups）──
+# DISPATCH_CHAINS 里的部门代称若 skill_groups 不存在，派单引擎按名字查不到部门。
+# 已存在复用：品牌传播与大客户(1) 市场生态部(2) 产品(3) 售后(5) 测运控组(104)。
+DISPATCH_DEPT_GROUPS: list[tuple[int, str]] = [
+    (110, "值班组"),               # §5.1 一般投诉承接，人员按班次维护
+    (111, "业务支撑组"),           # 套餐变更第 2 步
+    (112, "经营管理部"),           # 业财对账第 1 步
+    (113, "财务"),                 # 业财对账第 2 步
+    (114, "平台运维组"),           # 业务保障/应用平台
+    (115, "星座大系统负责人"),     # §5.3 第 3 级判断人（占位账号）
+    (116, "软件开发组"),           # L3/核心网系统
+    (117, "整星产品"),             # L3/卫星系统
+    (118, "终端研发"),             # 业务保障/终端软件
+    (119, "客户服务组"),           # 表B（责任部门文档）
+]
+
+# 表B 缺失的人员（新账号，默认密码 skdy123）。
+# 已存在复用：钟梦茜(10) 谢志鹏(11) 张朝娟(12) 练露(13) 张华(14)
+#             丘文伟(15) 王耀宗(26)。
+DISPATCH_EXTRA_USERS: list[tuple[int, str, str]] = [
+    (220, "yibo",              "易波"),
+    (221, "lichenyang",        "李晨阳"),
+    (222, "qiaoliang",         "乔良"),
+    (223, "nihanhua",          "倪汉华"),
+    (224, "luxiang",           "卢翔"),
+    (225, "liyouquan",         "李有全"),
+    (226, "constellation_lead", "星座大系统负责人"),  # §5.3 占位账号
+]
+
+# 表B 映射（user_id, skill_group_id, is_dispatcher）。
+# 设计约定"单人部门 = 对接人即处理人"：链上每个部门都要有人能执行
+# pending→open（分派权限按 is_dispatcher 判定），故单人部门一律 True。
+DISPATCH_USER_SKILL_GROUPS: list[tuple[int, int, bool]] = [
+    # 已有用户 → 链部门（原映射保留，本表只增不删）
+    (13, 111, True),   # 练露 → 业务支撑组（表B both；原网运部映射保留）
+    (15, 114, True),   # 丘文伟 → 平台运维组
+    (26, 119, True),   # 王耀宗 → 客户服务组
+    (26, 110, True),   # 王耀宗 → 值班组（默认值班人；班次轮换改 effective 区间）
+    # 新账号 → 链部门
+    (220, 112, True),  # 易波 → 经营管理部
+    (221, 113, True),  # 李晨阳 → 财务
+    (222, 116, True),  # 乔良 → 软件开发组
+    (223, 104, True),  # 倪汉华 → 测运控组（表B handler；组内唯一对接人）
+    (224, 117, True),  # 卢翔 → 整星产品
+    (225, 118, True),  # 李有全 → 终端研发
+    (226, 115, True),  # 占位账号 → 星座大系统负责人
 ]
 
 
@@ -670,6 +746,110 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
             )
             print(f"  [ok] {cat_name} ({cat_id}) → {d_sg_name}({d_sg_id}) / {d_user_name}({d_user_id})")
 
+        # ── 分派设计 V0.21 §4 表B：链部门 + 人员补齐（幂等）──
+        # 必须先于 dispatch_chains 校验逻辑可用：链的 department_code 按名字
+        # 查 skill_groups，缺部门则派单引擎找不到受理人。
+        print("[Phase 9] Seeding dispatch dept skill_groups...")
+        await db.execute(
+            text("""
+                INSERT INTO skill_groups (id, name, created_at, updated_at)
+                VALUES (:id, :name, :created_at, :updated_at)
+                ON CONFLICT (id) DO NOTHING
+            """),
+            [
+                {"id": gid, "name": name, "created_at": now, "updated_at": now}
+                for gid, name in DISPATCH_DEPT_GROUPS
+            ],
+        )
+        # 兜底：id 被占用但名字没建出来时按名字补（冲突仅在历史脏数据时触发）
+        for gid, name in DISPATCH_DEPT_GROUPS:
+            exists = await db.execute(
+                select(SkillGroup.id).where(SkillGroup.name == name).limit(1)
+            )
+            if not exists.scalar_one_or_none():
+                await db.execute(
+                    text("""
+                        INSERT INTO skill_groups (name, created_at, updated_at)
+                        VALUES (:name, :created_at, :updated_at)
+                        ON CONFLICT (name) DO NOTHING
+                    """),
+                    {"name": name, "created_at": now, "updated_at": now},
+                )
+                print(f"  [warn] id={gid} 被占用，按名字新建部门: {name}")
+
+        print("[Phase 9] Seeding dispatch extra users...")
+        await db.execute(
+            text("""
+                INSERT INTO users (id, username, name, role, group_id, is_group_leader,
+                                   password_hash, is_active, created_at, updated_at)
+                VALUES (:id, :username, :name, 'handler', 1, false,
+                        :password_hash, true, :created_at, :updated_at)
+                ON CONFLICT (id) DO NOTHING
+            """),
+            [
+                {"id": uid, "username": uname, "name": name,
+                 "password_hash": _SKDY_HASH, "created_at": now, "updated_at": now}
+                for uid, uname, name in DISPATCH_EXTRA_USERS
+            ],
+        )
+
+        print("[Phase 9] Seeding dispatch user_skill_groups (表B)...")
+        await db.execute(
+            text("""
+                INSERT INTO user_skill_groups (user_id, skill_group_id, is_dispatcher)
+                VALUES (:user_id, :skill_group_id, :is_dispatcher)
+                ON CONFLICT DO NOTHING
+            """),
+            [
+                {"user_id": uid, "skill_group_id": gid, "is_dispatcher": disp}
+                for uid, gid, disp in DISPATCH_USER_SKILL_GROUPS
+            ],
+        )
+
+        # ── 校验：dispatch_chains 的每个 department_code 都要有部门与对接人 ──
+        chain_depts = {d for _, depts, _ in DISPATCH_CHAINS for d in depts}
+        rows = await db.execute(select(SkillGroup.id, SkillGroup.name))
+        sg_by_name = {name: gid for gid, name in rows.all()}
+        missing_depts = sorted(chain_depts - set(sg_by_name))
+        if missing_depts:
+            print(f"  [ERROR] 链部门缺失 skill_groups: {missing_depts}")
+        for dept in sorted(chain_depts & set(sg_by_name)):
+            disp = await db.execute(
+                select(func.count()).select_from(UserSkillGroup).where(
+                    UserSkillGroup.skill_group_id == sg_by_name[dept],
+                    UserSkillGroup.is_dispatcher == True,  # noqa: E712
+                )
+            )
+            if (disp.scalar() or 0) == 0:
+                print(f"  [ERROR] 部门无对接人（无法分派）: {dept}")
+
+        # ── dispatch_chains（分派设计 V0.21 §4，重复执行幂等刷新为权威值）──
+        print("[Phase 9] Seeding dispatch_chains...")
+        for cat_id, depts, note in DISPATCH_CHAINS:
+            steps = [
+                {"order": i + 1, "department_code": d}
+                for i, d in enumerate(depts)
+            ]
+            await db.execute(
+                text("""
+                    INSERT INTO dispatch_chains
+                    (category_id, steps, enabled, note, created_at, updated_at)
+                    VALUES (:cat_id, CAST(:steps AS json), TRUE, :note, :now, :now)
+                    ON CONFLICT (category_id) DO UPDATE SET
+                        steps = EXCLUDED.steps,
+                        enabled = TRUE,
+                        note = EXCLUDED.note,
+                        updated_at = EXCLUDED.updated_at
+                """),
+                {
+                    "cat_id": cat_id,
+                    "steps": json.dumps(steps, ensure_ascii=False),
+                    "note": note,
+                    "now": now,
+                },
+            )
+            print(f"  [ok] chain {cat_id}: {' → '.join(depts)}")
+
         # 重置序列
         await db.execute(
             text("""
@@ -687,6 +867,12 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
             text("""
                 SELECT setval('category_routing_rules_id_seq',
                               COALESCE((SELECT MAX(id) FROM category_routing_rules), 1))
+            """)
+        )
+        await db.execute(
+            text("""
+                SELECT setval('dispatch_chains_id_seq',
+                              COALESCE((SELECT MAX(id) FROM dispatch_chains), 1))
             """)
         )
 

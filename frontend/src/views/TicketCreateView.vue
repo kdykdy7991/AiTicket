@@ -78,13 +78,24 @@
                 <el-option v-for="c in categoriesL1" :key="c.id" :label="c.name" :value="c.id" />
               </el-select>
             </el-form-item>
-            <el-form-item label="二级分类" prop="category_l2_id" class="form-col">
-              <el-select v-model="form.category_l2_id" placeholder="选择二级分类" style="width: 100%" :disabled="!form.category_l1_id" clearable>
-                <el-option v-for="c in categoriesL2" :key="c.id" :label="c.name" :value="c.id" />
+            <!-- V0.21 §4：二级下拉 = 该一级下全部"判断终点"（create_selectable），
+                 客服只判到判断级，中间判断节点由分诊细化，不进表单 -->
+            <el-form-item label="问题分类" prop="category_l2_id" class="form-col">
+              <el-select v-model="form.category_l2_id" placeholder="选择问题分类（判断终点）" style="width: 100%" :disabled="!form.category_l1_id" clearable filterable>
+                <el-option v-for="c in categoriesSelectableL2" :key="c.id" :label="c.label" :value="c.id" />
               </el-select>
             </el-form-item>
           </div>
-          <div class="form-row">
+          <!-- 分派链预填提示：选中分类后由 routing-rules/resolve 给出（链优先） -->
+          <p v-if="routingHint" class="routing-hint" :class="`routing-hint--${routingHint.type}`">
+            {{ routingHint.text }}
+          </p>
+          <!-- 即办结分类：建单即归档（保留工单记录），无需对接部门/对接人与回访 -->
+          <div v-if="isInstantCategory" class="instant-banner">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            「{{ selectedCategory?.name }}」为即办结分类：工单创建后直接归档（保留工单记录），无需选择对接部门，也无需回访。
+          </div>
+          <div v-else class="form-row">
             <el-form-item label="对接部门" prop="skill_group_id" class="form-col">
               <el-select v-model="form.skill_group_id" placeholder="技术/市场/售后" style="width: 100%" @change="onSkillGroupChange">
                 <el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id" />
@@ -182,6 +193,17 @@ const form = reactive({
   body: '',
 })
 
+// 选中的判断终点分类（V0.21）
+const categoryById = computed(() => new Map(categories.value.map(c => [c.id, c])))
+const selectedCategory = computed(() =>
+  form.category_l2_id ? categoryById.value.get(form.category_l2_id) : undefined,
+)
+// 即办结通道（1102 即时办结咨询 / 2202 套餐查询）：建单即归档，无需对接部门
+const isInstantCategory = computed(() => selectedCategory.value?.channel === 'instant')
+
+// 分派链/责任预填提示（routing-rules/resolve 返回）
+const routingHint = ref<{ type: 'chain' | 'warn'; text: string } | null>(null)
+
 const rules: FormRules = {
   customer_type: [{ required: true, message: '请选择用户类型', trigger: 'change' }],
   customer_phone: [
@@ -215,8 +237,23 @@ const rules: FormRules = {
     },
     trigger: 'blur',
   }],
-  skill_group_id: [{ required: true, message: '请选择对接部门', trigger: 'change' }],
-  dispatcher_id: [{ required: true, message: '请选择部门对接人', trigger: 'change' }],
+  // 即办结分类放宽对接部门/对接人（V0.21 §4：建单即归档，无需分派）
+  skill_group_id: [{
+    validator: (_r, _v, cb) => {
+      if (isInstantCategory.value) return cb()
+      if (!form.skill_group_id) return cb(new Error('请选择对接部门'))
+      cb()
+    },
+    trigger: 'change',
+  }],
+  dispatcher_id: [{
+    validator: (_r, _v, cb) => {
+      if (isInstantCategory.value) return cb()
+      if (!form.dispatcher_id) return cb(new Error('请选择部门对接人'))
+      cb()
+    },
+    trigger: 'change',
+  }],
   priority_id: [{ required: true, message: '请选择优先级', trigger: 'change' }],
   channel: [{ required: true, message: '请选择工单来源', trigger: 'change' }],
   category_l1_id: [{ required: true, message: '请选择一级分类', trigger: 'change' }],
@@ -224,7 +261,38 @@ const rules: FormRules = {
 }
 
 const categoriesL1 = computed(() => categories.value.filter(c => c.parent_id === null))
-const categoriesL2 = computed(() => categories.value.filter(c => c.parent_id === form.category_l1_id))
+
+// V0.21 §4：二级下拉 = 选中一级的全部后代"判断终点"（create_selectable），
+// 含三级节点（如 客户咨询 → 咨询服务 → 即时办结咨询）；标签带路径防重名混淆
+const categoriesSelectableL2 = computed(() => {
+  const l1 = form.category_l1_id
+  if (!l1) return []
+  const out: { id: number; label: string; name: string }[] = []
+  for (const c of categories.value) {
+    if (!c.create_selectable) continue
+    // 是否为 l1 的后代（沿 parent_id 上溯，避免依赖固定层级）
+    let p: number | null = c.parent_id
+    let hops = 0
+    let under = false
+    while (p != null && hops < 10) {
+      if (p === l1) { under = true; break }
+      p = categoryById.value.get(p)?.parent_id ?? null
+      hops++
+    }
+    if (!under) continue
+    // 路径标签：l1 直属子节点 → … → 自身
+    const names: string[] = []
+    let cur: number | null = c.id
+    while (cur != null && cur !== l1) {
+      const node = categoryById.value.get(cur)
+      if (!node) break
+      names.unshift(node.name)
+      cur = node.parent_id
+    }
+    out.push({ id: c.id, label: names.join(' / '), name: c.name })
+  }
+  return out
+})
 
 const availablePriorities = computed(() => {
   if (form.customer_type === 'enterprise') return priorities.value
@@ -233,7 +301,50 @@ const availablePriorities = computed(() => {
 
 function onCategoryL1Change() {
   form.category_l2_id = null
+  routingHint.value = null
 }
+
+// 选中判断终点后：请求责任预填（链优先）。
+//  - 链命中：预填对接部门/对接人（后端建单时也会同样预填，前端展示可覆盖），
+//    并提示"将按分派链流转：A → B"；
+//  - 即办结：清空对接字段，建单即归档；
+//  - 部门无对接人等 reason：显示告警，由表单手动指定。
+let routingSeq = 0
+watch(() => form.category_l2_id, async (cid) => {
+  routingHint.value = null
+  if (!cid) return
+  // 编辑草稿：保留草稿里已选的对接部门，不被预填覆盖
+  if (editingDraftId.value) return
+  const seq = ++routingSeq
+  const cat = categoryById.value.get(cid)
+  if (cat?.channel === 'instant') {
+    // 即办结通道：无需分派，清掉上一次选择残留的对接字段
+    form.skill_group_id = null
+    form.dispatcher_id = null
+    dispatchers.value = []
+    return
+  }
+  try {
+    const data = await metaApi.resolveRouting(cid)
+    if (seq !== routingSeq) return
+    if (data?.chain_steps?.length) {
+      const depts = data.chain_steps.map((s: any) => s.department_code)
+      routingHint.value = { type: 'chain', text: `将按分派链流转：${depts.join(' → ')}` }
+    }
+    if (data?.matched && data.dispatcher_skill_group_id) {
+      const sgId = Number(data.dispatcher_skill_group_id)
+      form.skill_group_id = sgId
+      form.dispatcher_id = null
+      dispatchers.value = await metaApi.getDispatchers(sgId)
+      if (data.dispatcher_id) form.dispatcher_id = data.dispatcher_id
+    }
+    if (data?.reason) {
+      routingHint.value = { type: 'warn', text: data.reason }
+    }
+  } catch {
+    // 预填失败不阻塞建单：由客服手动选择对接部门
+  }
+})
 
 // 切换来电号码类型时清空原值并触发校验
 function onPhoneTypeChange() {
@@ -481,6 +592,34 @@ async function doSubmit() {
   font-size: 12px;
   color: var(--color-text-tertiary);
   font-weight: 400;
+}
+
+/* 即办结分类横幅（V0.21 §4：套餐查询/即时办结咨询 建单即归档） */
+.instant-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #92400E;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 分派链/责任预填提示 */
+.routing-hint {
+  margin: -6px 0 16px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.routing-hint--chain {
+  color: var(--color-primary);
+}
+.routing-hint--warn {
+  color: #92400E;
 }
 
 .create-form :deep(.el-form-item__label) {

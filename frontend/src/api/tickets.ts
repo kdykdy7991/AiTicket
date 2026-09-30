@@ -79,6 +79,8 @@ function adaptStateLogs(logs: any[]): any[] {
       // 是否"退回类"动作：由后端 Flow Log 的 action_type 决定（唯一事实来源）。
       // return=退回/打回，reopen=已处理退回重开；resume(恢复处理) 不算退回。
       is_return: ['return', 'reopen'].includes(log.action_type || ''),
+      // 动作类型透传：时间线按 refine/transfer 等渲染动作徽标
+      action_type: log.action_type ?? null,
       // 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人
       creator_id_snapshot: log.creator_id_snapshot ?? null,
       creator_name_snapshot: log.creator_name_snapshot ?? null,
@@ -274,6 +276,18 @@ export const ticketApi = {
   async update(id: number, data: TicketUpdatePayload): Promise<Ticket> {
     const res: any = await api.patch(`/tickets/${id}`, data)
     return adaptTicket(res)
+  },
+
+  // 分诊：判断人把分类细化一级（域动作，POST 后端返回最新详情）
+  async refine(id: number, categoryId: number): Promise<any> {
+    const res: any = await api.post(`/tickets/${id}/refine`, { category_id: categoryId })
+    return res.data
+  },
+
+  // 转派：多步链本步完成，推进到链的下一部门（reason 留空后端自动填）
+  async transfer(id: number, reason?: string): Promise<any> {
+    const res: any = await api.post(`/tickets/${id}/transfer`, { reason: reason || null })
+    return res.data
   },
 
   async checkDuplicate(data: DuplicateCheckPayload): Promise<DuplicateCheckResult> {

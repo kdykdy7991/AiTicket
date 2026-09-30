@@ -636,6 +636,8 @@ def test_action_map_covers_all_reachable_transitions():
     assert ACTION_TYPES == {
         "create", "instant_resolve", "dispatch", "return", "cancel",
         "resolve", "hold", "resume", "reopen", "archive", "resubmit",
+        # 域动作（非状态流转边，from==to 自环日志）
+        "refine", "transfer",
     }
     assert action_for("pending", "open") == "dispatch"
     assert action_for("pending", "open", override="custom") == "custom"
@@ -895,6 +897,7 @@ async def test_dissatisfied_cannot_archive(env):
     r1 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "is_callbacked": True, "callback_required": True,
         "satisfaction": "dissatisfied",
+        "unsatisfied_reason": "上门处理后重启问题仍复现",
         "callback_details": "重启问题仍未解决，客户要求再次上门",
     })
     assert r1.status_code == 200, r1.text
@@ -965,6 +968,7 @@ async def test_callback_config_cannot_erase_callback_facts(env):
     r1 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "is_callbacked": True, "callback_required": True,
         "satisfaction": "dissatisfied",
+        "unsatisfied_reason": "重启问题仍未解决",
         "callback_details": "重启问题未解决，客户不满意",
     })
     assert r1.status_code == 200, r1.text

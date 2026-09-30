@@ -11,7 +11,7 @@ from app.models.category import TicketCategory
 # Mirror the V2_CATEGORIES tuple in the migration so tests can re-seed after
 # the per-test TRUNCATE in conftest.
 V2_CATEGORIES = [
-    (1001, None, "咨询", 1, 1),
+    (1001, None, "客户咨询", 1, 1),
     (1002, None, "客户服务", 1, 2),
     (1101, 1001, "即时", 2, 1),
     (1102, 1101, "即时办结咨询", 3, 1),
@@ -105,13 +105,13 @@ async def test_v2_tree_present_and_path_correct(seeded_categories):
         return None
 
     top_names = [n["name"] for n in tree]
-    assert "咨询" in top_names
+    assert "客户咨询" in top_names
     assert "客户服务" in top_names
 
     leaf = find_by_name(tree, "即时办结咨询")
     assert leaf is not None
     assert leaf["level"] == 3
-    assert leaf["path"] == "咨询 / 即时 / 即时办结咨询"
+    assert leaf["path"] == "客户咨询 / 即时 / 即时办结咨询"
 
     core = find_by_name(tree, "核心网系统")
     assert core is not None

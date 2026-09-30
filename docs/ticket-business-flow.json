@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "客服工单全链路业务流程（新建工单 → 归档）",
+    "output": "docs/ticket-business-flow.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-chain",
+        "label": "主链路：建单到归档",
+        "focus": ["nCreate", "nPending", "gDispatch", "nOpen", "nResolved", "gCallback", "nArchive"],
+        "note": "正式建单、分派、处理说明、回访满意后归档的标准路径。"
+      },
+      {
+        "id": "loops",
+        "label": "循环与异常分支",
+        "focus": ["nPending", "nReturned", "nHold", "nOpen", "nResolved", "gCallback", "nCancel"],
+        "note": "打回、退回、暂缓恢复、重开与不满意拦截形成的所有循环。"
+      }
+    ]
+  },
+  "lanes": [
+    { "id": "intake", "label": "建单与受理" },
+    { "id": "handling", "label": "分派与处理" },
+    { "id": "closure", "label": "暂缓与回访归档" },
+    { "id": "exceptions", "label": "旁路 · 退回 · 撤销（异常分支）", "variant": "exception" }
+  ],
+  "phases": [
+    { "id": "pAccept", "label": "受理", "fromCol": 0, "toCol": 1 },
+    { "id": "pHandle", "label": "处理", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "pClose", "label": "闭环归档", "fromCol": 4, "toCol": 5 }
+  ],
+  "groups": [
+    { "id": "gException", "label": "退回 / 撤销分支", "lane": "exceptions", "fromCol": 2, "toCol": 4, "variant": "security" }
+  ],
+  "mainPath": ["nCreate", "nPending", "gDispatch", "nOpen", "nResolved", "gCallback", "nArchive"],
+  "nodes": [
+    { "id": "nCreate", "lane": "intake", "col": 0, "type": "backend", "label": "新建工单", "sublabel": "POST /tickets", "tag": "create" },
+    { "id": "nPending", "lane": "intake", "col": 1, "type": "backend", "label": "待受理 pending", "sublabel": "分派前 · 无处理人" },
+    { "id": "gDispatch", "lane": "intake", "col": 2, "type": "security", "label": "分派校验", "sublabel": "对接人 / admin", "tag": "403 / 422" },
+    { "id": "nOpen", "lane": "handling", "col": 2, "type": "backend", "label": "处理中", "sublabel": "open · 处理人负责", "width": 104 },
+    { "id": "nResolved", "lane": "handling", "col": 4, "type": "backend", "label": "已处理 resolved", "sublabel": "solved_at · 可回访", "width": 116 },
+    { "id": "nHold", "lane": "closure", "col": 2, "type": "backend", "label": "暂缓", "sublabel": "on_hold", "tag": "原因必填", "width": 80 },
+    { "id": "gCallback", "lane": "closure", "col": 4, "type": "security", "label": "回访闭环判定", "sublabel": "满意度检查", "tag": "422", "width": 96 },
+    { "id": "nArchive", "lane": "closure", "col": 5, "type": "database", "label": "已归档 archived", "sublabel": "终态 · closed_at", "width": 116 },
+    { "id": "nInstant", "lane": "exceptions", "col": 0, "type": "cloud", "label": "即时办结", "sublabel": "免分派 · 免回访", "tag": "instant_resolve", "width": 132 },
+    { "id": "nReturned", "lane": "exceptions", "col": 2, "type": "backend", "label": "已退回 returned", "sublabel": "等待重新提交", "width": 116 },
+    { "id": "nCancel", "lane": "exceptions", "col": 4, "type": "external", "label": "已撤销 cancelled", "sublabel": "终态 · 原因必填", "width": 124 }
+  ],
+  "edges": [
+    { "id": "eCreate", "from": "nCreate", "to": "nPending", "label": "正式建单 → pending", "role": "main", "variant": "emphasis" },
+    { "id": "eAskDispatch", "from": "nPending", "to": "gDispatch", "label": "申请分派", "role": "main", "variant": "emphasis" },
+    { "id": "eDispatch", "from": "gDispatch", "to": "nOpen", "label": "分派 open · 须指定处理人", "role": "main", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "id": "eResolve", "from": "nOpen", "to": "nResolved", "label": "提交处理说明 → resolved", "role": "main", "variant": "emphasis" },
+    { "id": "eCallback", "from": "nResolved", "to": "gCallback", "label": "发起回访", "role": "main", "variant": "emphasis", "fromSide": "bottom", "toSide": "top" },
+    { "id": "eArchive", "from": "gCallback", "to": "nArchive", "label": "满意 / 未评价 / 无需回访 → 归档", "role": "main", "variant": "emphasis" },
+
+    { "id": "eInstantEntry", "from": "nCreate", "to": "nInstant", "label": "咨询类 is_instant_resolve", "role": "branch", "fromSide": "bottom", "toSide": "top" },
+    { "id": "eInstant", "from": "nInstant", "to": "nArchive", "label": "直接归档 · 免回访", "role": "branch", "route": "bottom-channel", "fromSide": "bottom", "toSide": "bottom" },
+
+    { "id": "eReturnPending", "from": "nPending", "to": "nReturned", "label": "退回 return · 原因必填", "role": "return", "fromSide": "bottom", "toSide": "left" },
+    { "id": "eResubmit", "from": "nReturned", "to": "nPending", "label": "重新提交 resubmit", "role": "return", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "eBounce", "from": "nOpen", "to": "nPending", "label": "打回 · 原因必填", "role": "return", "fromSide": "left", "toSide": "bottom" },
+    { "id": "eHold", "from": "nOpen", "to": "nHold", "label": "暂缓 · 原因必填", "role": "branch", "fromSide": "bottom", "toSide": "top" },
+    { "id": "eResume", "from": "nHold", "to": "nOpen", "label": "恢复处理 · 原因必填", "role": "return", "fromSide": "top", "toSide": "bottom" },
+    { "id": "eHoldBounce", "from": "nHold", "to": "nPending", "label": "打回 · 原因必填", "role": "return", "fromSide": "left", "toSide": "bottom" },
+    { "id": "eHoldResolve", "from": "nHold", "to": "nResolved", "label": "手动办结", "role": "branch", "fromSide": "right", "toSide": "left" },
+    { "id": "eReopen", "from": "nResolved", "to": "nOpen", "label": "退回重开 reopen · 原因必填 · 满意度重置", "role": "return", "fromSide": "bottom", "toSide": "right" },
+    { "id": "eDissatisfied", "from": "gCallback", "to": "nOpen", "label": "不满意：禁止归档 (422) · 必须重开重处理", "role": "error", "variant": "security", "fromSide": "left", "toSide": "right" },
+
+    { "id": "eCancelPending", "from": "nPending", "to": "nCancel", "label": "撤销", "role": "branch", "fromSide": "bottom", "toSide": "bottom" },
+    { "id": "eCancelOpen", "from": "nOpen", "to": "nCancel", "label": "撤销", "role": "branch", "fromSide": "bottom", "toSide": "left" },
+    { "id": "eCancelHold", "from": "nHold", "to": "nCancel", "label": "撤销", "role": "branch", "fromSide": "bottom", "toSide": "left" },
+    { "id": "eCancelReturned", "from": "nReturned", "to": "nCancel", "label": "撤销", "role": "branch", "fromSide": "right", "toSide": "left" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "唯一执行入口 apply_transition",
+      "items": [
+        "顺序：合法性 → 权限 (403) → 原因必填 (400) → 业务前置 (422) → 副作用 + Flow Log",
+        "批量 batch-update 同源：非法流转跳过，403/400 整批回滚",
+        "allowed_actions 由同一套规则生成，按钮可见性与执行结果永远一致"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "建单三入口",
+      "items": [
+        "正式建单 → pending，Flow Log 记 create",
+        "草稿 is_draft 不写初始日志，提交后进入 pending",
+        "即时办结 None → archived，记 instant_resolve，免回访免分派"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "回访闭环规则",
+      "items": [
+        "callback_required 是流程配置，不能抹掉已产生的回访事实",
+        "satisfaction=dissatisfied：归档动作不下发，执行侧 422 拦截",
+        "唯一重置路径：reopen 清空满意度 → 重新处理 → 再回访 → 归档"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "状态不变的沟通动作",
+      "items": [
+        "催办 urge：pending / open / on_hold，每张工单仅一次",
+        "追加信息 addition：pending / open / on_hold / returned，admin / agent",
+        "回复文章（处理说明）：open / on_hold 处理人提交即流转 resolved",
+        "撤销可从 pending / open / on_hold / returned 发起，原因必填"
+      ]
+    }
+  ]
+}

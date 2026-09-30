@@ -12,6 +12,29 @@
           <span class="ticket-number">{{ ticket.number || '未编号' }}</span>
           <StateTag :state="ticket.state" />
           <div class="header-actions">
+            <!-- V0.21：分诊（判断人细化分类一级）与转派（链推进一步） -->
+            <el-button
+              v-if="(ticket as any).can_refine"
+              type="primary"
+              plain
+              size="small"
+              class="header-action-btn"
+              @click="openRefineDialog"
+            >分诊</el-button>
+            <el-button
+              v-else-if="(ticket as any).refine_denied_reason && !isTerminalState"
+              size="small"
+              class="header-action-btn"
+              disabled
+              :title="(ticket as any).refine_denied_reason"
+            >分诊</el-button>
+            <el-button
+              v-if="transferAction"
+              type="primary"
+              size="small"
+              class="header-action-btn"
+              @click="openTransferDialog"
+            >转派</el-button>
             <el-button v-if="canReturn" type="danger" size="small" class="header-action-btn" @click="openReturnDialog">退 回</el-button>
             <el-button v-if="canCancel" type="danger" size="small" class="header-action-btn" @click="openCancelDialog">撤销</el-button>
           </div>
@@ -24,6 +47,21 @@
             <div class="ticket-description-label">详细描述</div>
             <div class="ticket-description-body">{{ (ticket as any).description }}</div>
           </div>
+          <!-- 分派链进度（V0.21 链快照）：灰=已过步骤，主色=当前步骤 -->
+          <div v-if="chainSteps.length" class="chain-strip">
+            <span class="chain-strip-label">分派链</span>
+            <template v-for="(s, i) in chainSteps" :key="s.order">
+              <span
+                class="chain-step"
+                :class="{ 'is-done': i < currentStepIndex, 'is-current': i === currentStepIndex }"
+              >
+                {{ s.department_code }}
+              </span>
+              <span v-if="i < chainSteps.length - 1" class="chain-arrow">→</span>
+            </template>
+            <span class="chain-progress">第 {{ Math.min(currentStepIndex + 1, chainSteps.length) }} / {{ chainSteps.length }} 步</span>
+          </div>
+
           <div class="timeline-card">
             <h3 class="timeline-section-title">流转时间线</h3>
             <StateLogTimeline
@@ -113,6 +151,16 @@
                 <el-radio :label="'dissatisfied'">不满意</el-radio>
                 <el-radio :label="'unrated'">未评价</el-radio>
               </el-radio-group>
+              <!-- 不满意原因（后端 unsatisfied_reason，dissatisfied 必填，V0.87 收尾） -->
+              <el-input
+                v-if="callbackChoice === 'call_backed' && satisfaction === 'dissatisfied'"
+                v-model="unsatisfiedReason"
+                type="textarea"
+                :rows="2"
+                placeholder="客户不满意原因（必填）"
+                maxlength="500"
+                show-word-limit
+              />
               <!-- 回访详情（不满意原因为其中必填场景），后端 callback_details 字段 -->
               <el-input
                 v-if="callbackChoice === 'call_backed'"
@@ -208,6 +256,32 @@
         </template>
       </el-dialog>
 
+      <!-- 分诊弹窗：判断人细化分类一级，系统按新分类链重新落位 -->
+      <el-dialog v-model="refineDialogVisible" title="分诊" width="440px" top="15vh" :close-on-click-modal="false">
+        <p class="dialog-hint">按流程规定把分类细化一级，确认后系统将按新分类的分派链重新落位部门：</p>
+        <el-radio-group v-model="refineCategoryId" class="refine-options">
+          <el-radio v-for="o in refineOptions" :key="o.id" :label="o.id" :value="o.id" border class="refine-option">
+            {{ o.name }}
+          </el-radio>
+        </el-radio-group>
+        <template #footer>
+          <el-button @click="refineDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="refining" :disabled="!refineCategoryId" @click="confirmRefine">确认分诊</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 转派弹窗：链本步完成，推进到下一部门 -->
+      <el-dialog v-model="transferDialogVisible" title="转派" width="440px" top="15vh" :close-on-click-modal="false">
+        <p class="dialog-hint">
+          本步处理完成，工单将按分派链转派至下一部门{{ nextDeptName ? `：「${nextDeptName}」` : '' }}。
+        </p>
+        <el-input v-model="transferReason" type="textarea" :rows="2" placeholder="转派说明（选填，留空自动填写「本步完成，转派下一部门」）" maxlength="500" show-word-limit />
+        <template #footer>
+          <el-button @click="transferDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="transferring" @click="confirmTransfer">确认转派</el-button>
+        </template>
+      </el-dialog>
+
     </template>
   </div>
 </template>
@@ -217,6 +291,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
 import { metaApi } from '@/api/overviews'
+import { ticketApi } from '@/api/tickets'
 import { ElMessage } from 'element-plus'
 import type { Group, AllowedAction } from '@/types'
 import StateTag from '@/components/common/StateTag.vue'
@@ -257,6 +332,75 @@ const canReturn = computed(() => !!returnAction.value)
 const canCancel = computed(() => !!findAction('cancel'))
 const canArchiveFromResolved = computed(() => !!findAction('archive'))
 const canResubmit = computed(() => !!findAction('resubmit'))
+
+// ── V0.21 分派链快照：进度条与转派弹窗的"下一部门"提示 ──
+const chainSteps = computed<{ order: number; department_code: string }[]>(
+  () => (ticket.value as any)?.dispatch_chain_steps ?? [],
+)
+const currentStepIndex = computed(() => (ticket.value as any)?.dispatch_step_index ?? 0)
+const nextDeptName = computed(
+  () => chainSteps.value[currentStepIndex.value + 1]?.department_code ?? '',
+)
+
+// ── 分诊（refine）：能力位与选项全部来自后端 can_refine / refine_options ──
+const refineOptions = computed<{ id: number; name: string; level?: number }[]>(
+  () => (ticket.value as any)?.refine_options ?? [],
+)
+const refineDialogVisible = ref(false)
+const refineCategoryId = ref<number | null>(null)
+const refining = ref(false)
+
+function openRefineDialog() {
+  refineCategoryId.value = refineOptions.value[0]?.id ?? null
+  refineDialogVisible.value = true
+}
+
+async function confirmRefine() {
+  if (!refineCategoryId.value) {
+    ElMessage.warning('请选择细化后的分类')
+    return
+  }
+  refining.value = true
+  try {
+    await ticketApi.refine((ticket.value as any).id, refineCategoryId.value)
+    ElMessage.success('分诊完成，已按新分类重新落位')
+    refineDialogVisible.value = false
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch (e: any) {
+    const detail = e?.response?.data?.error?.message || e?.response?.data?.detail
+    ElMessage.error(detail || '分诊失败')
+  } finally {
+    refining.value = false
+  }
+}
+
+// ── 转派（transfer）：后端 allowed_actions 下发的链推进动作 ──
+const transferAction = computed<AllowedAction | undefined>(() => findAction('transfer'))
+const transferDialogVisible = ref(false)
+const transferReason = ref('')
+const transferring = ref(false)
+
+function openTransferDialog() {
+  transferReason.value = ''
+  transferDialogVisible.value = true
+}
+
+async function confirmTransfer() {
+  transferring.value = true
+  try {
+    await ticketApi.transfer((ticket.value as any).id, transferReason.value.trim())
+    ElMessage.success('已转派至下一部门')
+    transferDialogVisible.value = false
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch (e: any) {
+    const detail = e?.response?.data?.error?.message || e?.response?.data?.detail
+    ElMessage.error(detail || '转派失败')
+  } finally {
+    transferring.value = false
+  }
+}
 
 async function loadTicket() {
   const id = Number(route.params.id)
@@ -342,10 +486,17 @@ const callbackChoice = ref<'call_backed' | 'no_need'>('no_need')
 const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | 'unrated' | ''>('')
 // 回访详情（不满意原因）：后端 callback_details 字段，不满意时必填
 const callbackDetails = ref('')
+// 不满意原因（后端 unsatisfied_reason，V0.87 收尾：dissatisfied 必填）
+const unsatisfiedReason = ref('')
 
-// 归档按钮禁用条件：已回访必须选满意度；不满意必须填写回访详情
+// 归档按钮禁用条件：已回访必须选满意度；不满意必须填写不满意原因与回访详情
 const archiveDisabled = computed(() => {
   if (callbackChoice.value === 'call_backed' && !satisfaction.value) return true
+  if (
+    callbackChoice.value === 'call_backed'
+    && satisfaction.value === 'dissatisfied'
+    && !unsatisfiedReason.value.trim()
+  ) return true
   if (
     callbackChoice.value === 'call_backed'
     && satisfaction.value === 'dissatisfied'
@@ -360,12 +511,14 @@ watch(canArchiveFromResolved, (visible) => {
     callbackChoice.value = 'no_need'
     satisfaction.value = ''
     callbackDetails.value = ''
+    unsatisfiedReason.value = ''
   } else {
     const t = ticket.value as any
     archiveNotes.value = t?.archive_notes || ''
     callbackChoice.value = t?.is_callbacked ? 'call_backed' : 'no_need'
     satisfaction.value = t?.satisfaction || ''
     callbackDetails.value = t?.callback_details || ''
+    unsatisfiedReason.value = t?.unsatisfied_reason || ''
   }
 }, { immediate: true })
 
@@ -382,6 +535,7 @@ async function submitArchive() {
         is_callbacked: true,
         callback_required: true,
         satisfaction: satisfaction.value,
+        unsatisfied_reason: unsatisfiedReason.value.trim(),
         callback_details: callbackDetails.value.trim(),
       } as any)
       ElMessage.warning('已记录回访结果：客户不满意，请通过「退回」让处理人重新处理')
@@ -670,6 +824,75 @@ async function confirmCancel() {
   border: 1px solid var(--color-border-light);
   border-radius: var(--radius-lg);
   padding: 16px;
+}
+
+/* 分派链进度条（V0.21 链快照） */
+.chain-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  font-size: 13px;
+}
+
+.chain-strip-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-right: 4px;
+}
+
+.chain-step {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.chain-step.is-done {
+  background: #ECFDF5;
+  border-color: rgba(16, 185, 129, 0.3);
+  color: #047857;
+}
+
+.chain-step.is-current {
+  background: var(--color-primary-light);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 700;
+}
+
+.chain-arrow {
+  color: var(--color-text-tertiary);
+}
+
+.chain-progress {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分诊弹窗选项 */
+.refine-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.refine-option {
+  margin-right: 0 !important;
+  width: 100%;
 }
 
 .timeline-section-title {
