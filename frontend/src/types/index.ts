@@ -173,7 +173,9 @@ export interface Ticket {
   category_path: string | null
   /** 问题判断组（按判断先后排序）；空数组 = 客服组建单时已完成判断 */
   judgement_departments: string[]
-  /** 问题处理部门；判断节点未分诊时为 null */
+  /** 流转节点（处理链中间环节，线性推进）；空数组 = 无需流转 */
+  transit_departments: string[]
+  /** 问题处理部门（处理链最后一环）；判断节点未分诊时为 null */
   handling_department: string | null
   symptom: string | null
   is_duplicate: boolean

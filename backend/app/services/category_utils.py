@@ -35,23 +35,28 @@ class CategoryLineage(NamedTuple):
 class ResponsibilitySlots(NamedTuple):
     """工单全生命周期的责任槽位（由分类静态推导，不依赖运行时历史）。
 
-    工单流程分两个阶段：**问题判断** → **问题处理**。客服建单时确认一/二级
-    分类后，该分类是否需要后续继续判断、由谁判断，是分类的固有属性，记录在
-    ``dispatch_chains``（每个分类一条链，``steps[0]`` 是该分类的承接部门）。
+    工单流程是**创建 → 问题判断 → 流转 → 处理**。客服建单时确认一/二级分类后，
+    该分类是否需要后续继续判断、由谁判断，是分类的固有属性，记录在
+    ``dispatch_chains``（每个分类一条链，``steps`` 是该分类的处理链）。
 
-    推导方式：从当前分类沿 parent 链上溯，收集每个有链分类的链首部门：
+    推导方式：从当前分类沿 parent 链上溯，逐层看该分类有没有链：
 
-    - 当前分类**无启用子节点**（叶子，判断已结束）→ 链首部门是**问题处理部门**，
-      祖先链首部门构成**问题判断组**（判断先后顺序 = 根→叶）
-    - 当前分类**有启用子节点**（判断节点，如业务保障/星座大系统）→ 链首部门
-      仍需继续分诊，计入**问题判断组**，**问题处理部门**待分诊确定（None）
+    - 当前分类**无启用子节点**（叶子，判断已结束）→ 它自己的链是**处理链**：
+      ``steps[-1]``（最后一环）是**问题处理部门**（真正干活的），
+      ``steps[:-1]``（中间环节）是**流转节点**；祖先的链首构成**问题判断组**
+    - 当前分类**有启用子节点**（判断节点，如业务保障/星座大系统）→ 它的链首
+      还要继续分诊，计入**问题判断组**，处理部门待分诊确定（None）
 
-    例：核心网系统(2311) → 判断组 [售后, 星座大系统负责人]，处理部门 软件开发组
-        业务保障(2301)   → 判断组 [售后]，处理部门 None（待分诊）
-        品牌合作(1202)   → 判断组 []（客服组建单时已判断完），处理部门 品牌传播与大客户
+    判断组顺序 = 判断先后（根→叶）；流转节点顺序 = 流转先后（近→叶）。
+
+    例：核心网系统(2311) → 判断组[售后, 星座大系统负责人]，流转[]，处理 软件开发组
+        套餐变更(2203)   → 判断组[]，流转[市场生态部]，处理 业务支撑组（审核→执行）
+        业务保障(2301)   → 判断组[售后]，流转[]，处理 None（待分诊）
+        品牌合作(1202)   → 判断组[]，流转[]，处理 品牌传播与大客户
     """
 
     judgement_departments: tuple[str, ...]
+    transit_departments: tuple[str, ...]
     handling_department: str | None
 
 
@@ -68,13 +73,14 @@ async def build_responsibility_index(db: AsyncSession) -> dict[int, Responsibili
     避免重复查询。
     """
     by_id = await _load_categories(db)
-    chain_heads: dict[int, str] = {}
+    # 每个分类的处理链（有序）：category_id -> [部门, ...]
+    chains: dict[int, list[str]] = {}
     for row in (await db.execute(
         select(DispatchChain).where(DispatchChain.enabled == True)  # noqa: E712
     )).scalars().all():
-        steps = row.steps or []
-        if steps and steps[0].get("department_code"):
-            chain_heads[row.category_id] = steps[0]["department_code"]
+        depts = [s.get("department_code") for s in (row.steps or []) if s.get("department_code")]
+        if depts:
+            chains[row.category_id] = depts
 
     has_active_child: dict[int, bool] = {}
     for c in by_id.values():
@@ -83,23 +89,33 @@ async def build_responsibility_index(db: AsyncSession) -> dict[int, Responsibili
 
     index: dict[int, ResponsibilitySlots] = {}
     for cid in by_id:
-        # 近→远收集链首：自己 → 父 → 祖
-        depts: list[str] = []
+        # 近→远上溯（自己 → 父 → 祖）
+        is_leaf = not has_active_child.get(cid)
+        judgement: list[str] = []  # 判断组，收集时近→远，最后反转
+        transit: list[str] = []  # 流转节点，收集时近→远
+        handling: str | None = None
         cur: TicketCategory | None = by_id.get(cid)
         seen: set[int] = set()
+        first = True
         while cur is not None and cur.id not in seen:
             seen.add(cur.id)
-            head = chain_heads.get(cur.id)
-            if head and head not in depts:
-                depts.append(head)
+            steps = chains.get(cur.id) or []
+            if steps:
+                if first and is_leaf:
+                    # 叶子：自己这条链的最后一环才是处理部门，前面的是流转节点
+                    handling = steps[-1]
+                    transit.extend(steps[:-1])
+                else:
+                    # 判断节点：链首=判断组一环，其余环节=流转节点
+                    judgement.append(steps[0])
+                    transit.extend(steps[1:])
+            first = False
             cur = by_id.get(cur.parent_id) if cur.parent_id is not None else None
-
-        if has_active_child.get(cid):
-            # 判断节点：链首要继续分诊，全部计入判断组，处理部门待定
-            index[cid] = ResponsibilitySlots(tuple(reversed(depts)), None)
-        else:
-            # 叶子：自己这条链首就是处理部门，祖先是判断组
-            index[cid] = ResponsibilitySlots(tuple(reversed(depts[1:])), depts[0] if depts else None)
+        index[cid] = ResponsibilitySlots(
+            judgement_departments=tuple(reversed(judgement)),
+            transit_departments=tuple(reversed(transit)),
+            handling_department=handling,
+        )
     return index
 
 

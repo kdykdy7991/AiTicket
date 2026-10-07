@@ -4,7 +4,8 @@
       责任归属：工单流程两阶段——问题判断 → 问题处理。
       客服组:创建人 恒存在（工单必由客服组建单）；
       问题判断组 可多环（售后 → 星座大系统负责人），空 = 客服组已完成判断；
-      问题处理部门 判断节点未分诊时为「待分诊确定」。
+      流转节点 处理链的中间环节（线性推进），空 = 无需流转；
+      问题处理部门 处理链最后一环，判断节点未分诊时为「待分诊确定」。
     -->
     <div class="sidebar-section">
       <h4 class="section-title">责任归属</h4>
@@ -19,10 +20,23 @@
             <span
               v-for="(dept, i) in judgementDepartments"
               :key="dept"
-              :class="{ 'judgement-sep': i > 0 }"
+              :class="{ 'dept-sep': i > 0 }"
             >{{ dept }}</span>
           </template>
           <span v-else class="muted">客服组已完成判断</span>
+        </span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">流转节点</span>
+        <span class="field-value">
+          <template v-if="transitDepartments.length">
+            <span
+              v-for="(dept, i) in transitDepartments"
+              :key="dept"
+              :class="{ 'dept-sep': i > 0 }"
+            >{{ dept }}</span>
+          </template>
+          <span v-else class="muted">无需流转</span>
         </span>
       </div>
       <div class="field-row">
@@ -260,6 +274,11 @@ const judgementDepartments = computed<string[]>(
   () => (props.ticket as any).judgement_departments || []
 )
 
+/** 流转节点：处理链的中间环节，空 = 无需流转 */
+const transitDepartments = computed<string[]>(
+  () => (props.ticket as any).transit_departments || []
+)
+
 /** 问题处理部门：判断节点未分诊时后端返回 null */
 const handlingDepartment = computed<string>(
   () => (props.ticket as any).handling_department || ''
@@ -307,9 +326,9 @@ function satisfactionLabel(v: string): string {
   letter-spacing: 0.06em;
   margin: 0;
 }
-/* 判断组多环分隔：售后 → 星座大系统负责人 */
-.judgement-sep { margin-left: 6px; }
-.judgement-sep::before {
+/* 多环分隔：售后 → 星座大系统负责人 */
+.dept-sep { margin-left: 6px; }
+.dept-sep::before {
   content: '→';
   margin-right: 6px;
   color: var(--color-text-placeholder);

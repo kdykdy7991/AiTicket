@@ -121,6 +121,7 @@ def _ticket_to_brief(
         category_l2_name=cat_l2.name if cat_l2 else None,
         category_path=cat_path,
         judgement_departments=list(slots.judgement_departments) if slots else [],
+        transit_departments=list(slots.transit_departments) if slots else [],
         handling_department=slots.handling_department if slots else None,
         region_name=t.region_name,
         is_duplicate=t.is_duplicate,

@@ -270,22 +270,26 @@ async def test_responsibility_slots_judgement_vs_handling(seeded_categories):
         return idx[cid]
 
     # 叶子分类：链首部门=处理部门，祖先链首=判断组（判断先后=根→叶）
-    core = slots(2311)  # 核心网系统：客户服务/业务保障/星座大系统/核心网系统
+    core = slots(2311)  # 核心网系统：业务保障/星座大系统/核心网系统
     assert core.judgement_departments == ("售后", "星座大系统负责人")
+    assert core.transit_departments == ()
     assert core.handling_department == "软件开发组"
 
     # 判断节点分类（有启用子节点）：链首仍需继续分诊 → 计入判断组，处理部门待定
     assure = slots(2301)  # 业务保障，客服判到此级，售后在此分诊
     assert assure.judgement_departments == ("售后",)
+    assert assure.transit_departments == ()
     assert assure.handling_department is None
 
     sats = slots(2310)  # 星座大系统：售后分诊到此，负责人再判断
     assert sats.judgement_departments == ("售后", "星座大系统负责人")
+    assert sats.transit_departments == ()
     assert sats.handling_department is None
 
     # 单步直达且父链无链：客服组建单时已判断完 → 判断组为空
     brand = slots(1202)  # 品牌合作
     assert brand.judgement_departments == ()
+    assert brand.transit_departments == ()
     assert brand.handling_department == "品牌传播与大客户"
 
     # 跨分支：客户咨询/非即时/品牌合作，判断组为空
@@ -299,7 +303,12 @@ async def test_responsibility_slots_judgement_vs_handling(seeded_categories):
     hw = slots(2322)
     assert hw.handling_department == "售后"
 
-    # 多步链（审核→执行）：当前实现取链首为处理部门
-    change = slots(2203)  # 套餐变更
-    assert change.handling_department == "市场生态部"
+    # 多步链（审核→执行）：中间环节=流转节点，最后一环=处理部门
+    change = slots(2203)  # 套餐变更：[市场生态部, 业务支撑组]
     assert change.judgement_departments == ()
+    assert change.transit_departments == ("市场生态部",)
+    assert change.handling_department == "业务支撑组"
+
+    ledger = slots(2204)  # 业财对账：[经营管理部, 财务]
+    assert ledger.transit_departments == ("经营管理部",)
+    assert ledger.handling_department == "财务"

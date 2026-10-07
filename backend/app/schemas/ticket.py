@@ -111,7 +111,9 @@ class TicketBrief(BaseModel):
     # 责任槽位（由分类静态推导，见 category_utils.ResponsibilitySlots）
     # judgement_departments: 问题判断组，按判断先后排序；空=客服组建单时已判断完
     judgement_departments: list[str] = []
-    # handling_department: 问题处理部门；判断节点未分诊时为 None
+    # transit_departments: 流转节点（处理链的中间环节，线性推进）；空=无需流转
+    transit_departments: list[str] = []
+    # handling_department: 问题处理部门（处理链最后一环）；判断节点未分诊时为 None
     handling_department: str | None = None
     region_name: str | None = None
     is_duplicate: bool = False

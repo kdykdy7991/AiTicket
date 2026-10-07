@@ -177,6 +177,7 @@ function adaptTicket(t: any): any {
     category_path: t.category_path || null,
     // 责任槽位：后端按分类静态推导（判断组/处理部门）
     judgement_departments: t.judgement_departments || [],
+    transit_departments: t.transit_departments || [],
     handling_department: t.handling_department || null,
     // 重投关联：后端 linked_ticket_id，无 number，仅放 id
     duplicate_of: t.linked_ticket_id ? { id: t.linked_ticket_id, number: '' } : null,
