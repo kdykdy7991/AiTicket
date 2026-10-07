@@ -397,20 +397,22 @@ async def check_transition_permission(
             raise HTTPException(422, detail="分派时必须指定处理人")
         target_id = owner_id or ticket.owner_id
         if target_id and ticket.skill_group_id:
-            await _assert_owner_in_department(db, target_id, ticket.skill_group_id)
+            await _assert_user_in_department(
+                db, target_id, ticket.skill_group_id, "处理人"
+            )
 
 
-async def _assert_owner_in_department(
-    db: AsyncSession, owner_id: int, skill_group_id: int
+async def _assert_user_in_department(
+    db: AsyncSession, user_id: int, skill_group_id: int, role_label: str
 ) -> None:
-    """处理人必须属于工单当前责任部门，否则 422。
+    """人员必须属于指定部门，否则 422。
 
     前端选人控件已按部门过滤，这里是后端兜底：admin 或直接调接口都能绕过前端，
     实测就出现过工单责任部门=经营管理部、处理人=网运部成员的错配。
     """
     link = await db.execute(
         select(UserSkillGroup).where(
-            UserSkillGroup.user_id == owner_id,
+            UserSkillGroup.user_id == user_id,
             UserSkillGroup.skill_group_id == skill_group_id,
         )
     )
@@ -421,8 +423,8 @@ async def _assert_owner_in_department(
         raise HTTPException(
             422,
             detail=(
-                f"处理人不属于工单当前责任部门「{dept.scalar_one_or_none() or skill_group_id}」，"
-                "请选择该部门成员"
+                f"{role_label}不属于工单当前责任部门"
+                f"「{dept.scalar_one_or_none() or skill_group_id}」"
             ),
         )
 
@@ -689,6 +691,13 @@ async def apply_transfer(
     ticket.handler_skill_group_id = rx["skill_group_id"]
     if rx["dispatcher_id"] is not None:
         ticket.dispatcher_id = rx["dispatcher_id"]
+    # 转派本步不设处理人（open→pending 会清空 owner），错配只可能出现在下一步
+    # 分派——那里已校验处理人属于当时的 skill_group_id。此处再断言一次处方给出
+    # 的对接人属于新落位部门，防 prescribe_dept 返回异常数据导致跨部门落位。
+    if rx["dispatcher_id"] is not None:
+        await _assert_user_in_department(
+            db, rx["dispatcher_id"], rx["skill_group_id"], "链上对接人"
+        )
 
     log = await apply_transition(
         db,
