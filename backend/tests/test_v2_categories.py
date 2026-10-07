@@ -2,10 +2,11 @@
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from datetime import datetime, timezone
 
 from app.models.category import TicketCategory
+from test_workflow_regression import _next_phone
 
 
 # Mirror the V2_CATEGORIES tuple in the migration so tests can re-seed after
@@ -146,3 +147,159 @@ async def test_old_categories_still_have_children_listable(seeded_categories):
     assert old_l1 is not None
     child_names = [c["name"] for c in old_l1["children"]]
     assert "品牌咨询" in child_names
+
+
+async def test_lineage_index_resolves_l1_l2_and_path(seeded_categories):
+    """血缘索引：L1=根节点、L2=根的直接子级、path=root→leaf 全链。
+
+    回归 4 层树：旧实现 `t.category.parent.name` 只取一层 parent，会把
+    二级节点「业务保障」当成一级，或把 L3「星座大系统」当成一级。
+    """
+    from app.services.category_utils import build_lineage_index
+
+    _c, _dispatcher_id, engine = seeded_categories
+    async with AsyncSession(engine) as s:
+        index = await build_lineage_index(s)
+
+    def names(cid):
+        return [c.name for c in index[cid].path]
+
+    # L4 叶子：客户服务 / 业务保障 / 星座大系统 / 核心网系统
+    lin = index[2311]
+    assert lin.l1.name == "客户服务"
+    assert lin.l2.name == "业务保障"
+    assert names(2311) == ["客户服务", "业务保障", "星座大系统", "核心网系统"]
+
+    # L3 叶子（客户咨询分支）
+    assert index[1202].l1.name == "客户咨询"
+    assert index[1202].l2.name == "非即时"
+    assert names(1202) == ["客户咨询", "非即时", "品牌合作"]
+
+    # L2 自身：没有更深层，L2 就是自己
+    assert index[2301].l1.name == "客户服务"
+    assert index[2301].l2.name == "业务保障"
+    assert names(2301) == ["客户服务", "业务保障"]
+
+    # L1 自身：无 L2
+    assert index[1002].l1.name == "客户服务"
+    assert index[1002].l2 is None
+    assert names(1002) == ["客户服务"]
+
+    # 旧的 2 层扁平树（历史工单）行为不变
+    assert index[101].l1.name == "咨询类"
+    assert index[101].l2.name == "品牌咨询"
+    assert names(101) == ["咨询类", "品牌咨询"]
+
+
+async def test_ticket_detail_exposes_correct_l1_l2_path(seeded_categories):
+    """端到端：工单详情的 category_l1/l2/path 走血缘派生。"""
+    from app.models.dispatch import DispatchChain
+    from app.models.group import SkillGroup, UserSkillGroup
+    from app.services.category_utils import build_lineage_index
+    from scripts.seed import DISPATCH_CHAINS
+
+    c, disp_id, engine = seeded_categories
+    # 正式建单必填对接部门/对接人；链配置决定落位，测试库没跑 seed 故手动补
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        sg = SkillGroup(name="血缘测试部门")
+        s.add(sg)
+        await s.flush()
+        s.add(UserSkillGroup(user_id=disp_id, skill_group_id=sg.id, is_dispatcher=True))
+        for cid, depts, note in DISPATCH_CHAINS:
+            s.add(DispatchChain(
+                category_id=cid,
+                steps=[{"order": i + 1, "department_code": d} for i, d in enumerate(depts)],
+                note=note,
+            ))
+        await s.commit()
+        await s.refresh(sg)
+        dispatcher_id, sg_id = disp_id, sg.id
+
+    # 2301 业务保障是客服建单可选的判断终点（L2），L1 应为「客户服务」
+    resp = await c.post("/api/v1/tickets", json={
+        "description": "分类血缘回归测试",
+        "priority": "p4_enterprise",
+        "channel": "phone",
+        "customer_type": "personal",
+        "customer_phone": _next_phone(),
+        "category_id": 2301,
+        "skill_group_id": sg_id,
+        "dispatcher_id": dispatcher_id,
+    })
+    assert resp.status_code == 201, resp.text
+    d = resp.json()["data"]
+    assert d["category_l1_name"] == "客户服务"
+    assert d["category_l2_name"] == "业务保障"
+    assert d["category_name"] == "业务保障"
+    assert d["category_path"] == "客户服务 / 业务保障"
+
+    # 分诊细化到 L3 后，路径加深但 L1/L2 不变
+    async with factory() as s:
+        index = await build_lineage_index(s)
+    assert "星座大系统" in [c.name for c in index[2310].path]
+    assert index[2310].l1.name == "客户服务"
+    assert index[2310].l2.name == "业务保障"
+
+
+async def test_responsibility_slots_judgement_vs_handling(seeded_categories):
+    """责任槽位推导：判断组沿分类父链上溯，处理部门只取叶子自己的链首。
+
+    业务前提：客服建单时确认一/二级分类后，该分类是否需要后续继续判断、
+    由谁判断，是分类的静态属性（记录在 dispatch_chains），不是运行时历史。
+    """
+    from app.models.dispatch import DispatchChain
+    from app.services.category_utils import build_responsibility_index
+    from scripts.seed import DISPATCH_CHAINS
+
+    _c, _dispatcher_id, engine = seeded_categories
+    # conftest 每次 TRUNCATE，dispatch_chains 需重灌（分类已由 seeded_categories 灌好）
+    async with AsyncSession(engine) as s:
+        for cid, depts, note in DISPATCH_CHAINS:
+            s.add(DispatchChain(
+                category_id=cid,
+                steps=[{"order": i + 1, "department_code": d} for i, d in enumerate(depts)],
+                note=note,
+            ))
+        await s.commit()
+
+    async with AsyncSession(engine) as s:
+        idx = await build_responsibility_index(s)
+
+    def slots(cid):
+        return idx[cid]
+
+    # 叶子分类：链首部门=处理部门，祖先链首=判断组（判断先后=根→叶）
+    core = slots(2311)  # 核心网系统：客户服务/业务保障/星座大系统/核心网系统
+    assert core.judgement_departments == ("售后", "星座大系统负责人")
+    assert core.handling_department == "软件开发组"
+
+    # 判断节点分类（有启用子节点）：链首仍需继续分诊 → 计入判断组，处理部门待定
+    assure = slots(2301)  # 业务保障，客服判到此级，售后在此分诊
+    assert assure.judgement_departments == ("售后",)
+    assert assure.handling_department is None
+
+    sats = slots(2310)  # 星座大系统：售后分诊到此，负责人再判断
+    assert sats.judgement_departments == ("售后", "星座大系统负责人")
+    assert sats.handling_department is None
+
+    # 单步直达且父链无链：客服组建单时已判断完 → 判断组为空
+    brand = slots(1202)  # 品牌合作
+    assert brand.judgement_departments == ()
+    assert brand.handling_department == "品牌传播与大客户"
+
+    # 跨分支：客户咨询/非即时/品牌合作，判断组为空
+    assert slots(1202).judgement_departments == ()
+    # 祖先链存在但本人是叶子：判断组=祖先
+    consult = slots(1203)  # 产品使用/参数咨询（父 1201 无链）
+    assert consult.judgement_departments == ()
+    assert consult.handling_department == "产品"
+
+    # 判断方=处理方的场景（硬件故障 note 明确说明）
+    hw = slots(2322)
+    assert hw.handling_department == "售后"
+
+    # 多步链（审核→执行）：当前实现取链首为处理部门
+    change = slots(2203)  # 套餐变更
+    assert change.handling_department == "市场生态部"
+    assert change.judgement_departments == ()

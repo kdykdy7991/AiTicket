@@ -3,6 +3,7 @@
 import csv
 import io
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
@@ -29,7 +30,12 @@ from app.schemas.ticket import (
     TicketUpdate,
     DuplicateWarning,
 )
-from app.services.category_utils import CategoryLineage, build_lineage_index
+from app.services.category_utils import (
+    CategoryLineage,
+    ResponsibilitySlots,
+    build_lineage_index,
+    build_responsibility_index,
+)
 from app.services.dispatch_chain import INSTANT_RESOLVE_CATEGORY_IDS
 from app.services.state_machine import (
     TERMINAL_STATES,
@@ -46,11 +52,21 @@ from app.services.state_machine import (
 router = APIRouter(tags=["tickets"])
 
 
-async def get_category_lineage(
+class CategoryIndexes(NamedTuple):
+    """分类派生的两个索引，一次请求内共用（分类/分派链各只查一次）。"""
+
+    lineage: dict[int, CategoryLineage]
+    responsibility: dict[int, ResponsibilitySlots]
+
+
+async def get_category_indexes(
     db: AsyncSession = Depends(get_db),
-) -> dict[int, CategoryLineage]:
-    """分类血缘索引（请求级，全请求共用一次分类查询）。"""
-    return await build_lineage_index(db)
+) -> CategoryIndexes:
+    """分类血缘 + 责任槽位索引（请求级缓存）。"""
+    return CategoryIndexes(
+        lineage=await build_lineage_index(db),
+        responsibility=await build_responsibility_index(db),
+    )
 
 
 def _resolve_lineage(
@@ -77,10 +93,12 @@ def _ticket_to_brief(
     t: Ticket,
     terminal_ops: dict | None = None,
     lineage: dict[int, CategoryLineage] | None = None,
+    responsibility: dict[int, ResponsibilitySlots] | None = None,
 ) -> TicketBrief:
     archived_by = (terminal_ops or {}).get((t.id, "archived"))
     cancelled_by = (terminal_ops or {}).get((t.id, "cancelled"))
     cat_leaf, cat_l1, cat_l2, cat_path = _resolve_lineage(t, lineage)
+    slots = responsibility.get(t.category_id) if responsibility and t.category_id else None
     return TicketBrief(
         id=t.id, number=t.number, state=t.state,
         priority=t.priority, channel=t.channel, customer_type=t.customer_type,
@@ -102,6 +120,8 @@ def _ticket_to_brief(
         category_l2_id=cat_l2.id if cat_l2 else None,
         category_l2_name=cat_l2.name if cat_l2 else None,
         category_path=cat_path,
+        judgement_departments=list(slots.judgement_departments) if slots else [],
+        handling_department=slots.handling_department if slots else None,
         region_name=t.region_name,
         is_duplicate=t.is_duplicate,
         is_callbacked=t.is_callbacked,
@@ -126,6 +146,7 @@ def _ticket_to_detail(
     terminal_ops: dict | None = None,
     *,
     lineage: dict[int, CategoryLineage] | None = None,
+    responsibility: dict[int, ResponsibilitySlots] | None = None,
     allowed_actions: list[dict] | None = None,
     can_reply: bool = False,
     can_addition: bool = False,
@@ -134,7 +155,7 @@ def _ticket_to_detail(
     refine_options: list[dict] | None = None,
     refine_denied_reason: str | None = None,
 ) -> TicketDetail:
-    brief = _ticket_to_brief(t, terminal_ops, lineage)
+    brief = _ticket_to_brief(t, terminal_ops, lineage, responsibility)
     return TicketDetail(
         **brief.model_dump(),
         # V0.86 动作/能力元数据：只有 GET 详情会传入计算结果，
@@ -295,7 +316,7 @@ async def list_tickets(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """List tickets with filters and pagination."""
@@ -396,7 +417,7 @@ async def list_tickets(
     terminal_ops = await _get_terminal_operators(db, [t.id for t in tickets])
 
     return {
-        "data": [_ticket_to_brief(t, terminal_ops, lineage).model_dump() for t in tickets],
+        "data": [_ticket_to_brief(t, terminal_ops, cat_idx.lineage, cat_idx.responsibility).model_dump() for t in tickets],
         "pagination": {
             "page": page, "page_size": page_size,
             "total": total, "total_pages": (total + page_size - 1) // page_size,
@@ -422,7 +443,7 @@ async def export_tickets(
     date_to: str | None = Query(None, description="创建时间结束 (YYYY-MM-DD)"),
     columns: str | None = Query(None, description="逗号分隔的列组：base,customer,category,workflow"),
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """导出工单为 CSV（真实数据，按当前筛选条件）。"""
@@ -552,7 +573,7 @@ async def export_tickets(
 
         def _lin(t: Ticket) -> tuple:
             if t.id not in _lin_cache:
-                _lin_cache[t.id] = _resolve_lineage(t, lineage)
+                _lin_cache[t.id] = _resolve_lineage(t, cat_idx.lineage)
             return _lin_cache[t.id]
 
         col_defs += [
@@ -598,7 +619,7 @@ async def export_tickets(
 @router.get("/tickets/drafts")
 async def list_drafts(
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """Get current user's draft tickets."""
@@ -618,7 +639,7 @@ async def list_drafts(
     tickets = result.scalars().all()
     logger.warning(f"[DEBUG] list_drafts found {len(tickets)} drafts")
     return {
-        "data": [_ticket_to_brief(t, None, lineage) for t in tickets],
+        "data": [_ticket_to_brief(t, None, cat_idx.lineage, cat_idx.responsibility) for t in tickets],
         "pagination": {"total": len(tickets)},
     }
 
@@ -627,7 +648,7 @@ async def list_drafts(
 async def submit_draft(
     draft_id: int,
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(require_role("admin", "agent")),
 ):
     """Submit a draft ticket as a formal ticket."""
@@ -668,7 +689,7 @@ async def submit_draft(
         ).where(Ticket.id == ticket.id)
     )
     ticket = result.scalar_one()
-    return TicketCreateResponse(data=_ticket_to_detail(ticket, lineage=lineage))
+    return TicketCreateResponse(data=_ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility))
 
 
 @router.delete("/tickets/drafts/{draft_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -690,7 +711,7 @@ async def update_draft(
     draft_id: int,
     body: TicketCreate,
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """Update a draft ticket."""
@@ -735,7 +756,7 @@ async def update_draft(
         .where(Ticket.id == draft_id)
     )
     ticket = result.scalar_one()
-    return TicketCreateResponse(data=_ticket_to_detail(ticket, lineage=lineage))
+    return TicketCreateResponse(data=_ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility))
 
 
 
@@ -743,7 +764,7 @@ async def update_draft(
 async def get_ticket(
     ticket_id: int,
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """Get ticket detail."""
@@ -767,7 +788,8 @@ async def get_ticket(
     refine = await refine_capability(db, ticket, user)
     return _ticket_to_detail(
         ticket, terminal_ops,
-        lineage=lineage,
+        lineage=cat_idx.lineage,
+        responsibility=cat_idx.responsibility,
         allowed_actions=allowed_actions,
         **article_actions,
         can_refine=refine["can_refine"],
@@ -781,6 +803,7 @@ async def _detail_after_mutation(
     ticket_id: int,
     user: User,
     lineage: dict[int, CategoryLineage] | None = None,
+    responsibility: dict[int, ResponsibilitySlots] | None = None,
 ) -> TicketCreateResponse:
     """域动作（分诊/转派）commit 后重建详情响应。
 
@@ -806,6 +829,7 @@ async def _detail_after_mutation(
         data=_ticket_to_detail(
             ticket, terminal_ops,
             lineage=lineage,
+            responsibility=responsibility,
             allowed_actions=allowed_actions,
             **article_actions,
             can_refine=refine["can_refine"],
@@ -820,7 +844,7 @@ async def refine_ticket_category(
     ticket_id: int,
     body: TicketRefine,
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """分诊：判断人把工单分类细化一级（权限/校验/链重算收口在 apply_refine）。"""
@@ -831,7 +855,7 @@ async def refine_ticket_category(
 
     await apply_refine(db, ticket, new_category_id=body.category_id, operator=user)
     await db.commit()
-    return await _detail_after_mutation(db, ticket_id, user, lineage)
+    return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
 
 
 @router.post("/tickets/{ticket_id}/transfer", response_model=TicketCreateResponse)
@@ -839,7 +863,7 @@ async def transfer_ticket_to_next_dept(
     ticket_id: int,
     body: TicketTransfer,
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """转派：多步链本步完成，推进到链的下一部门（收口在 apply_transfer）。"""
@@ -850,14 +874,14 @@ async def transfer_ticket_to_next_dept(
 
     await apply_transfer(db, ticket, operator=user, reason=body.reason)
     await db.commit()
-    return await _detail_after_mutation(db, ticket_id, user, lineage)
+    return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
 
 
 @router.post("/tickets", response_model=TicketCreateResponse, status_code=status.HTTP_201_CREATED)
 async def create_ticket(
     body: TicketCreate,
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(require_role("admin", "agent")),
 ):
     """Create a new ticket."""
@@ -996,7 +1020,7 @@ async def create_ticket(
         )
         ticket = result.scalar_one()
         return TicketCreateResponse(
-            data=_ticket_to_detail(ticket, lineage=lineage),
+            data=_ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility),
             warnings=DuplicateWarning(
                 auto_match_warning=auto_match_warning
                 or "即时办结咨询：工单已直接归档，无需后续处理与回访",
@@ -1094,7 +1118,7 @@ async def create_ticket(
     ticket = result.scalar_one()
 
     return TicketCreateResponse(
-        data=_ticket_to_detail(ticket, lineage=lineage),
+        data=_ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility),
         warnings=DuplicateWarning(
             duplicate_detected=bool(warnings and warnings.get("duplicate_detected")),
             duplicate_tickets=(warnings or {}).get("duplicate_tickets", []),
@@ -1108,7 +1132,7 @@ async def update_ticket(
     ticket_id: int,
     body: TicketUpdate,
     db: AsyncSession = Depends(get_db),
-    lineage: dict[int, CategoryLineage] = Depends(get_category_lineage),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """Update ticket fields (state, priority, owner, etc.)."""
@@ -1221,7 +1245,7 @@ async def update_ticket(
         ).where(Ticket.id == ticket.id)
     )
     ticket = result.scalar_one()
-    return _ticket_to_detail(ticket, lineage=lineage)
+    return _ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility)
 
 
 @router.post("/tickets/batch-update")

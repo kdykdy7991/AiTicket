@@ -175,6 +175,9 @@ function adaptTicket(t: any): any {
     category_l1: t.category_l1_id ? { id: t.category_l1_id, name: t.category_l1_name } : null,
     category_l2: t.category_l2_id ? { id: t.category_l2_id, name: t.category_l2_name } : null,
     category_path: t.category_path || null,
+    // 责任槽位：后端按分类静态推导（判断组/处理部门）
+    judgement_departments: t.judgement_departments || [],
+    handling_department: t.handling_department || null,
     // 重投关联：后端 linked_ticket_id，无 number，仅放 id
     duplicate_of: t.linked_ticket_id ? { id: t.linked_ticket_id, number: '' } : null,
     // 首受人：后端 first_owner_id，无 name

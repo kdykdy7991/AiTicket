@@ -108,6 +108,11 @@ class TicketBrief(BaseModel):
     category_l2_name: str | None = None
     # 完整路径 root→leaf，如 "客户服务 / 业务保障 / 星座大系统 / 核心网系统"
     category_path: str | None = None
+    # 责任槽位（由分类静态推导，见 category_utils.ResponsibilitySlots）
+    # judgement_departments: 问题判断组，按判断先后排序；空=客服组建单时已判断完
+    judgement_departments: list[str] = []
+    # handling_department: 问题处理部门；判断节点未分诊时为 None
+    handling_department: str | None = None
     region_name: str | None = None
     is_duplicate: bool = False
     is_draft: bool = False

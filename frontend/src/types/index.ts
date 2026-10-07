@@ -171,6 +171,10 @@ export interface Ticket {
   category_l2: TicketCategory | null
   /** 完整分类路径 root→leaf，如 "客户服务 / 业务保障 / 星座大系统 / 核心网系统" */
   category_path: string | null
+  /** 问题判断组（按判断先后排序）；空数组 = 客服组建单时已完成判断 */
+  judgement_departments: string[]
+  /** 问题处理部门；判断节点未分诊时为 null */
+  handling_department: string | null
   symptom: string | null
   is_duplicate: boolean
   duplicate_reason: string | null
