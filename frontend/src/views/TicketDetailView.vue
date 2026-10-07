@@ -12,22 +12,29 @@
           <span class="ticket-number">{{ ticket.number || '未编号' }}</span>
           <StateTag :state="ticket.state" />
           <div class="header-actions">
-            <!-- V0.21：分诊（判断人细化分类一级）与转派（链推进一步） -->
-            <el-button
-              v-if="(ticket as any).can_refine"
-              type="primary"
-              plain
-              size="small"
-              class="header-action-btn"
-              @click="openRefineDialog"
-            >分诊</el-button>
-            <el-button
-              v-else-if="(ticket as any).refine_denied_reason && !isTerminalState"
-              size="small"
-              class="header-action-btn"
-              disabled
-              :title="(ticket as any).refine_denied_reason"
-            >分诊</el-button>
+            <!--
+              问题判断：不再有独立的「分诊」动作，判断人直接在此选择分类即可。
+              仅当账号是该分类链首部门的判断人时出现（后端 can_refine 已含
+              状态+账号校验），其他人看不到这个控件。
+            -->
+            <div v-if="canRefine" class="refine-inline">
+              <span class="refine-inline-label">问题分类</span>
+              <el-select
+                :model-value="currentCategoryId"
+                size="small"
+                class="refine-inline-select"
+                placeholder="选择分类"
+                @change="onPickRefineCategory"
+              >
+                <el-option
+                  v-for="o in refineOptions"
+                  :key="o.id"
+                  :label="o.name"
+                  :value="o.id"
+                />
+              </el-select>
+            </div>
+            <!-- V0.21：转派（链推进一步） -->
             <el-button
               v-if="transferAction"
               type="primary"
@@ -256,20 +263,6 @@
         </template>
       </el-dialog>
 
-      <!-- 分诊弹窗：判断人细化分类一级，系统按新分类链重新落位 -->
-      <el-dialog v-model="refineDialogVisible" title="分诊" width="440px" top="15vh" :close-on-click-modal="false">
-        <p class="dialog-hint">按流程规定把分类细化一级，确认后系统将按新分类的分派链重新落位部门：</p>
-        <el-radio-group v-model="refineCategoryId" class="refine-options">
-          <el-radio v-for="o in refineOptions" :key="o.id" :label="o.id" :value="o.id" border class="refine-option">
-            {{ o.name }}
-          </el-radio>
-        </el-radio-group>
-        <template #footer>
-          <el-button @click="refineDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="refining" :disabled="!refineCategoryId" @click="confirmRefine">确认分诊</el-button>
-        </template>
-      </el-dialog>
-
       <!-- 转派弹窗：链本步完成，推进到下一部门 -->
       <el-dialog v-model="transferDialogVisible" title="转派" width="440px" top="15vh" :close-on-click-modal="false">
         <p class="dialog-hint">
@@ -342,34 +335,46 @@ const nextDeptName = computed(
   () => chainSteps.value[currentStepIndex.value + 1]?.department_code ?? '',
 )
 
-// ── 分诊（refine）：能力位与选项全部来自后端 can_refine / refine_options ──
-const refineOptions = computed<{ id: number; name: string; level?: number }[]>(
-  () => (ticket.value as any)?.refine_options ?? [],
-)
-const refineDialogVisible = ref(false)
-const refineCategoryId = ref<number | null>(null)
+// ── 问题判断（原「分诊」）：能力位与选项全部来自后端 can_refine / refine_options ──
+// 后端已判定「状态允许 + 当前账号是该分类链首部门的判断人」，前端不再重复判断，
+// 无权限时整个控件不渲染。
+const canRefine = computed<boolean>(() => (ticket.value as any)?.can_refine === true)
+const refineOptions = computed<
+  { id: number; name: string; level?: number; next_department?: string | null }[]
+>(() => (ticket.value as any)?.refine_options ?? [])
+/** 当前分类 id：下拉的回显值（选项是直下级，故当前值不在其中，el-select 显示占位） */
+const currentCategoryId = computed<number | null>(() => (ticket.value as any)?.category_id ?? null)
 const refining = ref(false)
 
-function openRefineDialog() {
-  refineCategoryId.value = refineOptions.value[0]?.id ?? null
-  refineDialogVisible.value = true
-}
-
-async function confirmRefine() {
-  if (!refineCategoryId.value) {
-    ElMessage.warning('请选择细化后的分类')
-    return
+/**
+ * 选中分类 = 完成一次问题判断。分类只能向下细分一级且不可回退，
+ * 同时会按新分类重新落位责任部门，故提交前二次确认。
+ */
+async function onPickRefineCategory(categoryId: number) {
+  const opt = refineOptions.value.find(o => o.id === categoryId)
+  if (!opt) return
+  const nextDept = opt.next_department
+  const tip = nextDept
+    ? `将把问题分类细化为「${opt.name}」，并重新落位至「${nextDept}」。此操作不可回退。`
+    : `将把问题分类细化为「${opt.name}」。此操作不可回退。`
+  try {
+    await ElMessageBox.confirm(tip, '确认问题分类', {
+      confirmButtonText: '确认',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return  // 取消：下拉回到原值
   }
   refining.value = true
   try {
-    await ticketApi.refine((ticket.value as any).id, refineCategoryId.value)
-    ElMessage.success('分诊完成，已按新分类重新落位')
-    refineDialogVisible.value = false
+    await ticketApi.refine((ticket.value as any).id, categoryId)
+    ElMessage.success('分类已更新，责任部门已重新落位')
     ticketStore.refreshCurrentInList()
     await loadTicket()
   } catch (e: any) {
     const detail = e?.response?.data?.error?.message || e?.response?.data?.detail
-    ElMessage.error(detail || '分诊失败')
+    ElMessage.error(detail || '分类更新失败')
   } finally {
     refining.value = false
   }
@@ -884,16 +889,18 @@ async function confirmCancel() {
   font-variant-numeric: tabular-nums;
 }
 
-/* 分诊弹窗选项 */
-.refine-options {
+/* 问题判断内联控件：仅判断人可见，直接选分类完成判断 */
+.refine-inline {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
 }
-.refine-option {
-  margin-right: 0 !important;
-  width: 100%;
+.refine-inline-label {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
 }
+.refine-inline-select { width: 150px; }
 
 .timeline-section-title {
   font-size: 11px;

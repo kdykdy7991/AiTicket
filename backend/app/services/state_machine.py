@@ -488,6 +488,7 @@ async def refine_capability(
         category_children,
         is_dept_member,
         judging_department,
+        resolve_chain,
     )
 
     out: dict = {
@@ -514,9 +515,21 @@ async def refine_capability(
         out["refine_denied_reason"] = "该分类已是判断末级，无需分诊"
         return out
     out["can_refine"] = True
-    out["refine_options"] = [
-        {"id": c.id, "name": c.name, "level": c.level} for c in children
-    ]
+    # 每个可细化项带上"细化为它之后会落位到哪个部门"，供前端二次确认展示
+    # （落位规则与 apply_refine 一致：新链首步==当前判断部门则跳过，否则落位新链首）
+    current_judging = await judging_department(db, ticket.category_id)
+    options: list[dict] = []
+    for c in children:
+        next_dept: str | None = None
+        chain = await resolve_chain(db, c.id)
+        if chain and chain["steps"]:
+            head = chain["steps"][0]["department_code"]
+            if head != current_judging:
+                next_dept = head
+        options.append(
+            {"id": c.id, "name": c.name, "level": c.level, "next_department": next_dept}
+        )
+    out["refine_options"] = options
     return out
 
 
