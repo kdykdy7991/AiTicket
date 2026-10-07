@@ -99,7 +99,7 @@ async def test_migration_revision_applied(closeout_env):
     factory = async_sessionmaker(closeout_env["engine"], class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
         head = (await s.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
-    assert head == "l6o8p9q0r1s2"
+    assert head == "m7p9q0r1s2t3"  # m7p9q0r1s2t3 分类树扁平化后为新 head
 
 
 async def test_escalation_chain_shape(closeout_env):

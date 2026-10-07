@@ -13,29 +13,28 @@ from test_workflow_regression import _next_phone
 # the per-test TRUNCATE in conftest.
 V2_CATEGORIES = [
     (1001, None, "客户咨询", 1, 1),
-    (1002, None, "客户服务", 1, 2),
     (1101, 1001, "即时", 2, 1),
     (1102, 1101, "即时办结咨询", 3, 1),
     (1201, 1001, "非即时", 2, 1),
     (1202, 1201, "品牌合作", 3, 1),
     (1203, 1201, "产品使用/参数咨询", 3, 2),
     (1204, 1201, "渠道/代理合作", 3, 3),
-    (2101, 1002, "服务投诉", 2, 1),
-    (2102, 2101, "一般投诉", 3, 1),
-    (2103, 2101, "重要投诉", 3, 2),
-    (2104, 2101, "重大投诉", 3, 3),
-    (2201, 1002, "业务运营", 2, 1),
-    (2202, 2201, "套餐查询", 3, 1),
-    (2203, 2201, "套餐变更", 3, 2),
-    (2204, 2201, "业财对账", 3, 3),
-    (2301, 1002, "业务保障", 2, 1),
-    (2302, 2301, "应用平台", 3, 1),
-    (2310, 2301, "星座大系统", 3, 2),
-    (2311, 2310, "核心网系统", 4, 1),
-    (2312, 2310, "测运控系统", 4, 2),
-    (2313, 2310, "卫星系统", 4, 3),
-    (2321, 2301, "终端软件", 3, 3),
-    (2322, 2301, "硬件故障", 3, 4),
+    (2101, None, "服务投诉", 1, 2),
+    (2102, 2101, "一般投诉", 2, 1),
+    (2103, 2101, "重要投诉", 2, 2),
+    (2104, 2101, "重大投诉", 2, 3),
+    (2201, None, "业务运营", 1, 3),
+    (2202, 2201, "套餐查询", 2, 1),
+    (2203, 2201, "套餐变更", 2, 2),
+    (2204, 2201, "业财对账", 2, 3),
+    (2301, None, "业务保障", 1, 4),
+    (2302, 2301, "应用平台", 2, 1),
+    (2310, 2301, "星座大系统", 2, 2),
+    (2311, 2310, "核心网系统", 3, 1),
+    (2312, 2310, "测运控系统", 3, 2),
+    (2313, 2310, "卫星系统", 3, 3),
+    (2321, 2301, "终端软件", 2, 3),
+    (2322, 2301, "硬件故障", 2, 4),
 ]
 
 
@@ -106,8 +105,8 @@ async def test_v2_tree_present_and_path_correct(seeded_categories):
         return None
 
     top_names = [n["name"] for n in tree]
-    assert "客户咨询" in top_names
-    assert "客户服务" in top_names
+    # m7p9q0r1s2t3：中间层「客户服务」已取消，其下三类提为一级
+    assert top_names == ["客户咨询", "服务投诉", "业务运营", "业务保障"]
 
     leaf = find_by_name(tree, "即时办结咨询")
     assert leaf is not None
@@ -116,13 +115,13 @@ async def test_v2_tree_present_and_path_correct(seeded_categories):
 
     core = find_by_name(tree, "核心网系统")
     assert core is not None
-    assert core["level"] == 4
-    assert core["path"] == "客户服务 / 业务保障 / 星座大系统 / 核心网系统"
+    assert core["level"] == 3
+    assert core["path"] == "业务保障 / 星座大系统 / 核心网系统"
 
     bp = find_by_name(tree, "套餐变更")
     assert bp is not None
-    assert bp["level"] == 3
-    assert bp["path"] == "客户服务 / 业务运营 / 套餐变更"
+    assert bp["level"] == 2
+    assert bp["path"] == "业务运营 / 套餐变更"
 
 
 async def test_old_top_level_categories_deactivated(seeded_categories):
@@ -164,11 +163,11 @@ async def test_lineage_index_resolves_l1_l2_and_path(seeded_categories):
     def names(cid):
         return [c.name for c in index[cid].path]
 
-    # L4 叶子：客户服务 / 业务保障 / 星座大系统 / 核心网系统
+    # L3叶子：业务保障 / 星座大系统 / 核心网系统
     lin = index[2311]
-    assert lin.l1.name == "客户服务"
-    assert lin.l2.name == "业务保障"
-    assert names(2311) == ["客户服务", "业务保障", "星座大系统", "核心网系统"]
+    assert lin.l1.name == "业务保障"
+    assert lin.l2.name == "星座大系统"
+    assert names(2311) == ["业务保障", "星座大系统", "核心网系统"]
 
     # L3 叶子（客户咨询分支）
     assert index[1202].l1.name == "客户咨询"
@@ -176,14 +175,15 @@ async def test_lineage_index_resolves_l1_l2_and_path(seeded_categories):
     assert names(1202) == ["客户咨询", "非即时", "品牌合作"]
 
     # L2 自身：没有更深层，L2 就是自己
-    assert index[2301].l1.name == "客户服务"
-    assert index[2301].l2.name == "业务保障"
-    assert names(2301) == ["客户服务", "业务保障"]
+    # 业务保障提为一级后没有 L2
+    assert index[2301].l1.name == "业务保障"
+    assert index[2301].l2 is None
+    assert names(2301) == ["业务保障"]
 
     # L1 自身：无 L2
-    assert index[1002].l1.name == "客户服务"
-    assert index[1002].l2 is None
-    assert names(1002) == ["客户服务"]
+    assert index[2101].l1.name == "服务投诉"
+    assert index[2101].l2 is None
+    assert names(2101) == ["服务投诉"]
 
     # 旧的 2 层扁平树（历史工单）行为不变
     assert index[101].l1.name == "咨询类"
@@ -229,17 +229,17 @@ async def test_ticket_detail_exposes_correct_l1_l2_path(seeded_categories):
     })
     assert resp.status_code == 201, resp.text
     d = resp.json()["data"]
-    assert d["category_l1_name"] == "客户服务"
-    assert d["category_l2_name"] == "业务保障"
+    assert d["category_l1_name"] == "业务保障"
+    assert d["category_l2_name"] is None
     assert d["category_name"] == "业务保障"
-    assert d["category_path"] == "客户服务 / 业务保障"
+    assert d["category_path"] == "业务保障"
 
-    # 分诊细化到 L3 后，路径加深但 L1/L2 不变
+    # 分诊细化后路径加深；业务保障已是 L1，故 L1/L2 分别为业务保障/星座大系统
     async with factory() as s:
         index = await build_lineage_index(s)
     assert "星座大系统" in [c.name for c in index[2310].path]
-    assert index[2310].l1.name == "客户服务"
-    assert index[2310].l2.name == "业务保障"
+    assert index[2310].l1.name == "业务保障"
+    assert index[2310].l2.name == "星座大系统"
 
 
 async def test_responsibility_slots_judgement_vs_handling(seeded_categories):

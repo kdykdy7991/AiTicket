@@ -22,8 +22,7 @@ from app.models.user import User
 from test_workflow_regression import _next_phone, action_sequence, as_user
 
 CATS = [
-    (1002, None, "客户服务", 1, 2),
-    (2301, 1002, "业务保障", 2, 1),
+    (2301, None, "业务保障", 1, 1),
 ]
 
 # 两步链：售后 → 平台运维组（步骤推进的最小可测结构）
