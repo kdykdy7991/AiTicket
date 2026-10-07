@@ -297,12 +297,18 @@ async function onExport() {
 
 .list-card { border: 1px solid var(--color-border-light); }
 .list-card :deep(.el-card__body) { padding: 0; }
-/* 行背景（灰色行/表头灰底）顶满卡片边：表格本身贴卡片边
-   视觉留白改由所有单元格左右 padding 提供，避免挤压时间列
-   表头和数据行用同一份 padding，标题和内容对齐 */
+/* 行背景（灰色行/表头灰底）顶满卡片边：表格本身贴卡片边。
+   视觉留白只放在 .el-table__cell 上，并清零 Element Plus .cell 自带的
+   `padding: 0 12px`——两层叠加会变成每侧 28px（合计 56px），7 列共吃掉 392px，
+   使各列可用宽度比内容实测需求少 24px，内容被裁切（.cell 默认
+   `overflow: hidden` + `white-space: normal`，溢出表现为换行或截断而非省略号）。 */
 .list-card :deep(.el-table .el-table__cell) {
   padding-left: 16px;
   padding-right: 16px;
+}
+.list-card :deep(.el-table .cell) {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* 快捷分类标签 */
