@@ -2,8 +2,8 @@
   <div class="categories-view">
     <div class="page-header">
       <div>
-        <h2 class="page-title">问题分类管理</h2>
-        <p class="page-subtitle">维护工单的一级分类和二级细分，创建页下拉选项会实时同步</p>
+        <h2 class="page-title">分类管理</h2>
+        <p class="page-subtitle">维护工单的一级分类和二级细分，建单页下拉选项会实时同步</p>
       </div>
     </div>
 

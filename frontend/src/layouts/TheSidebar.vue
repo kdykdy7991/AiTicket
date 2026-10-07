@@ -110,7 +110,7 @@ const mainMenu = computed(() => {
 const adminMenu = [
   { path: '/admin/users', label: '用户管理', icon: iconUsers },
   { path: '/admin/groups', label: '组管理', icon: iconGroup },
-  { path: '/admin/categories', label: '问题分类', icon: iconCategory },
+  { path: '/admin/categories', label: '分类管理', icon: iconCategory },
   { path: '/admin/triggers', label: '触发器', icon: iconTrigger },
   { path: '/admin/sla', label: 'SLA 策略', icon: iconSLA },
   { path: '/admin/channels', label: '邮件渠道', icon: iconMail },

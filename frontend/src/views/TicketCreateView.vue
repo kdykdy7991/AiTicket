@@ -79,11 +79,15 @@
               </el-select>
             </el-form-item>
             <!-- V0.21 §4：二级下拉 = 该一级下全部"判断终点"（create_selectable），
-                 客服只判到判断级，中间判断节点由分诊细化，不进表单 -->
-            <el-form-item label="问题分类" prop="category_l2_id" class="form-col">
-              <el-select v-model="form.category_l2_id" placeholder="选择问题分类（判断终点）" style="width: 100%" :disabled="!form.category_l1_id" clearable filterable>
+                 客服只判到判断级，中间判断节点由分诊细化，不进表单。
+                 若选中的一级本身即判断终点（如业务保障），二级无需再选。 -->
+            <el-form-item v-if="!l1IsJudgmentEnd" label="二级分类" prop="category_l2_id" class="form-col">
+              <el-select v-model="form.category_l2_id" placeholder="选择二级分类" style="width: 100%" :disabled="!form.category_l1_id" clearable filterable>
                 <el-option v-for="c in categoriesSelectableL2" :key="c.id" :label="c.label" :value="c.id" />
               </el-select>
+            </el-form-item>
+            <el-form-item v-else label="二级分类" class="form-col">
+              <span class="form-static">{{ l1Name }}对接部门分诊时判定</span>
             </el-form-item>
           </div>
           <!-- 分派链预填提示：选中分类后由 routing-rules/resolve 给出（链优先） -->
@@ -262,6 +266,23 @@ const rules: FormRules = {
 
 const categoriesL1 = computed(() => categories.value.filter(c => c.parent_id === null))
 
+/**
+ * 选中的一级分类本身即「判断终点」时，不再要求客服选二级。
+ * 典型场景：业务保障——客服只判到业务保障这一级，由售后在分诊时细化；
+ * 其子级（应用平台/星座大系统/终端软件/硬件故障）都不可建单 selectable。
+ */
+const l1IsJudgmentEnd = computed(() => {
+  const l1 = form.category_l1_id
+  if (!l1) return false
+  return categoryById.value.get(l1)?.create_selectable === true
+})
+
+/** 选中一级的名称（判断终点时用于提示文案） */
+const l1Name = computed(() => {
+  const l1 = form.category_l1_id
+  return l1 ? categoryById.value.get(l1)?.name || '' : ''
+})
+
 // V0.21 §4：二级下拉 = 选中一级的全部后代"判断终点"（create_selectable），
 // 含三级节点（如 客户咨询 → 咨询服务 → 即时办结咨询）；标签带路径防重名混淆
 const categoriesSelectableL2 = computed(() => {
@@ -310,8 +331,10 @@ function onCategoryL1Change() {
 //  - 即办结：清空对接字段，建单即归档；
 //  - 部门无对接人等 reason：显示告警，由表单手动指定。
 let routingSeq = 0
-watch(() => form.category_l2_id, async (cid) => {
+// 预填的触发源：优先取二级判断终点；一级本身即判断终点时（如业务保障）用一级
+watch([() => form.category_l2_id, () => form.category_l1_id], async ([l2, l1]) => {
   routingHint.value = null
+  const cid = l2 || (l1IsJudgmentEnd.value ? l1 : null)
   if (!cid) return
   // 编辑草稿：保留草稿里已选的对接部门，不被预填覆盖
   if (editingDraftId.value) return
@@ -629,6 +652,12 @@ async function doSubmit() {
   padding-bottom: 6px;
 }
 
+/* 二级分类免选时的静态提示（对齐 el-select 的视觉高度） */
+.form-static {
+  font-size: 14px;
+  color: var(--color-text-tertiary);
+  line-height: 32px;
+}
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
