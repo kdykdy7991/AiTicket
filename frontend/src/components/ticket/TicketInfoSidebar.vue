@@ -1,5 +1,58 @@
 <template>
   <div class="ticket-sidebar" v-if="ticket">
+    <!-- 责任归属：固定槽位，未参与的显式说明，不留空 -->
+    <div class="sidebar-section">
+      <h4 class="section-title">责任归属</h4>
+      <div class="field-row">
+        <span class="field-label">客服组</span>
+        <span class="field-value">{{ (ticket as any).group_name || '—' }}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">创建人</span>
+        <span class="field-value">{{ (ticket as any).creator_name || '—' }}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">责任部门</span>
+        <span class="field-value">{{ ticket.skill_group_name || '未指派' }}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">部门负责人</span>
+        <span class="field-value">{{ (ticket as any).dispatcher_name || '未指定' }}</span>
+      </div>
+      <div class="field-row">
+        <span class="field-label">处理人</span>
+        <span class="field-value">{{ (ticket as any).owner_name || '未分配' }}</span>
+      </div>
+      <div class="field-row" v-if="(ticket as any).archived_by_name">
+        <span class="field-label">归档人</span>
+        <span class="field-value">{{ (ticket as any).archived_by_name }}</span>
+      </div>
+      <div class="field-row" v-if="(ticket as any).cancelled_by_name">
+        <span class="field-label">撤销人</span>
+        <span class="field-value">{{ (ticket as any).cancelled_by_name }}</span>
+      </div>
+    </div>
+
+    <!-- 分派链：链环是固定的工单槽位，未到达的显式标注 -->
+    <div class="sidebar-section" v-if="chainSteps.length">
+      <h4 class="section-title">
+        分派链
+        <span class="section-hint">{{ chainProgressText }}</span>
+      </h4>
+      <div
+        v-for="(step, i) in chainSteps"
+        :key="i"
+        class="chain-row"
+        :class="{ reached: i <= currentStepIndex, current: i === currentStepIndex }"
+      >
+        <span class="chain-dot">{{ i + 1 }}</span>
+        <span class="chain-name">{{ step.department_code }}</span>
+        <span class="chain-state">{{ chainStateText(i) }}</span>
+      </div>
+    </div>
+
+    <div class="sidebar-divider" />
+
     <!-- 属性 -->
     <div class="sidebar-section">
       <h4 class="section-title">属性</h4>
@@ -8,20 +61,18 @@
         <span class="field-value">{{ ticket.priority?.name || '—' }}</span>
       </div>
       <div class="field-row">
-        <span class="field-label">对接部门</span>
-        <span class="field-value">{{ ticket.skill_group_name || '—' }}</span>
-      </div>
-      <div class="field-row" v-if="(ticket as any).dispatcher_id">
-        <span class="field-label">部门对接人</span>
-        <span class="field-value">{{ (ticket as any).dispatcher_name || '—' }}</span>
+        <span class="field-label">来源</span>
+        <span class="field-value">
+          <span class="channel-badge" :class="`channel-${ticket.channel}`">{{ channelLabel(ticket.channel) }}</span>
+        </span>
       </div>
       <div class="field-row">
-        <span class="field-label">处理人</span>
-        <span class="field-value">{{ (ticket as any).owner_name || '未分配' }}</span>
-      </div>
-      <div class="field-row">
-        <span class="field-label">客服组</span>
-        <span class="field-value">{{ (ticket as any).group_name || '—' }}</span>
+        <span class="field-label">SLA</span>
+        <span class="field-value">
+          <span :class="['sla-tag', ticket.sla_breached ? 'breached' : 'ok']">
+            {{ ticket.sla_breached ? '超时' : '达标' }}
+          </span>
+        </span>
       </div>
     </div>
 
@@ -69,14 +120,18 @@
 
     <div class="sidebar-divider" />
 
-    <!-- 分类信息 -->
+    <!-- 分类信息：展示完整路径（分类树深度不定，最多 4 层） -->
     <div class="sidebar-section">
       <h4 class="section-title">分类</h4>
-      <div class="info-row" v-if="ticket.category_l1">
+      <div class="info-row" v-if="categoryText">
+        <span class="info-label">分类</span>
+        <span class="info-value">{{ categoryText }}</span>
+      </div>
+      <div class="info-row" v-if="!categoryText && ticket.category_l1">
         <span class="info-label">一级</span>
         <span class="info-value">{{ ticket.category_l1.name }}</span>
       </div>
-      <div class="info-row" v-if="ticket.category_l2">
+      <div class="info-row" v-if="!categoryText && ticket.category_l2">
         <span class="info-label">二级</span>
         <span class="info-value">{{ ticket.category_l2.name }}</span>
       </div>
@@ -109,23 +164,9 @@
 
     <div class="sidebar-divider" />
 
-    <!-- 渠道 / 流转 -->
+    <!-- 处理结果 -->
     <div class="sidebar-section">
-      <h4 class="section-title">流转</h4>
-      <div class="info-row">
-        <span class="info-label">来源</span>
-        <span class="channel-badge" :class="`channel-${ticket.channel}`">{{ channelLabel(ticket.channel) }}</span>
-      </div>
-      <div class="info-row" v-if="ticket.first_owner_id">
-        <span class="info-label">首受</span>
-        <span class="info-value">{{ (ticket as any).first_owner_name || '—' }}</span>
-      </div>
-      <div class="info-row" v-if="ticket.sla_breached !== undefined">
-        <span class="info-label">SLA</span>
-        <span :class="['sla-tag', ticket.sla_breached ? 'breached' : 'ok']">
-          {{ ticket.sla_breached ? '超时' : '达标' }}
-        </span>
-      </div>
+      <h4 class="section-title">处理结果</h4>
       <div class="info-row" v-if="ticket.resolved">
         <span class="info-label">解决</span>
         <span class="info-value resolved-yes">已解决</span>
@@ -209,6 +250,43 @@ import type { TicketDetail, TicketChannel } from '@/types'
 
 const props = defineProps<{ ticket: TicketDetail }>()
 
+/**
+ * 分类展示文案：优先用后端下发的完整路径（分类树深度不定，最多 4 层，
+ * L1/L2 不足以表达 3、4 层），缺失时回退到一级/二级拼接。
+ */
+const categoryText = computed(() => {
+  const t = props.ticket
+  if (t.category_path) return t.category_path
+  const parts = [t.category_l1?.name, t.category_l2?.name].filter(Boolean)
+  return parts.length ? parts.join(' / ') : ''
+})
+
+/** 分派链环（V0.21 快照）。steps 的 department_code 即skill_groups.name。 */
+const chainSteps = computed<Array<{ order?: number; department_code?: string }>>(() => {
+  const steps = (props.ticket as any).dispatch_chain_steps
+  return Array.isArray(steps) ? steps : []
+})
+
+/** 当前走到第几环（0起）；-1 表示尚未开始。 */
+const currentStepIndex = computed(() => {
+  const idx = (props.ticket as any).dispatch_step_index
+  return typeof idx === 'number' ? idx : -1
+})
+
+const chainProgressText = computed(() => {
+  const total = chainSteps.value.length
+  const cur = currentStepIndex.value
+  if (cur < 0) return `共 ${total} 环 · 待启动`
+  return `共 ${total} 环 · 当前第 ${cur + 1} 环`
+})
+
+/** 链环状态：已到达 / 当前 / 未到达 */
+function chainStateText(i: number): string {
+  if (i < currentStepIndex.value) return '已到达'
+  if (i === currentStepIndex.value) return '当前'
+  return '未到达'
+}
+
 // SLA 总时长 = 创建时间 →  escalation_at（解决/首次响应截止时间）
 const totalSLAMinutes = computed(() => {
   const t = props.ticket
@@ -251,6 +329,49 @@ function satisfactionLabel(v: string): string {
   letter-spacing: 0.06em;
   margin: 0;
 }
+/* 区块标题右侧的进度提示（如分派链环数） */
+.section-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--color-text-placeholder);
+}
+
+/* 分派链：固定环位列表，未到达的环显式标注而非留空 */
+.chain-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-placeholder);
+}
+.chain-row.reached { color: var(--color-text-secondary); }
+.chain-row.current { color: var(--color-text-primary); font-weight: 600; }
+.chain-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+}
+.chain-row.reached .chain-dot {
+  background: var(--color-primary-ghost);
+  color: var(--color-primary);
+}
+.chain-row.current .chain-dot {
+  background: var(--color-primary);
+  color: #fff;
+}
+.chain-name { flex: 1; min-width: 0; }
+.chain-state { flex-shrink: 0; font-size: 11px; color: var(--color-text-placeholder); }
 
 .sidebar-divider {
   height: 1px;

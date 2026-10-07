@@ -171,9 +171,10 @@ function adaptTicket(t: any): any {
     contact_phone: t.contact_phone || null,
     // 组织：后端无，用所属公司兜底
     organization: t.customer_company ? { id: 0, name: t.customer_company, active: true } : null,
-    // 分类：后端返回 category_l1/category_l2，兼容旧数据
+    // 分类：后端返回 category_l1/category_l2/category_path（沿 parent 链到根派生）
     category_l1: t.category_l1_id ? { id: t.category_l1_id, name: t.category_l1_name } : null,
     category_l2: t.category_l2_id ? { id: t.category_l2_id, name: t.category_l2_name } : null,
+    category_path: t.category_path || null,
     // 重投关联：后端 linked_ticket_id，无 number，仅放 id
     duplicate_of: t.linked_ticket_id ? { id: t.linked_ticket_id, number: '' } : null,
     // 首受人：后端 first_owner_id，无 name

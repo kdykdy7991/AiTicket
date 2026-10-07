@@ -101,10 +101,13 @@ class TicketBrief(BaseModel):
     dispatcher_name: str | None = None
     category_id: int | None = None
     category_name: str | None = None
+    # 以下均为派生值（工单只存 category_id）：L1=根节点、L2=根的直接子级
     category_l1_id: int | None = None
     category_l1_name: str | None = None
     category_l2_id: int | None = None
     category_l2_name: str | None = None
+    # 完整路径 root→leaf，如 "客户服务 / 业务保障 / 星座大系统 / 核心网系统"
+    category_path: str | None = None
     region_name: str | None = None
     is_duplicate: bool = False
     is_draft: bool = False

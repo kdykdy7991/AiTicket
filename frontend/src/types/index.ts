@@ -169,6 +169,8 @@ export interface Ticket {
   region_name: string | null
   category_l1: TicketCategory | null
   category_l2: TicketCategory | null
+  /** 完整分类路径 root→leaf，如 "客户服务 / 业务保障 / 星座大系统 / 核心网系统" */
+  category_path: string | null
   symptom: string | null
   is_duplicate: boolean
   duplicate_reason: string | null

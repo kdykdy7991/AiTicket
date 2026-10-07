@@ -7,10 +7,57 @@ attribute computed from the parent chain, not a hard constraint.
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import TicketCategory
+
+
+class CategoryLineage(NamedTuple):
+    """工单分类的派生血缘。
+
+    工单只存`category_id`（分诊会把它细化到任意深度），所以 L1/L2/路径
+    全都是沿parent 链派生的，不落库。
+
+    - l1: 根节点（一级分类）
+    - l2: 根节点的直接子级（二级分类）
+    - path: root → leaf 完整链，用于界面展示全路径
+    """
+
+    l1: TicketCategory | None
+    l2: TicketCategory | None
+    path: tuple[TicketCategory, ...]
+
+
+async def build_lineage_index(db: AsyncSession) -> dict[int, CategoryLineage]:
+    """一次性载入全部分类，构建 ``category_id -> CategoryLineage`` 映射。
+
+    必须沿 parent 链走到根，不能只取一层 ``parent``：分类树是任意深度的
+    （V2 树有 4 层，如 客户服务/业务保障/星座大系统/核心网系统），只取一层
+    会把二级节点（业务保障）误当成一级。
+
+    分类表极小（数十行），一次查询换掉逐工单递归，避免列表页 N+1。
+    """
+    rows = (await db.execute(select(TicketCategory))).scalars().all()
+    by_id = {c.id: c for c in rows}
+    index: dict[int, CategoryLineage] = {}
+    for c in rows:
+        chain: list[TicketCategory] = []
+        cur: TicketCategory | None = c
+        seen: set[int] = set()
+        while cur is not None and cur.id not in seen:
+            seen.add(cur.id)
+            chain.append(cur)
+            cur = by_id.get(cur.parent_id) if cur.parent_id is not None else None
+        chain.reverse()  # 现在是 root → leaf
+        index[c.id] = CategoryLineage(
+            l1=chain[0] if chain else None,
+            l2=chain[1] if len(chain) > 1 else None,
+            path=tuple(chain),
+        )
+    return index
 
 
 async def get_category_by_id(db: AsyncSession, category_id: int | None) -> TicketCategory | None:
