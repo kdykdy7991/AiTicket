@@ -158,7 +158,9 @@ function adaptTicket(t: any): any {
     priority_key: t.priority,
     // 关联对象
     owner: t.owner_id ? { id: t.owner_id, firstname: t.owner_name, lastname: '' } : null,
+    owner_department: t.owner_department || null,
     dispatcher: t.dispatcher_id ? { id: t.dispatcher_id, firstname: t.dispatcher_name, lastname: '' } : null,
+    dispatcher_department: t.dispatcher_department || null,
     returned_to_user: t.returned_to_user_id ? { id: t.returned_to_user_id, firstname: t.returned_to_user_name, lastname: '' } : null,
     group: t.group_id ? { id: t.group_id, name: t.group_name } : null,
     skill_group: t.skill_group_id ? { id: t.skill_group_id, name: t.skill_group_name } : null,

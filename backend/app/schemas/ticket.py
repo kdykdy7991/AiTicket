@@ -97,8 +97,11 @@ class TicketBrief(BaseModel):
     handler_skill_group_name: str | None = None
     owner_id: int | None = None
     owner_name: str | None = None
+    # 所属部门（优先工单当前责任部门）——用于识别跨部门错配
+    owner_department: str | None = None
     dispatcher_id: int | None = None
     dispatcher_name: str | None = None
+    dispatcher_department: str | None = None
     category_id: int | None = None
     category_name: str | None = None
     # 以下均为派生值（工单只存 category_id）：L1=根节点、L2=根的直接子级

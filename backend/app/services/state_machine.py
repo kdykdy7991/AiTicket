@@ -31,7 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ForbiddenError, StateTransitionError
-from app.models.group import UserSkillGroup
+from app.models.group import SkillGroup, UserSkillGroup
 from app.models.ticket import Ticket, TicketStateLog
 from app.models.user import User
 
@@ -386,16 +386,45 @@ async def check_transition_permission(
         resolved→open/on_hold: 处理人（owner）/ admin
       returned→pending/cancelled: 创建者 / admin
     分派的输入要求：非 admin 分派必须指定处理人（422）。
+    分派还需处理人属于工单当前责任部门（skill_group_id）——对齐
+    routing.validate_rule_payload 的同名约束，避免跨部门错配（admin 同样受约束）。
     """
     error = await transition_permission_error(db, ticket, to_state, user)
     if error is not None:
         raise ForbiddenError(error)
-    if (
-        user.role != "admin"
-        and (ticket.state, to_state) == ("pending", "open")
-        and not owner_id
-    ):
-        raise HTTPException(422, detail="分派时必须指定处理人")
+    if (ticket.state, to_state) == ("pending", "open"):
+        if user.role != "admin" and not owner_id:
+            raise HTTPException(422, detail="分派时必须指定处理人")
+        target_id = owner_id or ticket.owner_id
+        if target_id and ticket.skill_group_id:
+            await _assert_owner_in_department(db, target_id, ticket.skill_group_id)
+
+
+async def _assert_owner_in_department(
+    db: AsyncSession, owner_id: int, skill_group_id: int
+) -> None:
+    """处理人必须属于工单当前责任部门，否则 422。
+
+    前端选人控件已按部门过滤，这里是后端兜底：admin 或直接调接口都能绕过前端，
+    实测就出现过工单责任部门=经营管理部、处理人=网运部成员的错配。
+    """
+    link = await db.execute(
+        select(UserSkillGroup).where(
+            UserSkillGroup.user_id == owner_id,
+            UserSkillGroup.skill_group_id == skill_group_id,
+        )
+    )
+    if link.scalar_one_or_none() is None:
+        dept = await db.execute(
+            select(SkillGroup.name).where(SkillGroup.id == skill_group_id)
+        )
+        raise HTTPException(
+            422,
+            detail=(
+                f"处理人不属于工单当前责任部门「{dept.scalar_one_or_none() or skill_group_id}」，"
+                "请选择该部门成员"
+            ),
+        )
 
 
 async def apply_initial_state(

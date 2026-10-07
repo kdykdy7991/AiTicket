@@ -44,6 +44,9 @@ async def env(client):
         s.add(UserSkillGroup(user_id=dispatcher_id, skill_group_id=sg.id, is_dispatcher=True))
         handler = User(username="wf-handler", name="回归处理人", password_hash="x", role="agent")
         s.add(handler)
+        await s.flush()
+        # 处理人必须属于工单当前责任部门（分派时后端会校验）
+        s.add(UserSkillGroup(user_id=handler.id, skill_group_id=sg.id, is_dispatcher=False))
         await s.commit()
         await s.refresh(sg)
         await s.refresh(handler)

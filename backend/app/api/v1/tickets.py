@@ -69,6 +69,26 @@ async def get_category_indexes(
     )
 
 
+def _dept_of(user: User | None, prefer_skill_group_id: int | None) -> str | None:
+    """人员的所属部门名（优先工单当前责任部门，其次其任一所属部门）。
+
+    User.skill_groups 是 lazy="selectin"，此处同步读取安全。
+    一个人可能属于多个部门（如既在网运部又在业务支撑组），与工单责任部门
+    匹配的那个才是本单语境下有意义的那个；都不匹配时回退首个，让跨部门
+    错配在界面上可见（而不是悄悄显示一个不相干的部门）。
+    """
+    if user is None:
+        return None
+    names = [sg.name for sg in (user.skill_groups or []) if sg.name]
+    if not names:
+        return None
+    if prefer_skill_group_id:
+        for sg in user.skill_groups or []:
+            if sg.id == prefer_skill_group_id:
+                return sg.name
+    return names[0]
+
+
 def _resolve_lineage(
     t: Ticket,
     lineage: dict[int, CategoryLineage] | None,
@@ -111,8 +131,10 @@ def _ticket_to_brief(
         ),
         owner_id=t.owner_id,
         owner_name=t.owner.name if t.owner else None,
+        owner_department=_dept_of(t.owner, t.skill_group_id),
         dispatcher_id=t.dispatcher_id,
         dispatcher_name=t.dispatcher.name if t.dispatcher else None,
+        dispatcher_department=_dept_of(t.dispatcher, t.skill_group_id),
         category_id=t.category_id,
         category_name=cat_leaf.name if cat_leaf else None,
         category_l1_id=cat_l1.id if cat_l1 else t.category_id,

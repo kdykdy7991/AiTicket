@@ -63,6 +63,9 @@ async def env(client):
         s.add(UserSkillGroup(user_id=dispatcher_id, skill_group_id=sg.id, is_dispatcher=True))
         handler = User(username="tb-handler", name="基线处理人", password_hash="x", role="agent")
         s.add(handler)
+        await s.flush()
+        # 处理人必须属于工单当前责任部门（分派时后端会校验）
+        s.add(UserSkillGroup(user_id=handler.id, skill_group_id=sg.id, is_dispatcher=False))
         await s.commit()
         await s.refresh(sg)
         await s.refresh(handler)
@@ -1030,3 +1033,32 @@ async def test_no_callback_config_behavior_unchanged(env):
     assert d2["state"] == "archived"
     assert d2["satisfaction"] is None
     assert d2["is_callbacked"] is False
+
+
+async def test_dispatch_rejects_owner_outside_department(env):
+    """回归：分派时处理人必须属于工单当前责任部门。
+
+    此前只校验「谁是操作者」和「有没有指定处理人」，不校验处理人所属部门，
+    实测出现过责任部门=经营管理部、处理人=网运部成员的跨部门错配。
+    """
+    c, engine, factory = env["client"], env["engine"], env["factory"]
+    async with factory() as s:
+        outsider = User(username="tb-dept-outsider", name="外部门处理人",
+                        password_hash="x", role="agent")
+        s.add(outsider)
+        await s.commit()
+        outsider_id = outsider.id
+
+    t = await env["create_ticket"]()          # 责任部门= TB协调组
+    r = await c.patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "open", "owner_id": outsider_id,
+    })
+    assert r.status_code == 422, r.text
+    assert "不属于工单当前责任部门" in r.json()["detail"]
+
+    # 同部门成员可正常分派
+    ok = await c.patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "open", "owner_id": env["handler_id"],
+    })
+    assert ok.status_code == 200, ok.text
+    assert ok.json()["owner_id"] == env["handler_id"]

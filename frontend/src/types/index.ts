@@ -151,6 +151,8 @@ export interface Ticket {
   priority: TicketPriority
   group: Group
   owner: User | null
+  /** 所属部门（后端优先返回工单当前责任部门，其次其任一所属部门） */
+  owner_department: string | null
   customer: User
   organization: Organization | null
   channel: TicketChannel

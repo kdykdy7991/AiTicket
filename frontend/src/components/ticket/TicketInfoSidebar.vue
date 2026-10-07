@@ -47,7 +47,12 @@
       </div>
       <div class="field-row">
         <span class="field-label">处理人</span>
-        <span class="field-value">{{ (ticket as any).owner_name || '未分配' }}</span>
+        <span class="field-value">
+          <span>{{ (ticket as any).owner_name || '未分配' }}</span>
+          <span v-if="(ticket as any).owner_department" class="dept-tag">
+            {{ (ticket as any).owner_department }}
+          </span>
+        </span>
       </div>
     </div>
 
@@ -332,6 +337,16 @@ function satisfactionLabel(v: string): string {
   content: '→';
   margin-right: 6px;
   color: var(--color-text-placeholder);
+}
+/* 人员所属部门标注：跨部门错配时一眼可见 */
+.dept-tag {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-subtle);
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  font-weight: 500;
 }
 /* 语义化占位（客服组已完成判断 / 未分配 等） */
 .muted { color: var(--color-text-tertiary); }
