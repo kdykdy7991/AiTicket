@@ -177,10 +177,12 @@ function senderName(article: Article): string {
   return u.firstname || u.name || ''
 }
 
-/** Flow Log 动作类型 → 徽标文案（refine/transfer 是 V0.21 新增域动作，其余不加徽标） */
+/** Flow Log 动作类型 → 徽标文案（起点动作与 V0.21 域动作需显式标出） */
 function actionBadge(log: TicketStateLog): string {
   const map: Record<string, string> = {
-    refine: '分诊',
+    create: '创建',
+    instant_resolve: '即办结',
+    refine: '问题判断',
     transfer: '转派',
   }
   return map[log.action_type || ''] || ''
@@ -410,6 +412,11 @@ function repliesForState(log: TicketStateLog): Article[] {
   font-size: 11px;
   font-weight: 600;
   line-height: 1;
+}
+.action-create,
+.action-instant_resolve {
+  background: var(--color-bg-subtle);
+  color: var(--color-text-secondary);
 }
 .action-refine {
   background: #EEF2FF;
