@@ -77,24 +77,20 @@ async def _ensure_v2_categories(engine):
     from scripts.seed import V2_CAT
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
-        if await _category_exists(engine, V2_CAT["即时办结咨询"]):
+        if await _category_exists(engine, 1202):
             return
         # Inline the v2 categories (mirrors f2a3b4c5d6e7)
         # (id, parent_id, name, level, sort_order)
         V2_CATEGORIES = [
             (1001, None, "客户咨询", 1, 1),
-            (1101, 1001, "即时", 2, 1),
-            (1102, 1101, "即时办结咨询", 3, 1),
-            (1201, 1001, "非即时", 2, 1),
-            (1202, 1201, "品牌合作", 3, 1),
-            (1203, 1201, "产品使用/参数咨询", 3, 2),
-            (1204, 1201, "渠道/代理合作", 3, 3),
+            (1202, 1001, "品牌合作", 2, 1),
+            (1203, 1001, "产品使用/参数咨询", 2, 2),
+            (1204, 1001, "渠道/代理合作", 2, 3),
             (2101, None, "服务投诉", 1, 1),
             (2102, 2101, "一般投诉", 3, 1),
             (2103, 2101, "重要投诉", 3, 2),
             (2104, 2101, "重大投诉", 3, 3),
             (2201, None, "业务运营", 1, 1),
-            (2202, 2201, "套餐查询", 3, 1),
             (2203, 2201, "套餐变更", 3, 2),
             (2204, 2201, "业财对账", 3, 3),
             (2301, None, "业务保障", 1, 1),
@@ -115,7 +111,8 @@ async def _ensure_v2_categories(engine):
                 continue
             s.add(TicketCategory(
                 id=cid, parent_id=parent, name=name, level=level,
-                sort_order=sort, is_active=True, created_at=now, updated_at=now,
+                sort_order=sort, is_active=True,
+                created_at=now, updated_at=now,
             ))
         await s.commit()
 
@@ -231,7 +228,7 @@ async def test_phase9_seed_creates_routing_rules(phase9_env):
         )).scalars().all()
     cat_ids = {r.category_id for r in rules}
     from scripts.seed import V2_CAT
-    assert V2_CAT["即时办结咨询"] in cat_ids
+    assert 1102 not in cat_ids
     assert V2_CAT["核心网系统"] in cat_ids
     assert V2_CAT["卫星系统"] in cat_ids
 

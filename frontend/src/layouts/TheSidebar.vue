@@ -90,7 +90,6 @@ const iconGroup = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 const iconTrigger = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg>'
 const iconSLA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>'
 const iconMail = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,7 12,13 2,7"/></svg>'
-const iconCategory = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>'
 
 const mainMenu = computed(() => {
   const items = [
@@ -110,7 +109,6 @@ const mainMenu = computed(() => {
 const adminMenu = [
   { path: '/admin/users', label: '用户管理', icon: iconUsers },
   { path: '/admin/groups', label: '组管理', icon: iconGroup },
-  { path: '/admin/categories', label: '分类管理', icon: iconCategory },
   { path: '/admin/triggers', label: '触发器', icon: iconTrigger },
   { path: '/admin/sla', label: 'SLA 策略', icon: iconSLA },
   { path: '/admin/channels', label: '邮件渠道', icon: iconMail },

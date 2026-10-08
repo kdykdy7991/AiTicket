@@ -91,7 +91,7 @@ HANDLERS = [
     (24, 'jiangweiye', '姜伟业', 'handler', 1, False, _DEFAULT_HASH),
     (25, 'chenwenbing', '陈文兵', 'handler', 1, False, _DEFAULT_HASH),
     # V0.7 新增对接人
-    (26, 'wangyaozong', '王耀宗', 'handler', 1, False, _DEFAULT_HASH),
+    (26, 'wangyaozong', '王耀宗', 'agent', 1, False, _DEFAULT_HASH),
     (31, 'wangjunhua', '汪军华', 'handler', 1, False, _DEFAULT_HASH),
     (35, 'yangbing', '杨冰', 'handler', 1, False, _DEFAULT_HASH),
     (37, 'caoxin', '曹欣', 'handler', 1, False, _DEFAULT_HASH),

@@ -65,7 +65,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'triggers', name: 'AdminTriggers', component: () => import('@/views/admin/PlaceholderView.vue'), meta: { title: '触发器' } },
       { path: 'sla', name: 'AdminSLA', component: () => import('@/views/admin/SLAView.vue'), meta: { title: 'SLA 策略' } },
       { path: 'channels', name: 'AdminChannels', component: () => import('@/views/admin/PlaceholderView.vue'), meta: { title: '邮件渠道' } },
-      { path: 'categories', name: 'AdminCategories', component: () => import('@/views/admin/CategoriesView.vue'), meta: { title: '分类管理' } },
     ],
   },
 ]

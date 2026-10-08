@@ -129,6 +129,21 @@ async def test_create_writes_chain_snapshot(renv):
     assert t["dispatcher_id"] == renv["aftersale_user"]
 
 
+async def test_business_assurance_goes_directly_to_judgement(renv):
+    t = await renv["create_ticket"](
+        skill_group_id=renv["sg_platform"],
+        dispatcher_id=renv["platform_user"],
+    )
+    assert t["skill_group_name"] == "售后"
+    assert t["dispatcher_id"] == renv["aftersale_user"]
+    detail = (await renv["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert detail["can_refine"] is True
+    assert not any(a["action"] == "dispatch" for a in detail["allowed_actions"])
+    await renv["patch"](
+        t["id"], {"state": "open", "owner_id": renv["aftersale_user"]}, expect=403
+    )
+
+
 async def test_refine_switches_chain_and_dept(renv):
     """pending 分诊：分类/链/部门切到子级，状态不变，留下 refine 自环日志。"""
     t = await renv["create_ticket"]()
@@ -156,10 +171,21 @@ async def test_refine_switches_chain_and_dept(renv):
         assert "业务保障" in log.reason and "应用平台" in log.reason
 
 
+async def set_existing_open_ticket(renv, ticket_id):
+    """Model a ticket that reached open before the judgement gate was added."""
+    from app.models.ticket import Ticket
+    factory = async_sessionmaker_for(renv["engine"])
+    async with factory() as db:
+        ticket = await db.get(Ticket, ticket_id)
+        ticket.state = "open"
+        ticket.owner_id = renv["aftersale_user"]
+        await db.commit()
+
+
 async def test_refine_open_switches_owner(renv):
     """open 分诊换部门时同步换成新部门的默认处理人，状态保持 open。"""
     t = await renv["create_ticket"]()
-    await renv["patch"](t["id"], {"state": "open", "owner_id": renv["aftersale_user"]})
+    await set_existing_open_ticket(renv, t["id"])
 
     d = await renv["refine"](t["id"], 2302)
     assert d["state"] == "open"
@@ -170,7 +196,7 @@ async def test_refine_open_switches_owner(renv):
 async def test_refine_continue_rule_same_dept(renv):
     """接续规则：新链首步 == 当前判断部门（售后）→ 单步链原地不动，owner 保留。"""
     t = await renv["create_ticket"]()
-    await renv["patch"](t["id"], {"state": "open", "owner_id": renv["aftersale_user"]})
+    await set_existing_open_ticket(renv, t["id"])
 
     d = await renv["refine"](t["id"], 2322)  # 硬件故障：判断方=处理方
     assert d["state"] == "open"
@@ -215,7 +241,7 @@ async def test_refine_requires_judging_dept_member(renv):
 async def test_refine_denied_in_terminal_state(renv):
     """已处理的工单不可回溯分诊。"""
     t = await renv["create_ticket"]()
-    await renv["patch"](t["id"], {"state": "open", "owner_id": renv["aftersale_user"]})
+    await set_existing_open_ticket(renv, t["id"])
     await renv["patch"](t["id"], {"state": "resolved", "solution": "已解决"})
     resp = await renv["refine"](t["id"], 2302, expect=403)
     assert "仅待受理/处理中" in resp.json()["error"]["message"]

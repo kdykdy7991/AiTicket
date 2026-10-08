@@ -20,11 +20,6 @@ from app.models.dispatch import DispatchChain
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.user import User
 
-# 即办结分类（设计 §4 表A）：建单即归档，保留工单记录，不进分派链。
-# 1102 即时办结咨询 / 2202 套餐查询（2026-09-30 确认：客服直接办结）。
-INSTANT_RESOLVE_CATEGORY_IDS: set[int] = {1102, 2202}
-
-
 async def resolve_chain(db: AsyncSession, category_id: int | None) -> dict | None:
     """分类 → 启用中的链。返回 {"matched_category_id", "steps"}；无链返回 None。"""
     if category_id is None:

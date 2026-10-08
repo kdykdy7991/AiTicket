@@ -468,14 +468,10 @@ async def list_categories(
         paths[c.id] = " / ".join(path_chain)
 
     # 建单通道标注（V0.21 §4 表A，设计的表单放宽依据）：
-    # - channel:     chain=按分派链自动落位；instant=建单即办结；manual=无链人工分派
-    # - create_selectable: 客服建单可选的"判断终点"——自身有通道（链/即办结/
+    # - channel:     chain=按分派链自动落位；manual=无链人工分派
+    # - create_selectable: 客服建单可选的"判断终点"——自身有通道（链/
     #   链末叶子），且祖先里没有判断链节点：业务保障/星座大系统这类判断节点
     #   的下级由处理侧分诊产生，不进客服建单表单。
-    from app.services.dispatch_chain import (
-        INSTANT_RESOLVE_CATEGORY_IDS,
-    )
-
     chain_cat_ids = set(
         (await db.execute(
             select(DispatchChain.category_id).where(DispatchChain.enabled == True)  # noqa: E712
@@ -502,7 +498,6 @@ async def list_categories(
     selectable: dict[int, bool] = {}
     for c in all_cats:
         has_chain = _has_chain(c.id)
-        is_instant = c.id in INSTANT_RESOLVE_CATEGORY_IDS
         is_leaf = active_children.get(c.id, 0) == 0
         ancestor_chain = False
         p = by_id.get(c.parent_id) if c.parent_id else None
@@ -511,8 +506,8 @@ async def list_categories(
                 ancestor_chain = True
                 break
             p = by_id.get(p.parent_id) if p.parent_id else None
-        channels[c.id] = "instant" if is_instant else ("chain" if has_chain else ("manual" if is_leaf else "none"))
-        selectable[c.id] = (has_chain or is_instant or is_leaf) and not ancestor_chain
+        channels[c.id] = "chain" if has_chain else ("manual" if is_leaf else "none")
+        selectable[c.id] = (has_chain or is_leaf) and not ancestor_chain
 
     # Build tree.
     node_map: dict[int, dict] = {}

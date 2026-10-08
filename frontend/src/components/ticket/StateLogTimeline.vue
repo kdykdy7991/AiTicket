@@ -1,9 +1,5 @@
 <template>
-  <!--
-    流转时间线：只呈现「动作名 + 时间 + 操作人」三项。
-    状态本身不在此重复展示（侧边栏已有），处理说明/补充信息/附件/归档回访
-    等内容见下方「处理记录」区。
-  -->
+  <!-- 处理流程按操作展示，节点责任人取流转时的人员快照。 -->
   <div class="timeline">
     <div v-if="nodes.length === 0" class="empty">暂无流转记录</div>
     <div
@@ -24,8 +20,8 @@
             <DateTimeLabel :iso="node.ts" />
           </span>
         </div>
-        <div v-if="operatorName(node.log)" class="action-operator">
-          操作人：{{ operatorName(node.log) }}
+        <div v-if="responsibleName(node.log, isCurrent(node))" class="action-operator">
+          {{ responsibleLabel(node.log) }}：{{ responsibleName(node.log, isCurrent(node)) }}
         </div>
       </div>
     </div>
@@ -39,6 +35,7 @@ import type { TicketStateLog } from '@/types'
 
 const props = defineProps<{
   logs: TicketStateLog[]
+  currentOwnerName?: string
 }>()
 
 interface TimelineNode {
@@ -88,14 +85,22 @@ const STATE_FALLBACK: Record<string, string> = {
 function actionName(log: TicketStateLog): string {
   const t = log.action_type || ''
   if (ACTION_NAMES[t]) return ACTION_NAMES[t]
-  const st = log.to_state_key || log.to_state || ''
+  const st = log.to_state_key || ''
   return STATE_FALLBACK[st] || '状态变更'
 }
 
-function operatorName(log: TicketStateLog): string {
-  const u = log.changed_by as any
-  if (!u) return ''
-  return `${u.firstname || ''}${u.lastname || ''}` || u.name || ''
+function responsibleLabel(log: TicketStateLog): string {
+  if (log.action_type === 'create') return '创建人'
+  if (log.to_state_key === 'pending') return '节点对接人'
+  if (log.to_state_key === 'returned') return '退回接收人'
+  return '节点处理人'
+}
+
+function responsibleName(log: TicketStateLog, current: boolean): string {
+  if (log.action_type === 'create') return log.creator_name_snapshot || log.operator_name || ''
+  if (log.to_state_key === 'pending') return log.dispatcher_name_snapshot || ''
+  if (log.to_state_key === 'returned') return log.creator_name_snapshot || ''
+  return (current && props.currentOwnerName) || log.owner_name_snapshot || ''
 }
 
 const TERMINAL_STATES = new Set(['archived', 'cancelled'])
@@ -104,7 +109,7 @@ const TERMINAL_STATES = new Set(['archived', 'cancelled'])
 function isCurrent(node: TimelineNode): boolean {
   const last = nodes.value[nodes.value.length - 1]
   if (!last || last.key !== node.key) return false
-  return !TERMINAL_STATES.has(node.log.to_state_key || node.log.to_state || '')
+  return !TERMINAL_STATES.has(node.log.to_state_key || '')
 }
 </script>
 

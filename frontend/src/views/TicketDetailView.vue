@@ -12,28 +12,6 @@
           <span class="ticket-number">{{ ticket.number || '未编号' }}</span>
           <StateTag :state="ticket.state" />
           <div class="header-actions">
-            <!--
-              问题判断：不再有独立的「分诊」动作，判断人直接在此选择分类即可。
-              仅当账号是该分类链首部门的判断人时出现（后端 can_refine 已含
-              状态+账号校验），其他人看不到这个控件。
-            -->
-            <div v-if="canRefine" class="refine-inline">
-              <span class="refine-inline-label">问题分类</span>
-              <el-select
-                :model-value="currentCategoryId"
-                size="small"
-                class="refine-inline-select"
-                placeholder="选择分类"
-                @change="onPickRefineCategory"
-              >
-                <el-option
-                  v-for="o in refineOptions"
-                  :key="o.id"
-                  :label="o.name"
-                  :value="o.id"
-                />
-              </el-select>
-            </div>
             <!-- V0.21：转派（链推进一步） -->
             <el-button
               v-if="transferAction"
@@ -50,20 +28,18 @@
 
       <div class="detail-body">
         <div class="detail-main">
+          <div class="sidebar-card flow-card">
+            <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h4a6 6 0 0 1 6 5"/></svg>处理流程</h3>
+            <StateLogTimeline :logs="ticket.state_logs || []" :current-owner-name="(ticket as any).owner_name || ''" />
+          </div>
           <div v-if="(ticket as any).description" class="ticket-description">
-            <div class="ticket-description-label">详细描述</div>
+            <h3 class="ticket-description-label"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M15 3v5h4M8 12h8M8 16h6"/></svg>问题描述</h3>
             <div class="ticket-description-body">{{ (ticket as any).description }}</div>
           </div>
 
-          <!-- 流转时间线：只回答「谁在什么时候做了什么动作」 -->
-          <div class="timeline-card">
-            <h3 class="timeline-section-title">流转时间线</h3>
-            <StateLogTimeline :logs="ticket.state_logs || []" />
-          </div>
-
           <!-- 处理记录：内容性信息（处理说明/补充/催办/附件/归档回访） -->
-          <div class="timeline-card">
-            <h3 class="timeline-section-title">处理记录</h3>
+          <div v-if="hasContentRecords" class="timeline-card">
+            <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 10h6M9 14h6M9 18h4"/></svg>处理记录</h3>
             <TicketContentRecords
               :ticket="ticket"
               :replies="(ticket.articles || []).filter(a => a.type === 'reply')"
@@ -188,6 +164,26 @@
             </div>
           </div>
 
+          <!-- 当前判断人的正常处理动作，选分类后按分派链流转。 -->
+          <div v-if="canRefine" class="refine-card">
+            <div class="refine-card-title">下一级问题判断</div>
+            <p class="refine-card-hint">请选择最符合当前问题的分类，确认后将按对应分派链继续流转。</p>
+            <div class="refine-options">
+              <button
+                v-for="option in refineOptions"
+                :key="option.id"
+                type="button"
+                class="refine-option"
+                :disabled="refining"
+                @click="onPickRefineCategory(option.id)"
+              >
+                <span>{{ option.name }}</span>
+                <span class="refine-option-next">{{ option.next_department ? `流转至${option.next_department}` : '当前部门继续处理' }}</span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+              </button>
+            </div>
+          </div>
+
           <!-- 指派处理人（仅部门对接人 + 待受理可见） -->
           <div v-if="canDispatch" class="dispatch-card">
             <div class="dispatch-card-title">指派处理人</div>
@@ -231,7 +227,7 @@
           </div>
         </div>
         <aside class="detail-sidebar">
-          <TicketInfoSidebar :ticket="ticket" />
+          <TicketOverview :ticket="ticket" />
         </aside>
       </div>
 
@@ -277,12 +273,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
 import { metaApi } from '@/api/overviews'
 import { ticketApi } from '@/api/tickets'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Group, AllowedAction } from '@/types'
 import StateTag from '@/components/common/StateTag.vue'
 import ArticleTimeline from '@/components/ticket/ArticleTimeline.vue'
 import ReplyEditor from '@/components/ticket/ReplyEditor.vue'
-import TicketInfoSidebar from '@/components/ticket/TicketInfoSidebar.vue'
+import TicketOverview from '@/components/ticket/TicketOverview.vue'
 import StateLogTimeline from '@/components/ticket/StateLogTimeline.vue'
 import TicketContentRecords from '@/components/ticket/TicketContentRecords.vue'
 
@@ -291,6 +287,16 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
+const hasContentRecords = computed(() => {
+  const t = ticket.value as any
+  if (!t) return false
+  const hasArticle = (t.articles || []).some((article: any) =>
+    ['reply', 'addition', 'reminder'].includes(article.type),
+  )
+  return hasArticle || t.state === 'archived' || !!t.archive_notes ||
+    t.is_callbacked === true || !!t.satisfaction ||
+    !!t.callback_details || !!t.unsatisfied_reason
+})
 
 // ── V0.86：所有按钮可见性来自后端 allowed_actions（唯一事实来源）──
 // 后端按 TRANSITIONS + 权限矩阵 + requires_reason + 业务约束改写生成；
@@ -335,12 +341,10 @@ const canRefine = computed<boolean>(() => (ticket.value as any)?.can_refine === 
 const refineOptions = computed<
   { id: number; name: string; level?: number; next_department?: string | null }[]
 >(() => (ticket.value as any)?.refine_options ?? [])
-/** 当前分类 id：下拉的回显值（选项是直下级，故当前值不在其中，el-select 显示占位） */
-const currentCategoryId = computed<number | null>(() => (ticket.value as any)?.category_id ?? null)
 const refining = ref(false)
 
 /**
- * 选中分类 = 完成一次问题判断。分类只能向下细分一级且不可回退，
+ * 选择分类 = 完成一次问题判断。分类只能向下细分一级且不可回退，
  * 同时会按新分类重新落位责任部门，故提交前二次确认。
  */
 async function onPickRefineCategory(categoryId: number) {
@@ -356,8 +360,11 @@ async function onPickRefineCategory(categoryId: number) {
       cancelButtonText: '取消',
       type: 'warning',
     })
-  } catch {
-    return  // 取消：下拉回到原值
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error('确认框打开失败，请重试')
+    }
+    return
   }
   refining.value = true
   try {
@@ -766,9 +773,10 @@ async function confirmCancel() {
 
 .ticket-number {
   font-family: 'SF Mono', 'Fira Code', monospace;
-  font-size: 13px;
-  color: var(--color-text-tertiary);
-  font-weight: 500;
+  font-size: 24px;
+  color: var(--color-text-primary);
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .ticket-description {
@@ -778,14 +786,17 @@ async function confirmCancel() {
   padding: 16px;
 }
 
-.ticket-description-label {
-  font-size: 11px;
+.ticket-description-label,
+.timeline-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
   font-weight: 700;
-  color: var(--color-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: 10px;
+  color: var(--color-text-primary);
+  margin: 0 0 20px;
 }
+.section-title-icon { width: 19px; height: 19px; flex: none; color: var(--color-primary); }
 
 .ticket-description-body {
   font-size: 14px;
@@ -806,15 +817,41 @@ async function confirmCancel() {
   min-width: 0;
 }
 .detail-sidebar {
-  width: 320px;
+  width: min(420px, 38%);
   flex-shrink: 0;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
   align-self: flex-start;
   position: sticky;
   top: 20px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.detail-sidebar :deep(.overview-card) { padding: 20px; }
+.detail-sidebar :deep(.overview-grid) { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.detail-sidebar :deep(.info-column) { gap: 14px; }
+.detail-sidebar :deep(.info-column + .info-column) { border-left: 0; padding-left: 0; }
+.detail-sidebar :deep(.info-row) { grid-template-columns: 104px minmax(0, 1fr); gap: 10px; }
+.detail-sidebar :deep(.section-divider) { margin-top: 20px; padding-top: 20px; }
+.sidebar-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
+  padding: 20px;
+}
+.flow-card :deep(.timeline-item) { padding-bottom: 22px; }
+.flow-card :deep(.action-operator) { margin-top: 4px; }
+.flow-card :deep(.timeline-marker) { width: 14px; }
+.flow-card :deep(.marker-dot) { width: 10px; height: 10px; }
+.flow-card :deep(.is-current .marker-dot) { background: var(--color-primary); }
+.flow-card :deep(.is-current .action-name) { color: var(--color-text-primary); }
+.flow-card :deep(.current-tag) { color: var(--color-primary); }
+
+@media (max-width: 900px) {
+  .detail-body { flex-direction: column; }
+  .detail-sidebar { width: auto; position: static; max-height: none; overflow: visible; }
 }
 
 .timeline-card {
@@ -825,27 +862,59 @@ async function confirmCancel() {
 }
 
 
-/* 问题判断内联控件：仅判断人可见，直接选分类完成判断 */
-.refine-inline {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* 判断动作与指派动作放在同一处理区域。 */
+.refine-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.08);
 }
-.refine-inline-label {
+.refine-card-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+.refine-card-hint {
+  margin: 6px 0 14px;
   font-size: 12px;
   color: var(--color-text-tertiary);
-  white-space: nowrap;
 }
-.refine-inline-select { width: 150px; }
-
-.timeline-section-title {
-  font-size: 11px;
-  font-weight: 700;
+.refine-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.refine-option {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 3px 8px;
+  align-items: center;
+  text-align: left;
+  padding: 11px 12px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.18s, background 0.18s;
+}
+.refine-option:hover:not(:disabled), .refine-option:focus-visible {
+  border-color: var(--color-primary);
+  background: rgba(99, 91, 255, 0.06);
+  outline: none;
+}
+.refine-option:disabled { opacity: 0.6; cursor: wait; }
+.refine-option-next {
+  grid-column: 1;
   color: var(--color-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 400;
 }
+.refine-option svg { grid-column: 2; grid-row: 1 / 3; color: var(--color-primary); }
 
 .terminal-notice {
   display: inline-flex;

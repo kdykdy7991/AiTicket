@@ -96,7 +96,7 @@ USERS = [
     (24, 'jiangweiye', '姜伟业', 'handler', 1, False, _SKDY_HASH),
     (25, 'chenwenbing', '陈文兵', 'handler', 1, False, _SKDY_HASH),
     # 对接人（V0.7 新增）
-    (26, 'wangyaozong', '王耀宗', 'handler', 1, False, _SKDY_HASH),
+    (26, 'wangyaozong', '王耀宗', 'agent', 1, False, _SKDY_HASH),
     (31, 'wangjunhua', '汪军华', 'handler', 1, False, _SKDY_HASH),
     (35, 'yangbing', '杨冰', 'handler', 1, False, _SKDY_HASH),
     (37, 'caoxin', '曹欣', 'handler', 1, False, _SKDY_HASH),
@@ -326,7 +326,6 @@ async def seed() -> None:
 
 # v2 leaf 分类 ID（与 f2a3b4c5d6e7 同步）
 V2_CAT = {
-    "即时办结咨询":     1102,
     "服务投诉":        2101,
     "业务运营":        2201,
     "业务保障":        2301,
@@ -385,8 +384,6 @@ V2_USER_SKILL_GROUPS = [
 # resolve_rule() 会向上走父链，所以不需要给每个 leaf 都挂规则；
 # 这里给业务类别（level 2/3）挂规则即可覆盖其所有子孙。
 V2_ROUTING_RULES = [
-    (V2_CAT["即时办结咨询"], 106, 203, 106, None, True,
-     "即时办结咨询走 archived 流程；协调人=即时办结协调组"),
     (V2_CAT["服务投诉"],     100, 200, None, None, True,
      "服务投诉统一由服务投诉协调组对接；具体专业部门按投诉类别后续补"),
     (V2_CAT["业务运营"],     101, 201, 101, 210, True,
@@ -409,18 +406,14 @@ V2_ROUTING_RULES = [
 # 与客户咨询并列为一级分类。
 V2_CATEGORIES = [
     (1001, None, "客户咨询", 1, 1),
-    (1101, 1001, "即时", 2, 1),
-    (1102, 1101, "即时办结咨询", 3, 1),
-    (1201, 1001, "非即时", 2, 1),
-    (1202, 1201, "品牌合作", 3, 1),
-    (1203, 1201, "产品使用/参数咨询", 3, 2),
-    (1204, 1201, "渠道/代理合作", 3, 3),
+    (1202, 1001, "品牌合作", 2, 1),
+    (1203, 1001, "产品使用/参数咨询", 2, 2),
+    (1204, 1001, "渠道/代理合作", 2, 3),
     (2101, None, "服务投诉", 1, 2),
     (2102, 2101, "一般投诉", 2, 1),
     (2103, 2101, "重要投诉", 2, 2),
     (2104, 2101, "重大投诉", 2, 3),
     (2201, None, "业务运营", 1, 3),
-    (2202, 2201, "套餐查询", 2, 1),
     (2203, 2201, "套餐变更", 2, 2),
     (2204, 2201, "业财对账", 2, 3),
     (2301, None, "业务保障", 1, 4),
@@ -477,7 +470,6 @@ V2_MISSING_LEAF_RULES = [
 # 判断节点所在部门写进链里作为下一步（如 2301→售后）。
 #
 # 不配链的分类（走其他通道，勿补）：
-#   1102 即时办结咨询 / 2202 套餐查询 —— 建单即办结（instant_resolve）
 #   2103 重要投诉 / 2104 重大投诉     —— 走 complaint_escalation_policies
 DISPATCH_CHAINS: list[tuple[int, list[str], str]] = [
     (1202, ["品牌传播与大客户"],   "咨询/品牌合作：单步直达"),
@@ -585,6 +577,8 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
                 for (cid, parent, name, level, sort) in V2_CATEGORIES
             ],
         )
+        # 旧「非即时」仅是容器；三个咨询子类已直接挂到「客户咨询」。
+        await db.execute(text("DELETE FROM ticket_categories WHERE id = 1201"))
         print("[Phase 9] Seeding default group (id=1)...")
         await db.execute(
             text("""

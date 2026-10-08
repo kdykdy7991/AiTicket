@@ -36,7 +36,6 @@ from app.services.category_utils import (
     build_lineage_index,
     build_responsibility_index,
 )
-from app.services.dispatch_chain import INSTANT_RESOLVE_CATEGORY_IDS
 from app.services.state_machine import (
     TERMINAL_STATES,
     action_for,
@@ -909,6 +908,15 @@ async def create_ticket(
 ):
     """Create a new ticket."""
     warnings = None
+    if body.category_id is not None:
+        category_active = (await db.execute(
+            select(TicketCategory.is_active).where(TicketCategory.id == body.category_id)
+        )).scalar_one_or_none()
+        if category_active is not True:
+            raise HTTPException(422, detail="所选问题分类不存在或已停用")
+    if body.is_instant_resolve:
+        raise HTTPException(422, detail="即时咨询不记录工单")
+
 
     # Auto-match responsibility：分派链（表A dispatch_chains）优先，
     # 无链回退旧 category_routing_rules（双轨过渡，设计 §8.3）。
@@ -935,19 +943,12 @@ async def create_ticket(
         else:
             auto_match_warning = resp.get("reason")
 
-    # 即办结分类预置（设计 §8 小改：套餐查询建单预置 instant_resolve）：
-    # 1102 即时办结咨询 / 2202 套餐查询 → 建单即归档，保留工单记录、
-    # 不进分派链。草稿仍按草稿存，提交（正式建单）时才生效。
-    instant_default_resolution: str | None = None
-    if body.category_id in INSTANT_RESOLVE_CATEGORY_IDS and not body.is_draft:
-        cat_name = (
-            await db.execute(
-                select(TicketCategory.name).where(TicketCategory.id == body.category_id)
-            )
-        ).scalar_one_or_none() or "即办结咨询"
-        body.is_instant_resolve = True
-        instant_default_resolution = f"{cat_name}（客服即时办结）"
-        auto_match_warning = f"「{cat_name}」为即办结分类，工单创建后直接归档，无需分派与回访"
+        # 业务保障是售后的下一级问题判断入口。直接落给链首对接人，
+        # 不允许建单时手动选出的其他部门/人员覆盖判断责任。
+        if body.category_id == 2301 and resp.get("via") == "chain" and resp.get("dispatcher_id"):
+            body.skill_group_id = resp.get("dispatcher_skill_group_id")
+            body.handler_skill_group_id = resp.get("handler_skill_group_id")
+            body.dispatcher_id = resp.get("dispatcher_id")
 
     if body.is_draft:
         # Draft: no number, no SLA, no duplicate check, relaxed validation
@@ -974,80 +975,6 @@ async def create_ticket(
             dispatch_chain_steps=chain_steps,
             dispatch_step_index=0 if chain_steps else None,
             is_draft=True,
-        )
-    elif body.is_instant_resolve:
-        # 即时办结咨询（Phase 6）：建正式工单，直接进入终态 archived。
-        # 仍然走完整审计：number / SLA / state_log。
-        today = datetime.now().strftime("%Y%m%d")
-        max_q = (
-            select(func.max(Ticket.number))
-            .where(Ticket.number.like(f"{today}-%"))
-        )
-        max_number = (await db.execute(max_q)).scalar()
-        if max_number is None:
-            seq = 1
-        else:
-            seq = int(max_number.split("-")[-1]) + 1
-        number = f"{today}-{seq:04d}"
-
-        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id, body.complaint_level)
-
-        now = datetime.now(timezone.utc)
-        ticket = Ticket(
-            number=number, description=body.description,
-            priority=body.priority, channel=body.channel,
-            state="archived",
-            customer_type=body.customer_type, customer_name=body.customer_name,
-            customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
-            customer_company=body.customer_company,
-            customer_level=body.customer_level, device_sn=body.device_sn,
-            region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
-            group_id=body.group_id or user.group_id,
-            skill_group_id=body.skill_group_id,
-            handler_skill_group_id=body.handler_skill_group_id,
-            owner_id=None,
-            creator_id=user.id, first_owner_id=None,
-            dispatcher_id=body.dispatcher_id,  # 即时办结可省略协调人
-            is_duplicate=body.is_duplicate,
-            duplicate_reason=body.duplicate_reason,
-            root_cause=body.root_cause,
-            solution=body.solution,
-            complaint_level=body.complaint_level,
-            solution_deadline=solution_deadline,
-            resolved=True,
-            resolution=body.instant_resolution or instant_default_resolution or "即时办结咨询",
-            solved_at=now,
-            # closed_at / closed_duration_minutes 是终态状态副作用，
-            # 统一由 apply_initial_state（状态流转执行入口）计算，不在构造期重复维护
-            callback_required=False,  # 不需要回访
-            is_callbacked=True,
-            is_draft=False,
-        )
-        db.add(ticket)
-        await db.flush()
-        # 一次性审计日志：None → archived（初始状态执行入口，含终态副作用）
-        await apply_initial_state(
-            db, ticket, to_state="archived",
-            operator=user, reason="即时办结咨询", body=body,
-        )
-        await db.commit()
-
-        # Reload with relationships
-        result = await db.execute(
-            select(Ticket).options(
-                selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
-                selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
-                selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-                selectinload(Ticket.group),
-            ).where(Ticket.id == ticket.id)
-        )
-        ticket = result.scalar_one()
-        return TicketCreateResponse(
-            data=_ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility),
-            warnings=DuplicateWarning(
-                auto_match_warning=auto_match_warning
-                or "即时办结咨询：工单已直接归档，无需后续处理与回访",
-            ),
         )
     else:
         # Formal ticket: generate number, SLA, duplicate check

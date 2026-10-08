@@ -21,12 +21,11 @@
         </span>
       </div>
       <div v-if="t.archive_notes" class="closure-body">{{ t.archive_notes }}</div>
+      <div v-if="t.callback_details" class="closure-body">回访记录：{{ t.callback_details }}</div>
       <div v-if="t.satisfaction === 'dissatisfied' && t.unsatisfied_reason" class="closure-reason">
         不满意原因：{{ t.unsatisfied_reason }}
       </div>
     </div>
-
-    <div v-if="records.length === 0" class="empty">暂无处理记录</div>
 
     <div v-for="r in records" :key="r.key" class="record">
       <div class="record-head">
@@ -104,11 +103,12 @@ const records = computed<RecordItem[]>(() => {
 
 const hasClosure = computed(
   () =>
-    t.value.is_callbacked !== undefined ||
-    t.value.callback_required === false ||
+    t.value.state === 'archived' ||
+    t.value.is_callbacked === true ||
     !!t.value.archive_notes ||
+    !!t.value.callback_details ||
     !!t.value.satisfaction ||
-    (t.value.satisfaction === 'dissatisfied' && !!t.value.unsatisfied_reason),
+    !!t.value.unsatisfied_reason,
 )
 
 function typeLabel(kind: RecordItem['kind']): string {
@@ -241,8 +241,4 @@ function satisfactionEmoji(v: string): string {
   cursor: pointer;
 }
 
-.empty {
-  font-size: 13px;
-  color: var(--color-text-placeholder);
-}
 </style>

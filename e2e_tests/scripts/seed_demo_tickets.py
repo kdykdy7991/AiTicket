@@ -187,7 +187,7 @@ def choose_category(cats: list[dict], kind: str) -> dict | None:
     """按 kind 在 categories 中随机挑一个 leaf。"""
     name_map = {
         "consult": ["即时办结咨询", "品牌合作", "产品使用/参数咨询", "渠道/代理合作"],
-        "ops": ["套餐查询", "套餐变更", "业财对账"],
+        "ops": ["套餐变更", "业财对账"],
         "support": ["核心网系统", "测运控系统", "卫星系统", "终端软件", "硬件故障", "应用平台"],
         "complaint": ["一般投诉", "重要投诉", "重大投诉"],
     }

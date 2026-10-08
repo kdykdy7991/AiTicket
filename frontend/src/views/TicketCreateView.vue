@@ -94,19 +94,14 @@
           <p v-if="routingHint" class="routing-hint" :class="`routing-hint--${routingHint.type}`">
             {{ routingHint.text }}
           </p>
-          <!-- 即办结分类：建单即归档（保留工单记录），无需对接部门/对接人与回访 -->
-          <div v-if="isInstantCategory" class="instant-banner">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            「{{ selectedCategory?.name }}」为即办结分类：工单创建后直接归档（保留工单记录），无需选择对接部门，也无需回访。
-          </div>
-          <div v-else class="form-row">
+          <div class="form-row">
             <el-form-item label="对接部门" prop="skill_group_id" class="form-col">
-              <el-select v-model="form.skill_group_id" placeholder="技术/市场/售后" style="width: 100%" @change="onSkillGroupChange">
+              <el-select v-model="form.skill_group_id" placeholder="技术/市场/售后" style="width: 100%" :disabled="isAssuranceJudgement" @change="onSkillGroupChange">
                 <el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id" />
               </el-select>
             </el-form-item>
             <el-form-item label="部门对接人" prop="dispatcher_id" class="form-col">
-              <el-select v-model="form.dispatcher_id" placeholder="选择部门对接人" style="width: 100%" filterable :disabled="!form.skill_group_id">
+              <el-select v-model="form.dispatcher_id" placeholder="选择部门对接人" style="width: 100%" filterable :disabled="!form.skill_group_id || isAssuranceJudgement">
                 <el-option v-for="d in dispatchers" :key="d.id" :label="d.name" :value="d.id" />
               </el-select>
             </el-form-item>
@@ -197,13 +192,8 @@ const form = reactive({
   body: '',
 })
 
-// 选中的判断终点分类（V0.21）
 const categoryById = computed(() => new Map(categories.value.map(c => [c.id, c])))
-const selectedCategory = computed(() =>
-  form.category_l2_id ? categoryById.value.get(form.category_l2_id) : undefined,
-)
-// 即办结通道（1102 即时办结咨询 / 2202 套餐查询）：建单即归档，无需对接部门
-const isInstantCategory = computed(() => selectedCategory.value?.channel === 'instant')
+const isAssuranceJudgement = computed(() => form.category_l1_id === 2301 && !form.category_l2_id)
 
 // 分派链/责任预填提示（routing-rules/resolve 返回）
 const routingHint = ref<{ type: 'chain' | 'warn'; text: string } | null>(null)
@@ -241,19 +231,17 @@ const rules: FormRules = {
     },
     trigger: 'blur',
   }],
-  // 即办结分类放宽对接部门/对接人（V0.21 §4：建单即归档，无需分派）
+  // 正式工单需指定对接部门和对接人
   skill_group_id: [{
     validator: (_r, _v, cb) => {
-      if (isInstantCategory.value) return cb()
-      if (!form.skill_group_id) return cb(new Error('请选择对接部门'))
+          if (!form.skill_group_id) return cb(new Error('请选择对接部门'))
       cb()
     },
     trigger: 'change',
   }],
   dispatcher_id: [{
     validator: (_r, _v, cb) => {
-      if (isInstantCategory.value) return cb()
-      if (!form.dispatcher_id) return cb(new Error('请选择部门对接人'))
+          if (!form.dispatcher_id) return cb(new Error('请选择部门对接人'))
       cb()
     },
     trigger: 'change',
@@ -284,7 +272,7 @@ const l1Name = computed(() => {
 })
 
 // V0.21 §4：二级下拉 = 选中一级的全部后代"判断终点"（create_selectable），
-// 含三级节点（如 客户咨询 → 咨询服务 → 即时办结咨询）；标签带路径防重名混淆
+// 分类标签带完整路径，避免不同分支的同名分类混淆。
 const categoriesSelectableL2 = computed(() => {
   const l1 = form.category_l1_id
   if (!l1) return []
@@ -339,20 +327,12 @@ watch([() => form.category_l2_id, () => form.category_l1_id], async ([l2, l1]) =
   // 编辑草稿：保留草稿里已选的对接部门，不被预填覆盖
   if (editingDraftId.value) return
   const seq = ++routingSeq
-  const cat = categoryById.value.get(cid)
-  if (cat?.channel === 'instant') {
-    // 即办结通道：无需分派，清掉上一次选择残留的对接字段
-    form.skill_group_id = null
-    form.dispatcher_id = null
-    dispatchers.value = []
-    return
-  }
   try {
     const data = await metaApi.resolveRouting(cid)
     if (seq !== routingSeq) return
     if (data?.chain_steps?.length) {
       const depts = data.chain_steps.map((s: any) => s.department_code)
-      routingHint.value = { type: 'chain', text: `将按分派链流转：${depts.join(' → ')}` }
+      routingHint.value = { type: 'chain', text: cid === 2301 ? '建单后由售后张华直接判断下一级问题分类' : `将按分派链流转：${depts.join(' → ')}` }
     }
     if (data?.matched && data.dispatcher_skill_group_id) {
       const sgId = Number(data.dispatcher_skill_group_id)
@@ -615,21 +595,6 @@ async function doSubmit() {
   font-size: 12px;
   color: var(--color-text-tertiary);
   font-weight: 400;
-}
-
-/* 即办结分类横幅（V0.21 §4：套餐查询/即时办结咨询 建单即归档） */
-.instant-banner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-  padding: 10px 14px;
-  border-radius: var(--radius-md);
-  background: rgba(245, 158, 11, 0.1);
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  color: #92400E;
-  font-size: 13px;
-  line-height: 1.6;
 }
 
 /* 分派链/责任预填提示 */

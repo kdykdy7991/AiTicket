@@ -13,18 +13,14 @@ from test_workflow_regression import _next_phone
 # the per-test TRUNCATE in conftest.
 V2_CATEGORIES = [
     (1001, None, "客户咨询", 1, 1),
-    (1101, 1001, "即时", 2, 1),
-    (1102, 1101, "即时办结咨询", 3, 1),
-    (1201, 1001, "非即时", 2, 1),
-    (1202, 1201, "品牌合作", 3, 1),
-    (1203, 1201, "产品使用/参数咨询", 3, 2),
-    (1204, 1201, "渠道/代理合作", 3, 3),
+    (1202, 1001, "品牌合作", 2, 1),
+    (1203, 1001, "产品使用/参数咨询", 2, 2),
+    (1204, 1001, "渠道/代理合作", 2, 3),
     (2101, None, "服务投诉", 1, 2),
     (2102, 2101, "一般投诉", 2, 1),
     (2103, 2101, "重要投诉", 2, 2),
     (2104, 2101, "重大投诉", 2, 3),
     (2201, None, "业务运营", 1, 3),
-    (2202, 2201, "套餐查询", 2, 1),
     (2203, 2201, "套餐变更", 2, 2),
     (2204, 2201, "业财对账", 2, 3),
     (2301, None, "业务保障", 1, 4),
@@ -74,7 +70,8 @@ async def _reseed_v2(engine) -> None:
             if cid not in existing_ids:
                 to_add.append(TicketCategory(
                     id=cid, parent_id=parent, name=name, level=level,
-                    sort_order=sort, is_active=True, created_at=now, updated_at=now,
+                    sort_order=sort, is_active=True,
+                    created_at=now, updated_at=now,
                 ))
         if to_add:
             s.add_all(to_add)
@@ -108,10 +105,14 @@ async def test_v2_tree_present_and_path_correct(seeded_categories):
     # m7p9q0r1s2t3：中间层「客户服务」已取消，其下三类提为一级
     assert top_names == ["客户咨询", "服务投诉", "业务运营", "业务保障"]
 
-    leaf = find_by_name(tree, "即时办结咨询")
-    assert leaf is not None
-    assert leaf["level"] == 3
-    assert leaf["path"] == "客户咨询 / 即时 / 即时办结咨询"
+    consult = find_by_name(tree, "客户咨询")
+    assert consult is not None
+    assert [child["name"] for child in consult["children"]] == [
+        "品牌合作", "产品使用/参数咨询", "渠道/代理合作",
+    ]
+    assert find_by_name(tree, "即时") is None
+    assert find_by_name(tree, "即时办结咨询") is None
+    assert find_by_name(tree, "非即时") is None
 
     core = find_by_name(tree, "核心网系统")
     assert core is not None
@@ -169,10 +170,10 @@ async def test_lineage_index_resolves_l1_l2_and_path(seeded_categories):
     assert lin.l2.name == "星座大系统"
     assert names(2311) == ["业务保障", "星座大系统", "核心网系统"]
 
-    # L3 叶子（客户咨询分支）
+    # 客户咨询直接挂三个二级分类
     assert index[1202].l1.name == "客户咨询"
-    assert index[1202].l2.name == "非即时"
-    assert names(1202) == ["客户咨询", "非即时", "品牌合作"]
+    assert index[1202].l2.name == "品牌合作"
+    assert names(1202) == ["客户咨询", "品牌合作"]
 
     # L2 自身：没有更深层，L2 就是自己
     # 业务保障提为一级后没有 L2

@@ -314,6 +314,8 @@ async def transition_permission_error(
     allowed_actions 的生成也调用它，路由/前端不再另写 if/else。
     分派场景"必须指定处理人"属于输入要求，由 check_transition_permission 判定。
     """
+    if ticket.state == "pending" and to_state == "open" and ticket.category_id == 2301:
+        return "业务保障工单须先由售后进行下一级问题判断"
     if user.role == "admin":
         return None  # admin 全权限
 

@@ -75,6 +75,7 @@ export interface TicketStateLog {
   is_return?: boolean
   /** Flow Log 动作类型（后端 state_logs 唯一事实来源）：dispatch/refine/transfer/... */
   action_type?: string | null
+  operator_name?: string | null
   /** 写入 state_log 那一刻工单上的人员快照（创建者/对接人/处理人）。
    *  旧数据可能为空，为空时前端回退到工单当前值。 */
   creator_id_snapshot?: number | null
