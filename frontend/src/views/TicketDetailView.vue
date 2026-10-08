@@ -54,20 +54,6 @@
             <div class="ticket-description-label">详细描述</div>
             <div class="ticket-description-body">{{ (ticket as any).description }}</div>
           </div>
-          <!-- 分派链进度（V0.21 链快照）：灰=已过步骤，主色=当前步骤 -->
-          <div v-if="chainSteps.length" class="chain-strip">
-            <span class="chain-strip-label">分派链</span>
-            <template v-for="(s, i) in chainSteps" :key="s.order">
-              <span
-                class="chain-step"
-                :class="{ 'is-done': i < currentStepIndex, 'is-current': i === currentStepIndex }"
-              >
-                {{ s.department_code }}
-              </span>
-              <span v-if="i < chainSteps.length - 1" class="chain-arrow">→</span>
-            </template>
-            <span class="chain-progress">第 {{ Math.min(currentStepIndex + 1, chainSteps.length) }} / {{ chainSteps.length }} 步</span>
-          </div>
 
           <div class="timeline-card">
             <h3 class="timeline-section-title">流转时间线</h3>
@@ -831,63 +817,6 @@ async function confirmCancel() {
   padding: 16px;
 }
 
-/* 分派链进度条（V0.21 链快照） */
-.chain-strip {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  padding: 12px 16px;
-  font-size: 13px;
-}
-
-.chain-strip-label {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--color-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-right: 4px;
-}
-
-.chain-step {
-  display: inline-flex;
-  align-items: center;
-  padding: 3px 12px;
-  border-radius: var(--radius-full);
-  background: var(--color-bg-subtle);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-tertiary);
-  font-weight: 500;
-  line-height: 1.6;
-}
-
-.chain-step.is-done {
-  background: #ECFDF5;
-  border-color: rgba(16, 185, 129, 0.3);
-  color: #047857;
-}
-
-.chain-step.is-current {
-  background: var(--color-primary-light);
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  font-weight: 700;
-}
-
-.chain-arrow {
-  color: var(--color-text-tertiary);
-}
-
-.chain-progress {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
 
 /* 问题判断内联控件：仅判断人可见，直接选分类完成判断 */
 .refine-inline {
