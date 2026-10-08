@@ -55,14 +55,20 @@
             <div class="ticket-description-body">{{ (ticket as any).description }}</div>
           </div>
 
+          <!-- 流转时间线：只回答「谁在什么时候做了什么动作」 -->
           <div class="timeline-card">
             <h3 class="timeline-section-title">流转时间线</h3>
-            <StateLogTimeline
-              :logs="ticket.state_logs || []"
+            <StateLogTimeline :logs="ticket.state_logs || []" />
+          </div>
+
+          <!-- 处理记录：内容性信息（处理说明/补充/催办/附件/归档回访） -->
+          <div class="timeline-card">
+            <h3 class="timeline-section-title">处理记录</h3>
+            <TicketContentRecords
               :ticket="ticket"
+              :replies="(ticket.articles || []).filter(a => a.type === 'reply')"
               :additions="(ticket.articles || []).filter(a => a.type === 'addition')"
               :reminders="(ticket.articles || []).filter(a => a.type === 'reminder')"
-              :replies="(ticket.articles || []).filter(a => a.type === 'reply')"
             />
           </div>
 
@@ -278,6 +284,7 @@ import ArticleTimeline from '@/components/ticket/ArticleTimeline.vue'
 import ReplyEditor from '@/components/ticket/ReplyEditor.vue'
 import TicketInfoSidebar from '@/components/ticket/TicketInfoSidebar.vue'
 import StateLogTimeline from '@/components/ticket/StateLogTimeline.vue'
+import TicketContentRecords from '@/components/ticket/TicketContentRecords.vue'
 
 const route = useRoute()
 const router = useRouter()
