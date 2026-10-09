@@ -1,7 +1,8 @@
 # 工单只读 MCP Server
 
 这个服务作为独立容器运行，对 Agent 平台提供 Streamable HTTP `POST/GET /mcp`。
-当前只暴露 `search_tickets`、`get_ticket`、`list_categories` 三个查询工具。
+当前只暴露 `list_recent_tickets`、`search_tickets`、`get_ticket`、
+`list_categories` 四个查询工具。
 平台的租户级令牌只代表 Agent 平台，不代表对话用户；因此本版不提供写工具。
 
 ## 配置

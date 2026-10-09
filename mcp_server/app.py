@@ -67,6 +67,16 @@ async def search_tickets(keyword: str, limit: int = 10) -> list[dict]:
 
 
 @mcp.tool(
+    description="按创建时间从新到旧列出最近的工单；无需关键词，默认 3 条，最多 20 条。",
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+)
+async def list_recent_tickets(limit: int = 3) -> list[dict]:
+    if not 1 <= limit <= 20:
+        raise ToolError("limit 须为 1 至 20")
+    return await _read("/tickets/recent", {"limit": limit})
+
+
+@mcp.tool(
     description="按工单号查看工单详情、处理流程和处理说明。",
     annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
 )

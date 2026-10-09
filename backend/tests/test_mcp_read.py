@@ -21,6 +21,11 @@ async def test_mcp_read_auth_and_ticket_lookup(client, monkeypatch):
             description="应用平台无法登录", category_id=category.id,
             created_at=datetime(2026, 10, 9, 8, 0, tzinfo=timezone.utc),
         ))
+        session.add(Ticket(
+            number="20261009-0002", customer_phone="13900000001", creator_id=1,
+            description="另一张工单", category_id=category.id,
+            created_at=datetime(2026, 10, 9, 9, 0, tzinfo=timezone.utc),
+        ))
         await session.commit()
 
     base = "/api/v1/internal/mcp"
@@ -30,6 +35,10 @@ async def test_mcp_read_auth_and_ticket_lookup(client, monkeypatch):
     assert search.status_code == 200, search.text
     assert [row["number"] for row in search.json()["data"]] == ["20261009-0001"]
     assert "customer_phone" not in search.json()["data"][0]
+    recent = await c.get(f"{base}/tickets/recent", params={"limit": 2}, headers=headers)
+    assert recent.status_code == 200, recent.text
+    assert [row["number"] for row in recent.json()["data"]] == ["20261009-0002", "20261009-0001"]
+    assert (await c.get(f"{base}/tickets/recent", params={"limit": 21}, headers=headers)).status_code == 422
     detail = await c.get(f"{base}/tickets/20261009-0001", headers=headers)
     assert detail.status_code == 200, detail.text
     assert detail.json()["data"]["category_path"] == "业务保障"

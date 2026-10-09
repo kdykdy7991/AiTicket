@@ -36,6 +36,32 @@ router = APIRouter(
 )
 
 
+def _ticket_summary(ticket: Ticket) -> dict:
+    return {
+        "number": ticket.number,
+        "state": ticket.state,
+        "category": ticket.category.name if ticket.category else None,
+        "owner": ticket.owner.name if ticket.owner else None,
+        "created_at": ticket.created_at.isoformat(),
+    }
+
+
+@router.get("/tickets/recent")
+async def list_recent_tickets(
+    limit: int = Query(3, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the newest submitted tickets in creation-time order."""
+    rows = (await db.execute(
+        select(Ticket)
+        .options(selectinload(Ticket.category), selectinload(Ticket.owner))
+        .where(Ticket.is_draft.is_(False), Ticket.number.is_not(None))
+        .order_by(Ticket.created_at.desc(), Ticket.id.desc())
+        .limit(limit)
+    )).scalars().all()
+    return {"data": [_ticket_summary(ticket) for ticket in rows]}
+
+
 @router.get("/tickets")
 async def search_tickets(
     keyword: str = Query(..., min_length=2, max_length=100),
@@ -59,16 +85,7 @@ async def search_tickets(
         .order_by(Ticket.created_at.desc(), Ticket.id.desc())
         .limit(limit)
     )).scalars().all()
-    return {"data": [
-        {
-            "number": ticket.number,
-            "state": ticket.state,
-            "category": ticket.category.name if ticket.category else None,
-            "owner": ticket.owner.name if ticket.owner else None,
-            "created_at": ticket.created_at.isoformat(),
-        }
-        for ticket in rows
-    ]}
+    return {"data": [_ticket_summary(ticket) for ticket in rows]}
 
 
 @router.get("/tickets/{number}")

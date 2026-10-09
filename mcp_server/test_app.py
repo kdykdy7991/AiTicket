@@ -30,4 +30,4 @@ async def test_bearer_auth_and_tool_discovery(monkeypatch):
     assert authorized.status_code == 200, authorized.text
     assert with_copied_whitespace.status_code == 200, with_copied_whitespace.text
     names = {tool["name"] for tool in authorized.json()["result"]["tools"]}
-    assert names == {"search_tickets", "get_ticket", "list_categories"}
+    assert names == {"list_recent_tickets", "search_tickets", "get_ticket", "list_categories"}
