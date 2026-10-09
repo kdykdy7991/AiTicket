@@ -171,7 +171,7 @@ async def create_article(
         )
 
     # 处理说明：只有当前处理人可提交，且工单须处于处理中/暂缓
-    # 提交后自动流转到「已处理(resolved)」，处理说明挂在对应 resolved 节点下
+    # 中间链节点提交后转派下一部门；链末节点提交后进入「已处理」。
     reply_log = None
     if type == "reply":
         if ticket.owner_id is None or user.id != ticket.owner_id:
@@ -184,6 +184,13 @@ async def create_article(
                 status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="工单当前状态不可提交处理说明"
             )
+        if (
+            ticket.state == "on_hold"
+            and ticket.dispatch_chain_steps
+            and ticket.dispatch_step_index is not None
+            and ticket.dispatch_step_index + 1 < len(ticket.dispatch_chain_steps)
+        ):
+            raise HTTPException(422, detail="当前节点须先恢复处理，再提交并流转至下一部门")
 
     # 追加：仅指定角色 + 指定状态
     if type == "addition":
@@ -228,7 +235,7 @@ async def create_article(
             raise HTTPException(422, detail=f"催办内容最多 {URGE_MAX_LENGTH} 字")
 
     if type == "reply":
-        # 进入 resolved 由统一执行入口完成：合法性/权限/reason/状态副作用/Flow Log
+        # 由统一执行入口判断是转派下一部门还是整单办结。
         # （文章级规则——owner-only、状态集合、角色——在上方已校验）
         reply_log = await apply_transition(db, ticket, to_state="resolved", operator=user)
 

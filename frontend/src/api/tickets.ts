@@ -81,6 +81,7 @@ function adaptStateLogs(logs: any[]): any[] {
       is_return: ['return', 'reopen'].includes(log.action_type || ''),
       // 动作类型透传：时间线按 refine/transfer 等渲染动作徽标
       action_type: log.action_type ?? null,
+      operator_name: log.operator_name ?? null,
       // 人员快照：写入 state_log 那一刻工单上的创建者/对接人/处理人
       creator_id_snapshot: log.creator_id_snapshot ?? null,
       creator_name_snapshot: log.creator_name_snapshot ?? null,

@@ -23,7 +23,7 @@ from app.schemas.common import (
     SkillGroupCreate, SkillGroupOut, UserCreate, UserOut, UserUpdate,
 )
 from app.services.category_utils import (
-    build_category_path, compute_level, would_create_cycle,
+    build_category_path, build_lineage_index, compute_level, would_create_cycle,
 )  # noqa: F401  (build_category_path used elsewhere if needed)
 from app.services.notification import send_dingtalk_text
 from app.services.routing import create_rule, resolve_rule, update_rule
@@ -985,19 +985,40 @@ async def report_stats(
     )).scalar() or 0
     sla_breach_rate = round(breached / new_count, 4) if new_count else 0.0
 
-    # 6. 故障分类分布（一级分类）
-    cat_alias = TicketCategory.__table__.alias("cat")
-    parent_alias = TicketCategory.__table__.alias("parent")
-    cat_q = (
-        select(parent_alias.c.name, func.count(Ticket.id))
-        .select_from(Ticket)
-        .join(cat_alias, cat_alias.c.id == Ticket.category_id)
-        .join(parent_alias, parent_alias.c.id == cat_alias.c.parent_id)
-        .where(*base)
-        .group_by(parent_alias.c.name)
+    # 6. 按完整分类路径归到一级、二级；工单可能挂在树中的任意层级。
+    lineage = await build_lineage_index(db)
+    roots = sorted(
+        (item.l1 for cid, item in lineage.items()
+         if item.l1 is not None and cid == item.l1.id and item.l1.is_active),
+        key=lambda category: (category.sort_order, category.id),
     )
-    cat_rows = (await db.execute(cat_q)).all()
-    by_category = [{"name": r[0], "count": r[1]} for r in cat_rows]
+    root_counts = {root.id: 0 for root in roots}
+    sub_counts: dict[int, dict[str, int]] = {root.id: {} for root in roots}
+    category_trend: dict[str, dict[str, int]] = {}
+    cat_daily_rows = (await db.execute(
+        select(func.date(Ticket.created_at), Ticket.category_id, func.count(Ticket.id))
+        .where(*base, Ticket.category_id.is_not(None))
+        .group_by(func.date(Ticket.created_at), Ticket.category_id)
+    )).all()
+    for day, category_id, count in cat_daily_rows:
+        item = lineage.get(category_id)
+        if item is None or item.l1 is None or item.l1.id not in root_counts:
+            continue
+        root = item.l1
+        root_counts[root.id] += count
+        sub_name = item.l2.name if item.l2 is not None else "未细分"
+        sub_counts[root.id][sub_name] = sub_counts[root.id].get(sub_name, 0) + count
+        trend = category_trend.setdefault(root.name, {})
+        day_key = str(day)
+        trend[day_key] = trend.get(day_key, 0) + count
+    by_category = [{"name": root.name, "count": root_counts[root.id]} for root in roots]
+    by_subcategory = {
+        root.name: [
+            {"name": name, "count": count}
+            for name, count in sorted(sub_counts[root.id].items(), key=lambda entry: -entry[1])
+        ]
+        for root in roots
+    }
 
     # 7. 待回访工单：已处理、需要回访、尚未回访
     pending_callback = (await db.execute(
@@ -1022,21 +1043,6 @@ async def report_stats(
         "dissatisfied": satisfaction_map.get("dissatisfied", 0),
         "unrated": satisfaction_map.get("unrated", 0),
     }
-
-    # 9. 二级分类分布（按一级分类名分组），用于点击一级分类弹出二级环形图
-    sub_q = (
-        select(parent_alias.c.name.label("parent_name"), cat_alias.c.name, func.count(Ticket.id))
-        .select_from(Ticket)
-        .join(cat_alias, cat_alias.c.id == Ticket.category_id)
-        .join(parent_alias, parent_alias.c.id == cat_alias.c.parent_id)
-        .where(*base)
-        .group_by(parent_alias.c.name, cat_alias.c.name)
-        .order_by(parent_alias.c.name, func.count(Ticket.id).desc())
-    )
-    sub_rows = (await db.execute(sub_q)).all()
-    by_subcategory: dict[str, list[dict]] = {}
-    for parent_name, child_name, count in sub_rows:
-        by_subcategory.setdefault(parent_name, []).append({"name": child_name, "count": count})
 
     # 10. 上一周期对比（用于 KPI 卡显示 "较上周 ±X%"）
     span_days = (end.date() - start.date()).days + 1
@@ -1113,24 +1119,6 @@ async def report_stats(
         .group_by("d").order_by("d")
     )).all()
     sat_daily_map = {str(r[0]): round(r[2] / r[1], 4) if (r[1] and r[1] > 0) else 0.0 for r in sat_daily_rows}
-
-    # 13. 一级分类每日趋势（分类表右侧迷你折线）
-    cat_trend_rows = (await db.execute(
-        select(
-            func.date(Ticket.created_at).label("d"),
-            parent_alias.c.name,
-            func.count(Ticket.id),
-        )
-        .select_from(Ticket)
-        .join(cat_alias, cat_alias.c.id == Ticket.category_id)
-        .join(parent_alias, parent_alias.c.id == cat_alias.c.parent_id)
-        .where(*base)
-        .group_by("d", parent_alias.c.name)
-        .order_by("d")
-    )).all()
-    category_trend: dict[str, dict[str, int]] = {}
-    for d, name, count in cat_trend_rows:
-        category_trend.setdefault(name, {})[str(d)] = count
 
     # 14. 把日序列补齐成 0（前端按日期范围渲染）
     def fill_daily(mapping: dict[str, float]) -> list[dict]:

@@ -1,7 +1,6 @@
 <template>
   <!--
-    处理记录：承载工单的内容性信息（处理说明 / 补充信息 / 催办 / 附件 / 归档回访），
-    与上方「流转时间线」分离——时间线只回答「谁在什么时候做了什么动作」。
+    未能匹配流程节点的旧处理说明，以及补充信息 / 催办 / 归档回访在此展示。
     按时间倒序（最新在前）。
   -->
   <div class="content-records">
@@ -103,7 +102,7 @@ const records = computed<RecordItem[]>(() => {
 
 const hasClosure = computed(
   () =>
-    t.value.state === 'archived' ||
+    t.value.state_key === 'archived' ||
     t.value.is_callbacked === true ||
     !!t.value.archive_notes ||
     !!t.value.callback_details ||

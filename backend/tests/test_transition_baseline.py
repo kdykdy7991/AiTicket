@@ -296,13 +296,14 @@ async def test_reopen_resolved_to_open(env):
     assert r.status_code == 200, r.text
     d = r.json()
     assert d["state"] == "open"
-    # 现状：resolved→open 不属于 RETURN_TRANSITIONS，has_returned 复位为 False
-    assert d["has_returned"] is False
+    assert d["has_returned"] is True
     # 现状：solved_at / resolved 保留（记录"曾经解决"，本次不改此语义）
     assert d["solved_at"] is not None
     assert d["resolved"] is True
     logs = await db_logs(env, t["id"])
     assert (logs[-1].from_state, logs[-1].to_state) == ("resolved", "open")
+    resolved_again = await env["resolve"](t["id"])
+    assert resolved_again["has_returned"] is True
 
 
 async def test_resolved_to_on_hold_rewritten_to_open(env):
@@ -359,7 +360,7 @@ async def test_resubmit_returned_to_pending(env):
     assert d["state"] == "pending"
     assert d["owner_id"] is None          # 清空处理人，等待再次分派
     assert d["returned_to_user_id"] is None
-    assert d["has_returned"] is False     # returned→pending 不属于 RETURN_TRANSITIONS
+    assert d["has_returned"] is True      # 重新提交不抹掉退回历史
     logs = await db_logs(env, t["id"])
     assert (logs[-1].from_state, logs[-1].to_state) == ("returned", "pending")
 
@@ -684,17 +685,14 @@ async def test_action_type_full_chain(env):
 
 async def test_action_type_instant_and_archive(env):
     c = env["client"]
-    # 即时办结：None → archived
+    # 即时咨询不再建单
     r = await c.post("/api/v1/tickets", json={
         "description": "咨询", "priority": "p4_enterprise",
         "channel": "phone", "customer_type": "personal",
         "customer_phone": _next_phone(),
         "is_instant_resolve": True, "instant_resolution": "已答复",
     })
-    assert r.status_code == 201, r.text
-    iid = r.json()["data"]["id"]
-    ilogs = await db_logs(env, iid)
-    assert ilogs[0].action_type == "instant_resolve"
+    assert r.status_code == 422, r.text
 
     # 常规办结后归档：resolved → archived
     t = await env["create_ticket"]()

@@ -30,7 +30,14 @@
         <div class="detail-main">
           <div class="sidebar-card flow-card">
             <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h4a6 6 0 0 1 6 5"/></svg>处理流程</h3>
-            <StateLogTimeline :logs="ticket.state_logs || []" :current-owner-name="(ticket as any).owner_name || ''" />
+            <StateLogTimeline
+              :logs="ticket.state_logs || []"
+              :current-state="(ticket as any).state_key"
+              :current-owner-name="(ticket as any).owner_name || ''"
+              :current-dispatcher-name="(ticket as any).dispatcher_name || ''"
+              :current-creator-name="(ticket as any).creator_name || ''"
+              :replies-by-log="replyPlacement.byLogId"
+            />
           </div>
           <div v-if="(ticket as any).description" class="ticket-description">
             <h3 class="ticket-description-label"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M15 3v5h4M8 12h8M8 16h6"/></svg>问题描述</h3>
@@ -42,7 +49,7 @@
             <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 10h6M9 14h6M9 18h4"/></svg>处理记录</h3>
             <TicketContentRecords
               :ticket="ticket"
-              :replies="(ticket.articles || []).filter(a => a.type === 'reply')"
+              :replies="replyPlacement.unmatched"
               :additions="(ticket.articles || []).filter(a => a.type === 'addition')"
               :reminders="(ticket.articles || []).filter(a => a.type === 'reminder')"
             />
@@ -133,16 +140,6 @@
                 type="textarea"
                 :rows="2"
                 placeholder="客户不满意原因（必填）"
-                maxlength="500"
-                show-word-limit
-              />
-              <!-- 回访详情（不满意原因为其中必填场景），后端 callback_details 字段 -->
-              <el-input
-                v-if="callbackChoice === 'call_backed'"
-                v-model="callbackDetails"
-                type="textarea"
-                :rows="2"
-                :placeholder="satisfaction === 'dissatisfied' ? '请填写客户不满意原因 / 回访记录（必填）' : '回访详情 / 客户反馈（可选）'"
                 maxlength="500"
                 show-word-limit
               />
@@ -287,13 +284,40 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
+const replyPlacement = computed(() => {
+  const byLogId = new Map<number, any[]>()
+  const unmatched: any[] = []
+  const logs = (ticket.value as any)?.state_logs || []
+  const replies = ((ticket.value as any)?.articles || []).filter((a: any) => a.type === 'reply')
+  for (const reply of replies) {
+    let log = logs.find((entry: any) => String(entry.id) === String(reply.state_key))
+    if (!log) {
+      // 旧处理说明可能只保存了状态名；按操作人及提交时间找对应的完成节点。
+      const senderId = reply.origin_by?.id
+      const candidates = logs.filter((entry: any) =>
+        ['resolve', 'transfer'].includes(entry.action_type) &&
+        (!senderId || entry.changed_by?.id === senderId),
+      )
+      log = candidates.sort((a: any, b: any) =>
+        Math.abs(new Date(a.entered_at).getTime() - new Date(reply.created_at).getTime()) -
+        Math.abs(new Date(b.entered_at).getTime() - new Date(reply.created_at).getTime()),
+      )[0]
+    }
+    if (!log) {
+      unmatched.push(reply)
+      continue
+    }
+    byLogId.set(log.id, [...(byLogId.get(log.id) || []), reply])
+  }
+  return { byLogId, unmatched }
+})
 const hasContentRecords = computed(() => {
   const t = ticket.value as any
   if (!t) return false
   const hasArticle = (t.articles || []).some((article: any) =>
-    ['reply', 'addition', 'reminder'].includes(article.type),
-  )
-  return hasArticle || t.state === 'archived' || !!t.archive_notes ||
+    ['addition', 'reminder'].includes(article.type),
+  ) || replyPlacement.value.unmatched.length > 0
+  return hasArticle || t.state_key === 'archived' || !!t.archive_notes ||
     t.is_callbacked === true || !!t.satisfaction ||
     !!t.callback_details || !!t.unsatisfied_reason
 })
@@ -489,23 +513,16 @@ const archiveNotes = ref('')
 // 回访选择：'call_backed'=已回访（is_callbacked=true），'no_need'=无需回访（callback_required=false）
 const callbackChoice = ref<'call_backed' | 'no_need'>('no_need')
 const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | 'unrated' | ''>('')
-// 回访详情（不满意原因）：后端 callback_details 字段，不满意时必填
-const callbackDetails = ref('')
 // 不满意原因（后端 unsatisfied_reason，V0.87 收尾：dissatisfied 必填）
 const unsatisfiedReason = ref('')
 
-// 归档按钮禁用条件：已回访必须选满意度；不满意必须填写不满意原因与回访详情
+// 归档按钮禁用条件：已回访必须选满意度；不满意必须填写不满意原因
 const archiveDisabled = computed(() => {
   if (callbackChoice.value === 'call_backed' && !satisfaction.value) return true
   if (
     callbackChoice.value === 'call_backed'
     && satisfaction.value === 'dissatisfied'
     && !unsatisfiedReason.value.trim()
-  ) return true
-  if (
-    callbackChoice.value === 'call_backed'
-    && satisfaction.value === 'dissatisfied'
-    && !callbackDetails.value.trim()
   ) return true
   return false
 })
@@ -515,14 +532,12 @@ watch(canArchiveFromResolved, (visible) => {
     archiveNotes.value = ''
     callbackChoice.value = 'no_need'
     satisfaction.value = ''
-    callbackDetails.value = ''
     unsatisfiedReason.value = ''
   } else {
     const t = ticket.value as any
     archiveNotes.value = t?.archive_notes || ''
     callbackChoice.value = t?.is_callbacked ? 'call_backed' : 'no_need'
     satisfaction.value = t?.satisfaction || ''
-    callbackDetails.value = t?.callback_details || ''
     unsatisfiedReason.value = t?.unsatisfied_reason || ''
   }
 }, { immediate: true })
@@ -541,7 +556,7 @@ async function submitArchive() {
         callback_required: true,
         satisfaction: satisfaction.value,
         unsatisfied_reason: unsatisfiedReason.value.trim(),
-        callback_details: callbackDetails.value.trim(),
+        archive_notes: archiveNotes.value.trim(),
       } as any)
       ElMessage.warning('已记录回访结果：客户不满意，请通过「退回」让处理人重新处理')
     } else {
@@ -551,7 +566,6 @@ async function submitArchive() {
         callback_required: callBacked,  // 已回访→true(需要回访已落实)；无需回访→false
         is_callbacked: callBacked,
         satisfaction: callBacked ? satisfaction.value : undefined,
-        callback_details: callBacked ? callbackDetails.value.trim() : undefined,
       } as any)
       ElMessage.success('工单已归档')
     }

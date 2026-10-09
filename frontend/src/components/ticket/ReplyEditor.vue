@@ -186,6 +186,12 @@ const currentStateKey = computed(() => (props.ticket as any).state_key || '')
 const canReply = computed(() => (props.ticket as any).can_reply === true)
 const canAppend = computed(() => (props.ticket as any).can_addition === true)
 const canRemind = computed(() => (props.ticket as any).can_remind === true)
+const willTransferAfterReply = computed(() => {
+  const t = props.ticket as any
+  const steps = t.dispatch_chain_steps || []
+  return t.state === 'open' && t.dispatch_step_index != null &&
+    t.dispatch_step_index + 1 < steps.length
+})
 
 const allowedActions = computed<AllowedAction[]>(
   () => (props.ticket as any).allowed_actions ?? [],
@@ -221,13 +227,15 @@ const placeholder = computed(() => {
   if (hasSummary.value) {
     return '当前状态下已提交处理说明'
   }
-  return '请输入处理说明，提交后将标记为已处理...'
+  return willTransferAfterReply.value
+    ? '请输入本部门处理说明，提交后将流转至下一部门...'
+    : '请输入处理说明，提交后将标记为已处理...'
 })
 
 const submitLabel = computed(() => {
   if (activeTab.value === 'addition') return '补充记录'
   if (activeTab.value === 'reminder') return '发起催办'
-  return '提交处理说明'
+  return willTransferAfterReply.value ? '提交并流转' : '提交处理说明'
 })
 
 // 附件处理
@@ -328,7 +336,7 @@ async function onSubmit() {
     appendReason.value = ''
     clearAttachments()
     const msgMap: Record<string, string> = {
-      reply: '处理说明已提交',
+      reply: willTransferAfterReply.value ? '处理说明已提交，已流转至下一部门' : '处理说明已提交',
       addition: '补充已记录',
       reminder: '催办已发起',
     }

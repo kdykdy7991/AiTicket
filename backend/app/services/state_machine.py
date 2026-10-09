@@ -42,13 +42,8 @@ STATE_LABELS: dict[str, str] = {
     "archived": "已归档", "cancelled": "已撤销",
 }
 
-# 哪些状态转换算"退回"动作，写完 state_log 后用来同步 has_returned
-# - (pending, returned): 客户/客服 退回给创建人
-# - (open, pending):     处理人退回给团队负责人（重新分派）
-RETURN_TRANSITIONS: set[tuple[str, str]] = {
-    ("pending", "returned"),
-    ("open", "pending"),
-}
+# "曾退回"按业务动作记录；open→pending 也可表示转派，不能只看状态边。
+RETURN_ACTIONS = {"return", "reopen"}
 
 # 8 状态流转规则：{from_state: [to_state, ...]}
 TRANSITIONS: dict[str, list[str]] = {
@@ -180,6 +175,13 @@ async def compute_allowed_actions(
     for to_state in TRANSITIONS.get(ticket.state, []):
         effective = enforce_business_constraints(ticket, to_state, log_rewrite=False)
         action = action_for(ticket.state, effective)
+        if (
+            action == "resolve"
+            and ticket.dispatch_chain_steps
+            and ticket.dispatch_step_index is not None
+            and ticket.dispatch_step_index + 1 < len(ticket.dispatch_chain_steps)
+        ):
+            continue  # 中间节点完成处理走 transfer，不能整单办结
         if action is None or (action, effective) in seen:
             continue
         if await transition_permission_error(db, ticket, effective, user) is not None:
@@ -218,6 +220,12 @@ def compute_article_actions(ticket: Ticket, user: User) -> dict[str, bool]:
             ticket.owner_id is not None
             and user.id == ticket.owner_id
             and ticket.state in REPLY_ALLOWED_STATES
+            and not (
+                ticket.state == "on_hold"
+                and ticket.dispatch_chain_steps
+                and ticket.dispatch_step_index is not None
+                and ticket.dispatch_step_index + 1 < len(ticket.dispatch_chain_steps)
+            )
         ),
         # 追加：指定角色 + 已处理之前的状态
         "can_addition": (
@@ -682,7 +690,7 @@ async def apply_transfer(
       4. 状态推进复用 apply_transition 唯一入口（open→pending：清 owner、
          记停留时长、原因校验），action_type 覆盖为 "transfer"——
          与"处理人打回"同一条边但语义是链前进
-      5. has_returned 归位：转派是前进不是打回（同边不同义，转派不置退回标记）
+      5. 保留历史退回标记：转派是前进，不新增退回历史
 
     不负责 commit——由调用方按请求边界提交。
     """
@@ -722,7 +730,6 @@ async def apply_transfer(
         reason=reason or f"本步完成，转派「{next_dept}」",
         action_type="transfer",
     )
-    ticket.has_returned = False  # 最新动作是转派不是退回（RETURN_TRANSITIONS 同边改写）
     await db.flush()
     return log
 
@@ -755,6 +762,24 @@ async def apply_transition(
     返回写入的 TicketStateLog；to_state 与当前状态相同（no-op）时返回 None。
     不负责 commit——由调用方按各自的请求边界提交。
     """
+    # 中间节点提交处理结果即完成本步，直接进入链的下一部门；
+    # 只有最后一个节点才能把整张工单置为“已处理”。
+    steps = ticket.dispatch_chain_steps or []
+    if (
+        ticket.state == "on_hold"
+        and to_state == "resolved"
+        and ticket.dispatch_step_index is not None
+        and ticket.dispatch_step_index + 1 < len(steps)
+    ):
+        raise HTTPException(422, detail="当前节点须先恢复处理，再提交并流转至下一部门")
+    if (
+        ticket.state == "open"
+        and to_state == "resolved"
+        and ticket.dispatch_step_index is not None
+        and ticket.dispatch_step_index + 1 < len(steps)
+    ):
+        return await apply_transfer(db, ticket, operator=operator, reason=reason)
+
     # 1. 业务约束
     to_state = enforce_business_constraints(ticket, to_state)
     if to_state == ticket.state:
@@ -833,8 +858,9 @@ async def apply_transition(
     if to_state == "on_hold" and hold_until:
         ticket.hold_until = datetime.fromisoformat(hold_until).replace(tzinfo=timezone.utc)
 
-    # has_returned 跟随"最新一次动作"：属于 RETURN_TRANSITIONS 才置 true
-    ticket.has_returned = (old_state, to_state) in RETURN_TRANSITIONS
+    # 一旦发生退回或退回重开，就永久保留历史标记；转派等后续动作不清除。
+    action = action_for(old_state, to_state, action_type)
+    ticket.has_returned = ticket.has_returned or action in RETURN_ACTIONS
     ticket.state = to_state
 
     # 上一状态停留时长
@@ -850,7 +876,7 @@ async def apply_transition(
     log = TicketStateLog(
         ticket_id=ticket.id, from_state=old_state, to_state=to_state,
         operator_id=operator.id, reason=reason, duration_minutes=duration,
-        action_type=action_for(old_state, to_state, action_type),
+        action_type=action,
         **snapshot_people(ticket),
     )
     db.add(log)

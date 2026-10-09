@@ -22,7 +22,7 @@ from app.models.user import User
 from test_workflow_regression import _next_phone, action_sequence, as_user
 
 CATS = [
-    (2301, None, "业务保障", 1, 1),
+    (2203, None, "套餐变更", 1, 1),
 ]
 
 # 两步链：售后 → 平台运维组（步骤推进的最小可测结构）
@@ -63,7 +63,7 @@ async def tenv(client):
             UserSkillGroup(user_id=u_as.id, skill_group_id=sg_aftersale.id, is_dispatcher=True),
             UserSkillGroup(user_id=u_pl.id, skill_group_id=sg_platform.id, is_dispatcher=True),
         ])
-        s.add(DispatchChain(category_id=2301, steps=STEPS))
+        s.add(DispatchChain(category_id=2203, steps=STEPS))
         await s.commit()
         ids = {"aftersale_user": u_as.id, "platform_user": u_pl.id}
 
@@ -74,7 +74,7 @@ async def tenv(client):
             channel="phone",
             customer_type="personal",
             customer_phone=_next_phone(),
-            category_id=2301,
+            category_id=2203,
         )
         payload.update(kw)
         r = await c.post("/api/v1/tickets", json=payload)
@@ -191,3 +191,35 @@ async def test_transfer_then_next_dept_closes(tenv):
     assert t2["dispatch_step_index"] == 1
     r = await tenv["patch"](t["id"], {"state": "resolved", "solution": "链末端已处理"})
     assert r["state"] == "resolved"
+
+
+async def test_reply_advances_intermediate_step_and_only_final_reply_resolves(tenv):
+    t = await _open_ticket(tenv)
+    detail = await tenv["get"](t["id"])
+    assert "resolve" not in {a["action"] for a in detail["allowed_actions"]}
+
+    with as_user(tenv["aftersale_user"], "handler"):
+        first = await tenv["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "第一部门审核完成"},
+        )
+    assert first.status_code == 201, first.text
+    t = await tenv["get"](t["id"])
+    assert t["state"] == "pending"
+    assert t["dispatch_step_index"] == 1
+    assert t["skill_group_name"] == "平台运维组"
+    assert t["owner_id"] is None
+    assert t["solved_at"] is None
+    assert await action_sequence(tenv, t["id"]) == ["create", "dispatch", "transfer"]
+
+    await tenv["patch"](t["id"], {"state": "open", "owner_id": tenv["platform_user"]})
+    with as_user(tenv["platform_user"], "handler"):
+        final = await tenv["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "第二部门执行完成"},
+        )
+    assert final.status_code == 201, final.text
+    t = await tenv["get"](t["id"])
+    assert t["state"] == "resolved"
+    assert t["solved_at"] is not None
+    assert await action_sequence(tenv, t["id"]) == ["create", "dispatch", "transfer", "dispatch", "resolve"]

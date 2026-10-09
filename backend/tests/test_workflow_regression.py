@@ -231,23 +231,11 @@ async def test_dissatisfied_closure_loop(env):
 
 
 async def test_instant_resolve_action_type(env):
-    """即时办结：None → archived 的一次性日志动作完整，终态副作用唯一归属执行入口。"""
+    """即时咨询不记录工单。"""
     r = await env["client"].post("/api/v1/tickets", json={
         "description": "回归-即时办结", "priority": "p4_enterprise",
         "channel": "phone", "customer_type": "personal",
         "customer_phone": _next_phone(),
         "is_instant_resolve": True, "instant_resolution": "已在线答复",
     })
-    assert r.status_code == 201, r.text
-    tid = r.json()["data"]["id"]
-    assert await action_sequence(env, tid) == ["instant_resolve"]
-
-    # 分工核验：resolved/solved_at/resolution 为建单初始化数据（调用方负责）；
-    # closed_at / closed_duration_minutes / TicketStateLog 由 apply_initial_state
-    # （执行入口）唯一计算，构造期不再重复维护
-    async with env["factory"]() as s:
-        tk = (await s.execute(select(Ticket).where(Ticket.id == tid))).scalar_one()
-        assert tk.resolved is True and tk.solved_at is not None   # 初始化数据
-        assert tk.closed_at is not None                           # 执行入口副作用
-        assert tk.closed_duration_minutes == 0
-        assert tk.state == "archived"
+    assert r.status_code == 422, r.text

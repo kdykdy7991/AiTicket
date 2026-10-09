@@ -18,12 +18,13 @@ function delay<T>(data: T, ms = 200): Promise<T> {
 let nextTicketId = 100
 let nextArticleId = 2000
 
-// 与后端 RETURN_TRANSITIONS 保持一致：
+// 与后端退回动作保持一致：
 //   (pending, returned): 客户/客服 退回给创建人
 //   (open, pending):     处理人退回给团队负责人
 const RETURN_TRANSITIONS = new Set<string>([
   'pending->returned',
   'open->pending',
+  'resolved->open',
 ])
 
 export const mockAuthApi = {
@@ -150,9 +151,9 @@ export const mockTicketApi = {
       const oldState = ticket.state
       const newState = payload.state as any
       ticket.state = newState
-      // has_returned 跟随"最新一次动作"：只有当本次转换属于退回动作时才置 true
+      // 历史标记一旦置位，后续正常流转不清除。
       const isReturn = RETURN_TRANSITIONS.has(`${oldState}->${newState}`)
-      ticket.has_returned = isReturn
+      ticket.has_returned = ticket.has_returned || isReturn
       // 同步更新最新一条 state_log 的 from/to key
       const logs = stateLogs[id]
       if (logs && logs.length > 0) {

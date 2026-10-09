@@ -1,28 +1,42 @@
 <template>
-  <!-- 处理流程按操作展示，节点责任人取流转时的人员快照。 -->
+  <!-- 已完成的操作按日志展示；当前待办根据工单状态单独接在末尾。 -->
   <div class="timeline">
     <div v-if="nodes.length === 0" class="empty">暂无流转记录</div>
     <div
       v-for="(node, index) in nodes"
       :key="node.key"
       class="timeline-item"
-      :class="{ 'is-first': index === 0, 'is-current': isCurrent(node) }"
+      :class="{ 'is-first': index === 0 }"
     >
       <div class="timeline-marker">
         <div class="marker-dot" />
-        <div v-if="index < nodes.length - 1" class="marker-line" />
+        <div v-if="index < nodes.length - 1 || currentStage" class="marker-line" />
       </div>
       <div class="timeline-content">
         <div class="timeline-head">
           <span class="action-name">{{ actionName(node.log) }}</span>
-          <span v-if="isCurrent(node)" class="current-tag">当前</span>
           <span class="action-time">
             <DateTimeLabel :iso="node.ts" />
           </span>
         </div>
-        <div v-if="responsibleName(node.log, isCurrent(node))" class="action-operator">
-          {{ responsibleLabel(node.log) }}：{{ responsibleName(node.log, isCurrent(node)) }}
+        <div v-if="responsibleName(node.log)" class="action-operator">
+          {{ responsibleLabel(node.log) }}：{{ responsibleName(node.log) }}
         </div>
+        <div v-for="reply in repliesByLog?.get(node.log.id) || []" :key="reply.id" class="node-reply">
+          <span class="node-reply-label">处理说明</span>
+          <div class="node-reply-body">{{ reply.body }}</div>
+        </div>
+      </div>
+    </div>
+    <div v-if="currentStage" class="timeline-item is-current">
+      <div class="timeline-marker"><div class="marker-dot" /></div>
+      <div class="timeline-content">
+        <div class="timeline-head">
+          <span class="action-name">{{ currentStage.title }}</span>
+          <span class="current-tag">当前</span>
+          <span v-if="currentStage.enteredAt" class="action-time"><DateTimeLabel :iso="currentStage.enteredAt" /></span>
+        </div>
+        <div v-if="currentStage.person" class="action-operator">{{ currentStage.personLabel }}：{{ currentStage.person }}</div>
       </div>
     </div>
   </div>
@@ -31,11 +45,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DateTimeLabel from '@/components/common/DateTimeLabel.vue'
-import type { TicketStateLog } from '@/types'
+import type { Article, TicketStateLog } from '@/types'
 
 const props = defineProps<{
   logs: TicketStateLog[]
+  currentState?: string
   currentOwnerName?: string
+  currentDispatcherName?: string
+  currentCreatorName?: string
+  repliesByLog?: Map<number, Article[]>
 }>()
 
 interface TimelineNode {
@@ -90,27 +108,49 @@ function actionName(log: TicketStateLog): string {
 }
 
 function responsibleLabel(log: TicketStateLog): string {
-  if (log.action_type === 'create') return '创建人'
+  const actionLabels: Record<string, string> = {
+    create: '创建人',
+    dispatch: '分派人',
+    refine: '判断人',
+    transfer: '转派人',
+    resolve: '处理人',
+    archive: '归档人',
+    cancel: '撤销人',
+    hold: '暂缓人',
+    resume: '恢复人',
+    return: '退回人',
+    reopen: '重开人',
+    resubmit: '提交人',
+    instant_resolve: '操作人',
+  }
+  if (log.action_type) return actionLabels[log.action_type] || '操作人'
   if (log.to_state_key === 'pending') return '节点对接人'
   if (log.to_state_key === 'returned') return '退回接收人'
   return '节点处理人'
 }
 
-function responsibleName(log: TicketStateLog, current: boolean): string {
-  if (log.action_type === 'create') return log.creator_name_snapshot || log.operator_name || ''
+function responsibleName(log: TicketStateLog): string {
+  if (log.action_type === 'create') return log.operator_name || log.creator_name_snapshot || ''
+  if (log.action_type === 'dispatch') return log.operator_name || log.dispatcher_name_snapshot || ''
+  if (log.action_type) return log.operator_name || log.changed_by?.firstname || ''
   if (log.to_state_key === 'pending') return log.dispatcher_name_snapshot || ''
   if (log.to_state_key === 'returned') return log.creator_name_snapshot || ''
-  return (current && props.currentOwnerName) || log.owner_name_snapshot || ''
+  return log.operator_name || log.changed_by?.firstname || ''
 }
 
 const TERMINAL_STATES = new Set(['archived', 'cancelled'])
 
-/** 当前节点 = 最后一条且该动作未把工单带入终态 */
-function isCurrent(node: TimelineNode): boolean {
-  const last = nodes.value[nodes.value.length - 1]
-  if (!last || last.key !== node.key) return false
-  return !TERMINAL_STATES.has(node.log.to_state_key || '')
-}
+const currentStage = computed(() => {
+  const state = props.currentState || nodes.value[nodes.value.length - 1]?.log.to_state_key
+  if (!state || TERMINAL_STATES.has(state)) return null
+  const enteredAt = nodes.value[nodes.value.length - 1]?.ts || ''
+  if (state === 'pending') return { title: '待分派处理人', personLabel: '对接人', person: props.currentDispatcherName || '', enteredAt }
+  if (state === 'open') return { title: '待提交处理说明', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }
+  if (state === 'on_hold') return { title: '暂缓处理中', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }
+  if (state === 'returned') return { title: '待补充后重新提交', personLabel: '创建人', person: props.currentCreatorName || '', enteredAt }
+  if (state === 'resolved') return { title: '待回访归档', personLabel: '', person: '', enteredAt }
+  return null
+})
 </script>
 
 <style scoped>
@@ -195,6 +235,16 @@ function isCurrent(node: TimelineNode): boolean {
   color: var(--color-text-tertiary);
   margin-top: 2px;
 }
+.node-reply {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-card);
+  box-shadow: var(--shadow-xs);
+}
+.node-reply-label { color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
+.node-reply-body { margin-top: 8px; color: var(--color-text-primary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .empty {
   font-size: 13px;

@@ -3,7 +3,6 @@
     <h3 class="card-title"><svg class="title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M6 16c.7-1.5 1.7-2 3-2s2.3.5 3 2M15 9h3M15 13h3"/></svg>基本信息</h3>
     <div class="overview-grid">
       <div class="info-column">
-        <div class="info-row"><span>标题</span><strong>{{ t.title || t.subject || t.symptom || '—' }}</strong></div>
         <div class="info-row"><span>问题分类</span><strong>{{ t.category_path || [t.category_l1?.name, t.category_l2?.name].filter(Boolean).join(' / ') || '—' }}</strong></div>
         <div v-if="t.symptom" class="info-row"><span>故障现象</span><strong>{{ t.symptom }}</strong></div>
         <div class="info-row"><span>创建人</span><strong>{{ t.creator_name || '—' }}</strong></div>
