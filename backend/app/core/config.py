@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # MCP 容器调用内部只读接口的专用密钥；不设置时接口不可用。
+    MCP_INTERNAL_TOKEN: str = ""
+
     # Ticket
     TICKET_NUMBER_PREFIX: str = "TKT"
 
@@ -56,7 +59,8 @@ class Settings(BaseSettings):
     PUBLIC_UPLOAD_URL: str = "/uploads"
     UPLOAD_MAX_SIZE: int = 10 * 1024 * 1024  # 10 MB
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    # Compose 的同一份 .env 还包含 MCP 容器专用变量，API 忽略无关字段。
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

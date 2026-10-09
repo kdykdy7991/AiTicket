@@ -33,6 +33,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://skdy:skdy123@db:5432/skdy_ticket
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me-in-production
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -41,6 +42,20 @@ services:
     volumes:
       - ./app:/app/app  # dev: hot reload
       - uploads:/app/uploads
+
+  mcp:
+    build:
+      context: ../mcp_server
+    ports:
+      - "10.113.114.88:8002:8000"
+      - "127.0.0.1:8002:8000"
+    environment:
+      TICKET_API_URL: http://api:8000
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
+    depends_on:
+      - api
 
 volumes:
   pgdata:

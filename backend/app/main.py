@@ -102,7 +102,7 @@ app.mount(settings.PUBLIC_UPLOAD_URL, StaticFiles(directory=settings.UPLOAD_DIR)
 
 
 # ── Routers ───────────────────────────────────────────────
-from app.api.v1 import auth, articles, tickets, common
+from app.api.v1 import auth, articles, tickets, common, mcp_read
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(tickets.router, prefix="/api/v1")
@@ -115,6 +115,7 @@ app.include_router(common.regions_router, prefix="/api/v1")
 app.include_router(common.sla_router, prefix="/api/v1")
 app.include_router(common.stats_router, prefix="/api/v1")
 app.include_router(common.routing_router, prefix="/api/v1")
+app.include_router(mcp_read.router, prefix="/api/v1")
 
 
 # ── Health ───────────────────────────────────────────────

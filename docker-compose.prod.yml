@@ -60,6 +60,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
     depends_on:
       db:
         condition: service_healthy
@@ -93,6 +94,27 @@ services:
     user: root
     depends_on:
       - api
+      - mcp
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "com.docker.compose.service"
+    restart: unless-stopped
+    networks:
+      - skdy-net
+
+  mcp:
+    build:
+      context: ./mcp_server
+    environment:
+      TICKET_API_URL: http://api:8000
+      MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
+      MCP_BEARER_TOKEN: ${MCP_BEARER_TOKEN:-}
+    depends_on:
+      api:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
