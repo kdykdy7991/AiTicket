@@ -51,10 +51,20 @@
                 show-word-limit
               />
               <div class="resubmit-selects">
+                <el-select v-model="resubmitCategoryL1Id" placeholder="选择一级分类" @change="onResubmitL1Change">
+                  <el-option v-for="c in resubmitCategoriesL1" :key="c.id" :label="c.name" :value="c.id" />
+                </el-select>
+                <el-select v-if="!resubmitL1Selectable" v-model="resubmitCategoryL2Id" placeholder="选择二级分类" :disabled="!resubmitCategoryL1Id" filterable @change="onResubmitCategoryChange">
+                  <el-option v-for="c in resubmitCategoriesL2" :key="c.id" :label="c.label" :value="c.id" />
+                </el-select>
+              </div>
+              <p v-if="resubmitRoutingHint" class="dispatch-card-hint">{{ resubmitRoutingHint }}</p>
+              <div class="resubmit-selects">
                 <el-select
                   v-model="resubmitSkillGroupId"
                   placeholder="选择对接部门"
                   :loading="skillGroupsLoading"
+                  :disabled="resubmitRouteLocked"
                   @change="onResubmitSkillGroupChange"
                 >
                   <el-option
@@ -69,7 +79,7 @@
                   placeholder="选择部门对接人"
                   :loading="dispatchersLoading"
                   filterable
-                  :disabled="!resubmitSkillGroupId"
+                  :disabled="!resubmitSkillGroupId || resubmitRouteLocked"
                 >
                   <el-option
                     v-for="d in dispatchers"
@@ -83,7 +93,7 @@
                 <el-button
                   type="primary"
                   :loading="resubmitting"
-                  :disabled="!resubmitSkillGroupId || !resubmitDispatcherId"
+                  :disabled="!resubmitCategoryId || !resubmitSkillGroupId || !resubmitDispatcherId"
                   @click="submitResubmit"
                 >
                   重新提交
@@ -242,7 +252,7 @@ import { useTicketStore } from '@/stores/ticket'
 import { metaApi } from '@/api/overviews'
 import { ticketApi } from '@/api/tickets'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { Group, AllowedAction } from '@/types'
+import type { Group, AllowedAction, TicketCategory } from '@/types'
 import StateTag from '@/components/common/StateTag.vue'
 import ReplyEditor from '@/components/ticket/ReplyEditor.vue'
 import TicketOverview from '@/components/ticket/TicketOverview.vue'
@@ -532,16 +542,45 @@ const resubmitting = ref(false)
 
 // ── 已退回工单重新提交面板 ──────────────────────────────────────
 const supplement = ref('')
+const resubmitCategories = ref<TicketCategory[]>([])
+const resubmitCategoryL1Id = ref<number | null>(null)
+const resubmitCategoryL2Id = ref<number | null>(null)
+const resubmitCategoriesL1 = computed(() => resubmitCategories.value.filter(c => c.parent_id === null && c.active))
+const resubmitCategoryById = computed(() => new Map(resubmitCategories.value.map(c => [c.id, c])))
+const resubmitL1Selectable = computed(() => !!resubmitCategoryL1Id.value && resubmitCategoryById.value.get(resubmitCategoryL1Id.value)?.create_selectable === true)
+const resubmitCategoriesL2 = computed(() => {
+  const rootId = resubmitCategoryL1Id.value
+  if (!rootId) return []
+  return resubmitCategories.value.filter(c => {
+    if (!c.active || !c.create_selectable || c.id === rootId) return false
+    let parent = c.parent_id
+    while (parent != null) {
+      if (parent === rootId) return true
+      parent = resubmitCategoryById.value.get(parent)?.parent_id ?? null
+    }
+    return false
+  }).map(c => ({ id: c.id, label: c.name }))
+})
+const resubmitCategoryId = computed(() => resubmitCategoryL2Id.value || (resubmitL1Selectable.value ? resubmitCategoryL1Id.value : null))
+const resubmitRoutingHint = ref('')
+const resubmitRouteLocked = ref(false)
 const resubmitSkillGroupId = ref<number | null>(null)
 const resubmitDispatcherId = ref<number | null>(null)
 const skillGroups = ref<Group[]>([])
 const dispatchers = ref<any[]>([])
 const skillGroupsLoading = ref(false)
 const dispatchersLoading = ref(false)
+let resubmitRoutingSeq = 0
 
 watch(canResubmit, async (visible) => {
   if (!visible) {
+    resubmitRoutingSeq++
     supplement.value = ''
+    resubmitCategories.value = []
+    resubmitCategoryL1Id.value = null
+    resubmitCategoryL2Id.value = null
+    resubmitRoutingHint.value = ''
+    resubmitRouteLocked.value = false
     resubmitSkillGroupId.value = null
     resubmitDispatcherId.value = null
     skillGroups.value = []
@@ -551,17 +590,21 @@ watch(canResubmit, async (visible) => {
   const t = ticket.value as any
   skillGroupsLoading.value = true
   try {
-    skillGroups.value = await metaApi.getSkillGroups()
-    resubmitSkillGroupId.value = t?.skill_group_id ?? null
-    resubmitDispatcherId.value = null
-    dispatchers.value = []
-    if (resubmitSkillGroupId.value) {
-      dispatchersLoading.value = true
-      dispatchers.value = await metaApi.getDispatchers(resubmitSkillGroupId.value)
-      resubmitDispatcherId.value = t?.dispatcher_id ?? null
+    const [groups, categories] = await Promise.all([metaApi.getSkillGroups(), metaApi.getCategories()])
+    skillGroups.value = groups
+    resubmitCategories.value = categories
+    let selected = resubmitCategoryById.value.get(t.category_id)
+    while (selected && !selected.create_selectable && selected.parent_id != null) {
+      selected = resubmitCategoryById.value.get(selected.parent_id)
     }
+    let root = selected
+    while (root?.parent_id != null) root = resubmitCategoryById.value.get(root.parent_id)
+    resubmitCategoryL1Id.value = root?.id ?? null
+    resubmitCategoryL2Id.value = selected?.id !== root?.id && selected?.create_selectable ? selected?.id ?? null : null
+    await onResubmitCategoryChange()
   } catch {
     skillGroups.value = []
+    resubmitCategories.value = []
     dispatchers.value = []
   } finally {
     skillGroupsLoading.value = false
@@ -569,7 +612,44 @@ watch(canResubmit, async (visible) => {
   }
 }, { immediate: true })
 
+async function onResubmitL1Change() {
+  resubmitCategoryL2Id.value = null
+  await onResubmitCategoryChange()
+}
+
+async function onResubmitCategoryChange() {
+  const seq = ++resubmitRoutingSeq
+  const categoryId = resubmitCategoryId.value
+  resubmitSkillGroupId.value = null
+  resubmitDispatcherId.value = null
+  dispatchers.value = []
+  resubmitRoutingHint.value = ''
+  resubmitRouteLocked.value = false
+  if (!categoryId) return
+  try {
+    const routing = await metaApi.resolveRouting(categoryId)
+    if (seq !== resubmitRoutingSeq) return
+    const steps = routing?.chain_steps || []
+    resubmitRouteLocked.value = steps.length > 0
+    if (steps.length) resubmitRoutingHint.value = `将按分派链流转：${steps.map((s: any) => s.department_code).join(' → ')}`
+    else if (routing?.reason) resubmitRoutingHint.value = routing.reason
+    const groupId = routing?.dispatcher_skill_group_id
+    if (groupId) {
+      resubmitSkillGroupId.value = Number(groupId)
+      dispatchersLoading.value = true
+      dispatchers.value = await metaApi.getDispatchers(Number(groupId))
+      if (seq !== resubmitRoutingSeq) return
+      resubmitDispatcherId.value = routing?.dispatcher_id ?? null
+    }
+  } catch {
+    if (seq === resubmitRoutingSeq) resubmitRoutingHint.value = '责任预填失败，请手动选择对接部门和对接人'
+  } finally {
+    if (seq === resubmitRoutingSeq) dispatchersLoading.value = false
+  }
+}
+
 async function onResubmitSkillGroupChange() {
+  if (resubmitRouteLocked.value) return
   resubmitDispatcherId.value = null
   dispatchers.value = []
   if (!resubmitSkillGroupId.value) return
@@ -584,8 +664,8 @@ async function onResubmitSkillGroupChange() {
 }
 
 async function submitResubmit() {
-  if (!resubmitSkillGroupId.value || !resubmitDispatcherId.value) {
-    ElMessage.warning('请选择对接部门和部门对接人')
+  if (!resubmitCategoryId.value || !resubmitSkillGroupId.value || !resubmitDispatcherId.value) {
+    ElMessage.warning('请选择问题分类、对接部门和部门对接人')
     return
   }
   const t = ticket.value as any
@@ -601,6 +681,7 @@ async function submitResubmit() {
     }
     await ticketStore.updateTicket(t.id, {
       state: findAction('resubmit')?.target_state || 'pending',
+      category_id: resubmitCategoryId.value,
       skill_group_id: resubmitSkillGroupId.value,
       dispatcher_id: resubmitDispatcherId.value,
       reason,

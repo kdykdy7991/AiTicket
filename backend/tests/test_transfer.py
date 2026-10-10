@@ -23,6 +23,7 @@ from test_workflow_regression import _next_phone, action_sequence, as_user
 
 CATS = [
     (2203, None, "套餐变更", 1, 1),
+    (2299, None, "平台复核", 1, 2),
 ]
 
 # 两步链：售后 → 平台运维组（步骤推进的最小可测结构）
@@ -63,7 +64,10 @@ async def tenv(client):
             UserSkillGroup(user_id=u_as.id, skill_group_id=sg_aftersale.id, is_dispatcher=True),
             UserSkillGroup(user_id=u_pl.id, skill_group_id=sg_platform.id, is_dispatcher=True),
         ])
-        s.add(DispatchChain(category_id=2203, steps=STEPS))
+        s.add_all([
+            DispatchChain(category_id=2203, steps=STEPS),
+            DispatchChain(category_id=2299, steps=[{"order": 1, "department_code": "平台运维组"}]),
+        ])
         await s.commit()
         ids = {"aftersale_user": u_as.id, "platform_user": u_pl.id}
 
@@ -186,6 +190,48 @@ async def test_initial_node_returns_to_creator(tenv):
     assert d["state"] == "returned"
     assert d["owner_id"] == t["creator_id"]
     assert d["returned_to_user_id"] == t["creator_id"]
+
+
+async def test_resubmit_new_category_rebuilds_route_and_can_resolve(tenv):
+    t = await tenv["create_ticket"]()
+    await tenv["patch"](t["id"], {"state": "returned", "reason": "分类有误"})
+    d = await tenv["patch"](t["id"], {
+        "state": "pending", "category_id": 2299,
+        "skill_group_id": t["skill_group_id"],
+        "dispatcher_id": tenv["aftersale_user"],
+    })
+    assert d["category_id"] == 2299
+    assert d["skill_group_name"] == "平台运维组"
+    assert d["dispatcher_id"] == tenv["platform_user"]
+    assert d["dispatch_chain_steps"] == [{"order": 1, "department_code": "平台运维组"}]
+    assert d["dispatch_step_index"] == 0
+    await tenv["patch"](t["id"], {"state": "open", "owner_id": tenv["platform_user"]})
+    with as_user(tenv["platform_user"], "handler"):
+        result = await tenv["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "重新分类后处理完成"},
+        )
+    assert result.status_code == 201, result.text
+    assert (await tenv["get"](t["id"]))["state"] == "resolved"
+
+
+async def test_resubmit_same_category_can_reenter_multistep_chain(tenv):
+    t = await tenv["create_ticket"]()
+    await tenv["patch"](t["id"], {"state": "returned", "reason": "补充后重办"})
+    d = await tenv["patch"](t["id"], {"state": "pending", "category_id": 2203})
+    assert d["dispatch_step_index"] == 0
+    assert d["skill_group_name"] == "售后"
+    await tenv["patch"](t["id"], {"state": "open", "owner_id": tenv["aftersale_user"]})
+    with as_user(tenv["aftersale_user"], "handler"):
+        reply = await tenv["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "售后已处理，交下一部门"},
+        )
+    assert reply.status_code == 201, reply.text
+    d = await tenv["get"](t["id"])
+    assert d["state"] == "pending"
+    assert d["dispatch_step_index"] == 1
+    assert d["skill_group_name"] == "平台运维组"
 
 
 async def test_transfer_denied_at_last_step(tenv):

@@ -44,6 +44,7 @@ from app.services.state_machine import (
     compute_allowed_actions,
     compute_article_actions,
     refine_capability,
+    is_dispatcher,
 )
 
 router = APIRouter(tags=["tickets"])
@@ -1125,6 +1126,53 @@ async def update_ticket(
     if ticket.satisfaction == "dissatisfied" and not (ticket.unsatisfied_reason or "").strip():
         raise HTTPException(422, detail="客户不满意：必须填写不满意原因")
 
+    is_resubmit = ticket.state == "returned" and body.state == "pending"
+    if body.category_id is not None and not is_resubmit:
+        raise HTTPException(422, detail="仅退回后重新提交时可修改问题分类")
+    if is_resubmit:
+        from app.services.dispatch_chain import resolve_responsibility
+
+        if body.owner_id is not None:
+            raise HTTPException(422, detail="重新提交后须由对接人重新分派处理人")
+
+        category_id = body.category_id or ticket.category_id
+        if category_id is not None:
+            category = (await db.execute(
+                select(TicketCategory).where(TicketCategory.id == category_id,
+                                             TicketCategory.is_active == True)
+            )).scalar_one_or_none()
+            if category is None:
+                raise HTTPException(422, detail="所选问题分类不存在或已停用")
+        routing = await resolve_responsibility(db, category_id) if category_id is not None else {}
+        steps = routing.get("chain_steps") or None
+        # 有链时责任部门必须与链首一致；无链时才允许人工指定。
+        if steps:
+            skill_group_id = routing.get("dispatcher_skill_group_id")
+            dispatcher_id = routing.get("dispatcher_id")
+        else:
+            skill_group_id = body.skill_group_id or routing.get("dispatcher_skill_group_id") or ticket.skill_group_id
+            dispatcher_id = body.dispatcher_id or routing.get("dispatcher_id") or ticket.dispatcher_id
+        if not skill_group_id or not dispatcher_id:
+            raise HTTPException(422, detail="所选分类缺少对接部门或部门对接人")
+        if not await is_dispatcher(db, dispatcher_id, skill_group_id):
+            raise HTTPException(422, detail="所选人员不是该部门的对接人")
+        ticket.category_id = category_id
+        ticket.dispatch_chain_steps = steps
+        ticket.dispatch_step_index = 0 if steps else None
+        ticket.return_checkpoints = []
+        ticket.legacy_return_cursor_log_id = None
+        ticket.first_owner_id = None
+        ticket.skill_group_id = skill_group_id
+        ticket.handler_skill_group_id = routing.get("handler_skill_group_id") or skill_group_id
+        ticket.dispatcher_id = dispatcher_id
+        body.skill_group_id = skill_group_id
+        body.handler_skill_group_id = ticket.handler_skill_group_id
+        body.dispatcher_id = dispatcher_id
+        ticket.solution_deadline = await _calculate_sla_deadline(
+            db, body.priority or ticket.priority, skill_group_id, ticket.complaint_level,
+        )
+        db.expire(ticket, ["category", "skill_group", "handler_skill_group", "dispatcher", "first_owner"])
+
     # State transition — 唯一执行入口：校验/权限/reason/前置校验/副作用/Flow Log 收口
     # （业务约束改写、resolved→on_hold 兜底、归档闭环校验见 state_machine.apply_transition）
     if body.state is not None and body.state != ticket.state:
@@ -1190,6 +1238,8 @@ async def batch_update_tickets(
       - 非法流转：跳过该工单（保留批量接口原有的容错语义）
       - 无权限 / 缺 reason：整批拒绝（403 / 400），事务回滚，不做部分提交
     """
+    if body.updates.category_id is not None:
+        raise HTTPException(422, detail="问题分类只能在单张工单重新提交时修改")
     result = await db.execute(
         select(Ticket).where(Ticket.id.in_(body.ticket_ids))
     )

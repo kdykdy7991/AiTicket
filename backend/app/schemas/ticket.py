@@ -42,6 +42,7 @@ class TicketCreate(BaseModel):
 
 class TicketUpdate(BaseModel):
     state: str | None = None
+    category_id: int | None = None  # 仅退回后重新提交时可调整分类
     priority: str | None = None
     owner_id: int | None = None
     group_id: int | None = None

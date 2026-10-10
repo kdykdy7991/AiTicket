@@ -399,6 +399,7 @@ export interface TicketDraftPayload {
 
 export interface TicketUpdatePayload {
   state?: string
+  category_id?: number
   state_id?: number
   priority?: string
   priority_id?: number
