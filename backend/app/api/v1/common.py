@@ -1006,7 +1006,7 @@ async def report_stats(
             continue
         root = item.l1
         root_counts[root.id] += count
-        sub_name = item.l2.name if item.l2 is not None else "未细分"
+        sub_name = item.l2.name if item.l2 is not None else "待确定二级分类"
         sub_counts[root.id][sub_name] = sub_counts[root.id].get(sub_name, 0) + count
         trend = category_trend.setdefault(root.name, {})
         day_key = str(day)

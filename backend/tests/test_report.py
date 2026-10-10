@@ -54,6 +54,6 @@ async def test_report_groups_deep_and_direct_tickets_under_root(client):
         "客户咨询": 0, "业务保障": 2,
     }
     assert {row["name"]: row["count"] for row in data["by_subcategory"]["业务保障"]} == {
-        "未细分": 1, "星座大系统": 1,
+        "待确定二级分类": 1, "星座大系统": 1,
     }
     assert next(row for row in data["by_category"] if row["name"] == "业务保障")["trend"][0]["value"] == 2
