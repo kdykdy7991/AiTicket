@@ -90,6 +90,7 @@ const iconGroup = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 const iconTrigger = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10"/></svg>'
 const iconSLA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>'
 const iconMail = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,7 12,13 2,7"/></svg>'
+const iconAssistant = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M8 20v2m8-2v2M12 2v3M8 11h.01M16 11h.01M8 15c1.2 1 2.5 1.5 4 1.5s2.8-.5 4-1.5"/></svg>'
 
 const mainMenu = computed(() => {
   const items = [
@@ -102,6 +103,9 @@ const mainMenu = computed(() => {
       { path: '/tickets/drafts', label: '我的草稿', icon: iconDraft },
       { path: '/tickets/new', label: '新建工单', icon: iconNew },
     )
+  }
+  if (authStore.isAdmin) {
+    items.push({ path: '/assistant', label: '智能助手', icon: iconAssistant })
   }
   return items
 })

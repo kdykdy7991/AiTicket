@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import AgentAssistantView from '@/views/AgentAssistantView.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -55,6 +56,12 @@ const routes: RouteRecordRaw[] = [
     name: 'Search',
     component: () => import('@/views/SearchView.vue'),
     meta: { title: '搜索' },
+  },
+  {
+    path: '/assistant',
+    name: 'AgentAssistant',
+    component: AgentAssistantView,
+    meta: { title: '智能助手', requiresAdmin: true },
   },
   {
     path: '/admin',

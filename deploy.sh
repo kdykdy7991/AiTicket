@@ -60,6 +60,18 @@ set -a
 source .env
 set +a
 
+# A port in another Compose project must never be treated as this app's web.
+if [[ ! "${WEB_PORT:-}" =~ ^[0-9]+$ ]]; then
+    echo "错误：WEB_PORT 必须是端口号"
+    exit 1
+fi
+while read -r container project; do
+    if [ -n "$container" ] && [ "$project" != "skdy_prod" ]; then
+        echo "错误：WEB_PORT=${WEB_PORT} 已由 ${container}（${project}）占用，请先修改 .env"
+        exit 1
+    fi
+done < <(docker ps --filter "publish=${WEB_PORT}" --format '{{.Names}} {{.Label "com.docker.compose.project"}}')
+
 echo "======================================"
 if [ "$INIT_MODE" = true ]; then
     echo "首次部署模式：skdy-api:${TAG}"

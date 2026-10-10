@@ -34,6 +34,11 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: change-me-in-production
       MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
+      AGENT_EMBED_URL: ${AGENT_EMBED_URL:-}
+      AGENT_EMBED_API_URL: ${AGENT_EMBED_API_URL:-}
+      AGENT_EMBED_CLIENT_ID: ${AGENT_EMBED_CLIENT_ID:-}
+      AGENT_EMBED_CLIENT_SECRET: ${AGENT_EMBED_CLIENT_SECRET:-}
+      AGENT_EMBED_HOST_ORIGINS: ${AGENT_EMBED_HOST_ORIGINS:-}
     depends_on:
       db:
         condition: service_healthy
@@ -56,6 +61,16 @@ services:
       MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-}
     depends_on:
       - api
+
+  # Development bridge to Debussy's loopback-only Vite proxy.
+  agent-bridge:
+    build: .
+    network_mode: host
+    command: python scripts/debussy_dev_bridge.py
+    environment:
+      DEBUSSY_DEV_PROXY_TARGET: http://127.0.0.1:5176
+      DEBUSSY_DEV_BRIDGE_BIND: 10.113.114.88
+      DEBUSSY_DEV_BRIDGE_PORT: 8767
 
 volumes:
   pgdata:

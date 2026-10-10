@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     # MCP 容器调用内部只读接口的专用密钥；不设置时接口不可用。
     MCP_INTERNAL_TOKEN: str = ""
 
+    # Debussy trusted-app exchange. Credentials stay on the API server.
+    AGENT_EMBED_URL: str = ""
+    AGENT_EMBED_API_URL: str = ""
+    AGENT_EMBED_CLIENT_ID: str = ""
+    AGENT_EMBED_CLIENT_SECRET: str = ""
+    AGENT_EMBED_HOST_ORIGINS: str = ""
+
     # Ticket
     TICKET_NUMBER_PREFIX: str = "TKT"
 
