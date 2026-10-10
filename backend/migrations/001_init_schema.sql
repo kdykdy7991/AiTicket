@@ -369,7 +369,7 @@ CREATE INDEX idx_audit_time     ON audit_logs(created_at DESC);
 
 -- 客服组
 INSERT INTO groups (id, name) VALUES
-    (1, '客服一组');
+    (1, '客服组');
 
 -- 技能组
 INSERT INTO skill_groups (id, name) VALUES

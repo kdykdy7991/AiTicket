@@ -58,7 +58,7 @@ REGIONS = [
 ]
 
 GROUPS = [
-    (1, '默认组'),
+    (1, '客服组'),
 ]
 
 SKILL_GROUPS = [
@@ -579,14 +579,14 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
         )
         # 旧「非即时」仅是容器；三个咨询子类已直接挂到「客户咨询」。
         await db.execute(text("DELETE FROM ticket_categories WHERE id = 1201"))
-        print("[Phase 9] Seeding default group (id=1)...")
+        print("[Phase 9] Seeding customer service group (id=1)...")
         await db.execute(
             text("""
                 INSERT INTO groups (id, name, created_at, updated_at)
                 VALUES (1, :name, :created_at, :updated_at)
                 ON CONFLICT (id) DO NOTHING
             """),
-            {"name": "默认组", "created_at": now, "updated_at": now},
+            {"name": "客服组", "created_at": now, "updated_at": now},
         )
 
         print("[Phase 9] Seeding v2 skill_groups...")

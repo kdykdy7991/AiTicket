@@ -144,7 +144,7 @@ async def _seed_legacy_basics(engine):
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     now = datetime.now(timezone.utc)
     async with factory() as s:
-        # groups 表 (id=1 默认组,users.group_id 外键依赖)
+        # groups 表 (id=1 客服组,users.group_id 外键依赖)
         for row in GROUPS:
             existing = (await s.execute(
                 select(Group).where(Group.id == row[0])
