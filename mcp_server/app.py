@@ -77,6 +77,46 @@ async def list_recent_tickets(limit: int = 3) -> list[dict]:
 
 
 @mcp.tool(
+    description=(
+        "按状态、分类 ID、负责人姓名及创建日期筛选工单；分类包含所选节点及全部下级分类。按创建时间从新到旧分页。"
+        "状态可用 pending、open、on_hold、resolved、returned、archived、cancelled；"
+        "日期格式 YYYY-MM-DD。分类 ID 可从 list_categories 获取。"
+    ),
+    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+)
+async def filter_tickets(
+    state: str = "",
+    category_id: int = 0,
+    owner_name: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    page: int = 1,
+    limit: int = 10,
+) -> dict:
+    if state and state not in {"pending", "open", "on_hold", "resolved", "returned", "archived", "cancelled"}:
+        raise ToolError("状态值无效")
+    if category_id < 0 or page < 1 or page > 100 or limit < 1 or limit > 20:
+        raise ToolError("分类 ID、页码或每页数量无效")
+    if owner_name and not 2 <= len(owner_name.strip()) <= 100:
+        raise ToolError("负责人姓名须为 2 至 100 个字符")
+    for value in (date_from, date_to):
+        if value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+            raise ToolError("日期格式须为 YYYY-MM-DD")
+    params = {"page": page, "limit": limit}
+    if state:
+        params["state"] = state
+    if category_id:
+        params["category_id"] = category_id
+    if owner_name:
+        params["owner_name"] = owner_name.strip()
+    if date_from:
+        params["date_from"] = date_from
+    if date_to:
+        params["date_to"] = date_to
+    return await _read("/tickets/filter", params)
+
+
+@mcp.tool(
     description="按工单号查看工单详情、处理流程和处理说明。",
     annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
 )

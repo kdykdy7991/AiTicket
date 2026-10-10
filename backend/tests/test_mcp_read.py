@@ -16,6 +16,10 @@ async def test_mcp_read_auth_and_ticket_lookup(client, monkeypatch):
         category = TicketCategory(name="业务保障")
         session.add(category)
         await session.flush()
+        child_category = TicketCategory(name="应用平台", parent_id=category.id)
+        session.add(child_category)
+        await session.flush()
+        parent_id, child_id = category.id, child_category.id
         session.add(Ticket(
             number="20261009-0001", customer_phone="13900000000", creator_id=1,
             description="应用平台无法登录", category_id=category.id,
@@ -23,7 +27,7 @@ async def test_mcp_read_auth_and_ticket_lookup(client, monkeypatch):
         ))
         session.add(Ticket(
             number="20261009-0002", customer_phone="13900000001", creator_id=1,
-            description="另一张工单", category_id=category.id,
+            description="另一张工单", category_id=child_category.id, state="open",
             created_at=datetime(2026, 10, 9, 9, 0, tzinfo=timezone.utc),
         ))
         await session.commit()
@@ -39,6 +43,23 @@ async def test_mcp_read_auth_and_ticket_lookup(client, monkeypatch):
     assert recent.status_code == 200, recent.text
     assert [row["number"] for row in recent.json()["data"]] == ["20261009-0002", "20261009-0001"]
     assert (await c.get(f"{base}/tickets/recent", params={"limit": 21}, headers=headers)).status_code == 422
+    filtered = await c.get(
+        f"{base}/tickets/filter",
+        params={"state": "open", "date_from": "2026-10-09", "limit": 1},
+        headers=headers,
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert filtered.json()["data"]["total"] == 1
+    assert [row["number"] for row in filtered.json()["data"]["items"]] == ["20261009-0002"]
+    parent_filter = await c.get(
+        f"{base}/tickets/filter", params={"category_id": parent_id}, headers=headers,
+    )
+    assert parent_filter.json()["data"]["total"] == 2
+    child_filter = await c.get(
+        f"{base}/tickets/filter", params={"category_id": child_id}, headers=headers,
+    )
+    assert [row["number"] for row in child_filter.json()["data"]["items"]] == ["20261009-0002"]
+    assert (await c.get(f"{base}/tickets/filter", params={"date_from": "2026-10-10", "date_to": "2026-10-09"}, headers=headers)).status_code == 422
     detail = await c.get(f"{base}/tickets/20261009-0001", headers=headers)
     assert detail.status_code == 200, detail.text
     assert detail.json()["data"]["category_path"] == "业务保障"

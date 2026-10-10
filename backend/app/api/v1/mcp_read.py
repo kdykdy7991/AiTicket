@@ -5,9 +5,10 @@ Only these GET routes accept the internal token; it cannot authorize writes.
 """
 
 import secrets
+from datetime import date, datetime, time
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -60,6 +61,48 @@ async def list_recent_tickets(
         .limit(limit)
     )).scalars().all()
     return {"data": [_ticket_summary(ticket) for ticket in rows]}
+
+
+@router.get("/tickets/filter")
+async def filter_tickets(
+    state: str | None = Query(None, max_length=30),
+    category_id: int | None = Query(None, ge=1),
+    owner_name: str | None = Query(None, min_length=2, max_length=100),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    page: int = Query(1, ge=1, le=100),
+    limit: int = Query(10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    """Filter submitted tickets with bounded pagination and a stable sort."""
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(422, detail="date_from must not exceed date_to")
+    filters = [Ticket.is_draft.is_(False), Ticket.number.is_not(None)]
+    if state:
+        filters.append(Ticket.state == state)
+    if category_id:
+        lineage_index = await build_lineage_index(db)
+        category_ids = [
+            candidate_id for candidate_id, lineage in lineage_index.items()
+            if any(category.id == category_id for category in lineage.path)
+        ]
+        filters.append(Ticket.category_id.in_(category_ids))
+    if owner_name:
+        filters.append(Ticket.owner.has(User.name.ilike(f"%{owner_name}%")))
+    if date_from:
+        filters.append(Ticket.created_at >= datetime.combine(date_from, time.min))
+    if date_to:
+        filters.append(Ticket.created_at <= datetime.combine(date_to, time.max))
+    total = (await db.execute(select(func.count(Ticket.id)).where(*filters))).scalar_one()
+    rows = (await db.execute(
+        select(Ticket)
+        .options(selectinload(Ticket.category), selectinload(Ticket.owner))
+        .where(*filters)
+        .order_by(Ticket.created_at.desc(), Ticket.id.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+    )).scalars().all()
+    return {"data": {"total": total, "page": page, "items": [_ticket_summary(ticket) for ticket in rows]}}
 
 
 @router.get("/tickets")
