@@ -297,9 +297,9 @@ async def test_reopen_resolved_to_open(env):
     d = r.json()
     assert d["state"] == "open"
     assert d["has_returned"] is True
-    # 现状：solved_at / resolved 保留（记录"曾经解决"，本次不改此语义）
-    assert d["solved_at"] is not None
-    assert d["resolved"] is True
+    # 恢复上一个办理节点后，当前轮次不再是已解决。
+    assert d["solved_at"] is None
+    assert d["resolved"] is False
     logs = await db_logs(env, t["id"])
     assert (logs[-1].from_state, logs[-1].to_state) == ("resolved", "open")
     resolved_again = await env["resolve"](t["id"])
@@ -555,7 +555,7 @@ async def test_reply_transitions_to_resolved(env):
             data={"type": "reply", "body": "已更换模块并复测通过"},
         )
     assert r.status_code == 201, r.text
-    # 处理说明挂在新写入的 resolved 日志节点上（state_key = log.id）
+    # 处理说明属于提交人办理的 open 节点，不挂到随后生成的办结节点。
     factory = async_sessionmaker(env["engine"], class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
         from app.models.ticket import Article
@@ -563,6 +563,9 @@ async def test_reply_transitions_to_resolved(env):
             select(Article).where(Article.ticket_id == t["id"], Article.type == "reply")
         )).scalar_one()
         assert art.state_key is not None and art.state_key.isdigit()
+        linked_log = await s.get(TicketStateLog, int(art.state_key))
+        assert linked_log.to_state == "open"
+        assert linked_log.action_type == "dispatch"
 
     d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
     assert d["state"] == "resolved"

@@ -171,6 +171,16 @@ async def test_refine_switches_chain_and_dept(renv):
         assert "业务保障" in log.reason and "应用平台" in log.reason
 
 
+async def test_return_after_refine_restores_category_and_department(renv):
+    t = await renv["create_ticket"]()
+    await renv["refine"](t["id"], 2302)
+    d = await renv["patch"](t["id"], {"state": "returned", "reason": "重新判断问题"})
+    assert d["state"] == "pending"
+    assert d["category_id"] == 2301
+    assert d["skill_group_name"] == "售后"
+    assert d["dispatcher_id"] == renv["aftersale_user"]
+
+
 async def set_existing_open_ticket(renv, ticket_id):
     """Model a ticket that reached open before the judgement gate was added."""
     from app.models.ticket import Ticket

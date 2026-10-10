@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
 from app.models.group import SkillGroup, UserSkillGroup
-from app.models.ticket import Ticket, TicketStateLog
+from app.models.ticket import Article, Ticket, TicketStateLog
 from app.models.user import User
 
 from test_workflow_regression import _next_phone, action_sequence, as_user
@@ -87,9 +87,12 @@ async def tenv(client):
         return r.json() if expect == 200 else r
 
     async def transfer(tid, expect=200, **body):
-        r = await c.post(f"/api/v1/tickets/{tid}/transfer", json=body)
-        assert r.status_code == expect, r.text
-        return r.json()["data"] if expect == 200 else r
+        with as_user(ids["aftersale_user"], "handler"):
+            r = await c.post(f"/api/v1/tickets/{tid}/articles", data={
+                "type": "reply", "body": body.get("reason") or "本部门处理完成",
+            })
+        assert r.status_code == (201 if expect == 200 else expect), r.text
+        return await get(tid) if expect == 200 else r
 
     async def get(tid):
         r = await c.get(f"/api/v1/tickets/{tid}")
@@ -118,9 +121,7 @@ async def test_transfer_advances_chain(tenv):
     # allowed_actions 只有 GET/域动作响应会算（PATCH 响应不带）
     detail = await tenv["get"](t["id"])
     actions = {a["action"]: a for a in detail["allowed_actions"]}
-    assert "transfer" in actions, "两步链第一步应下发转派按钮"
-    assert actions["transfer"]["target_state"] == "pending"
-    assert actions["transfer"]["requires_reason"] is False
+    assert "transfer" not in actions, "中间节点只通过处理说明流转"
 
     d = await tenv["transfer"](t["id"])
     assert d["state"] == "pending"
@@ -153,33 +154,79 @@ async def test_transfer_custom_reason(tenv):
     t = await _open_ticket(tenv)
     d = await tenv["transfer"](t["id"], reason="本步验证完成")
     assert d["state"] == "pending"
+    factory = async_sessionmaker(tenv["engine"], class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        replies = (await s.execute(select(Article).where(Article.ticket_id == t["id"], Article.type == "reply"))).scalars().all()
+    assert any(a.body == "本步验证完成" for a in replies)
+    async with factory() as s:
+        linked_log = await s.get(TicketStateLog, int(replies[0].state_key))
+        assert linked_log.to_state == "open"
+        assert linked_log.action_type == "dispatch"
+
+
+async def test_return_after_transfer_restores_previous_department_and_handler(tenv):
+    t = await _open_ticket(tenv)
+    await tenv["transfer"](t["id"])
+    d = await tenv["patch"](t["id"], {"state": "returned", "reason": "需要上一节点补充"})
+    assert d["state"] == "open"
+    assert d["dispatch_step_index"] == 0
+    assert d["skill_group_name"] == "售后"
+    assert d["owner_id"] == tenv["aftersale_user"]
+    assert d["has_returned"] is True
+
+    d = await tenv["patch"](t["id"], {"state": "pending", "reason": "上一节点也需退回"})
+    assert d["state"] == "pending"
+    assert d["owner_id"] is None
+    assert d["dispatch_step_index"] == 0
+
+
+async def test_initial_node_returns_to_creator(tenv):
+    t = await tenv["create_ticket"]()
+    d = await tenv["patch"](t["id"], {"state": "returned", "reason": "请创建人补充信息"})
+    assert d["state"] == "returned"
+    assert d["owner_id"] == t["creator_id"]
+    assert d["returned_to_user_id"] == t["creator_id"]
 
 
 async def test_transfer_denied_at_last_step(tenv):
-    """链末步无处可转：direct 调用 403，allowed_actions 不下发。"""
+    """链末步提交处理说明会办结，不再流转。"""
     t = await _open_ticket(tenv)
     await tenv["transfer"](t["id"])  # 推进到第 2 步（末步）
     await tenv["patch"](t["id"], {"state": "open", "owner_id": tenv["platform_user"]})
     detail = await tenv["get"](t["id"])
     assert "transfer" not in {a["action"] for a in detail["allowed_actions"]}
-    resp = await tenv["transfer"](t["id"], expect=403)
-    assert "最后一步" in resp.json()["error"]["message"]
+    with as_user(tenv["platform_user"], "handler"):
+        resp = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/articles", data={"type": "reply", "body": "最终处理完成"})
+    assert resp.status_code == 201, resp.text
+    assert (await tenv["get"](t["id"]))["state"] == "resolved"
 
 
 async def test_transfer_denied_when_not_owner(tenv):
     """触发人 = 当前处理人自己；非处理人无权转派。"""
     t = await _open_ticket(tenv)
     with as_user(999999, "agent"):
-        r = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/transfer", json={})
+        r = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/articles", data={"type": "reply", "body": "试图代办"})
     assert r.status_code == 403
-    assert "当前处理人" in r.json()["error"]["message"]
+    assert "当前处理人" in str(r.json())
 
 
 async def test_transfer_denied_outside_open(tenv):
     """pending（未分派）不可转派。"""
     t = await tenv["create_ticket"]()
-    resp = await tenv["transfer"](t["id"], expect=403)
-    assert "仅处理中" in resp.json()["error"]["message"]
+    with as_user(tenv["aftersale_user"], "handler"):
+        resp = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/articles", data={"type": "reply", "body": "提前处理"})
+    assert resp.status_code in (403, 422)
+
+
+async def test_direct_transfer_and_state_patch_cannot_skip_reply(tenv):
+    t = await _open_ticket(tenv)
+    direct = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/transfer", json={})
+    assert direct.status_code == 404
+    patch = await tenv["patch"](t["id"], {"state": "resolved"}, expect=422)
+    assert "处理说明" in patch.json()["detail"]
+    with as_user(tenv["aftersale_user"], "handler"):
+        empty = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/articles", data={"type": "reply", "body": "   "})
+    assert empty.status_code == 422
 
 
 async def test_transfer_then_next_dept_closes(tenv):

@@ -22,9 +22,28 @@
         <div v-if="responsibleName(node.log)" class="action-operator">
           {{ responsibleLabel(node.log) }}：{{ responsibleName(node.log) }}
         </div>
-        <div v-for="reply in repliesByLog?.get(node.log.id) || []" :key="reply.id" class="node-reply">
-          <span class="node-reply-label">处理说明</span>
-          <div class="node-reply-body">{{ reply.body }}</div>
+        <div v-for="article in articlesByLog?.get(node.log.id) || []" :key="article.id" class="node-reply">
+          <div class="node-record-head">
+            <span class="node-reply-label">{{ articleLabel(article.type) }}<span v-if="article.origin_by?.firstname"> · {{ article.origin_by.firstname }}</span></span>
+            <DateTimeLabel :iso="article.created_at" />
+          </div>
+          <div v-if="article.body" class="node-reply-body">{{ article.body }}</div>
+          <div v-if="article.append_reason" class="node-record-note">补充原因：{{ article.append_reason }}</div>
+          <div v-if="article.attachments?.length" class="node-attachments">
+            <a v-for="att in article.attachments" :key="att.id" :href="att.url" target="_blank" :title="att.original_filename">
+              <img :src="att.url" :alt="att.original_filename" />
+            </a>
+          </div>
+        </div>
+        <div v-if="closureLogId === node.log.id" class="node-reply">
+          <div class="node-record-head">
+            <span class="node-reply-label">归档与回访</span>
+            <span class="closure-badge">{{ ticket?.is_callbacked ? '已回访' : ticket?.callback_required === false ? '无需回访' : '未回访' }}</span>
+            <span v-if="ticket?.is_callbacked && ticket?.satisfaction" class="closure-badge">{{ satisfactionText(ticket.satisfaction) }}</span>
+          </div>
+          <div v-if="ticket?.archive_notes" class="node-reply-body">{{ ticket.archive_notes }}</div>
+          <div v-if="ticket?.callback_details" class="node-record-note">回访记录：{{ ticket.callback_details }}</div>
+          <div v-if="ticket?.satisfaction === 'dissatisfied' && ticket?.unsatisfied_reason" class="node-record-note">不满意原因：{{ ticket.unsatisfied_reason }}</div>
         </div>
       </div>
     </div>
@@ -53,8 +72,18 @@ const props = defineProps<{
   currentOwnerName?: string
   currentDispatcherName?: string
   currentCreatorName?: string
-  repliesByLog?: Map<number, Article[]>
+  articlesByLog?: Map<number, Article[]>
+  ticket?: any
+  closureLogId?: number | null
 }>()
+
+function articleLabel(type?: string): string {
+  return ({ reply: '处理说明', addition: '补充信息', reminder: '催办', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
+}
+
+function satisfactionText(value: string): string {
+  return { satisfied: '😊 满意', average: '😐 一般', dissatisfied: '😞 不满意', unrated: '未评价' }[value] || value
+}
 
 interface TimelineNode {
   key: string
@@ -244,7 +273,13 @@ const currentStage = computed(() => {
   box-shadow: var(--shadow-xs);
 }
 .node-reply-label { color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
+.node-record-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--color-text-tertiary); font-size: 11px; }
+.node-record-head > :last-child { margin-left: auto; }
 .node-reply-body { margin-top: 8px; color: var(--color-text-primary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.node-record-note { margin-top: 6px; color: var(--color-text-tertiary); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.closure-badge { padding: 1px 7px; border-radius: var(--radius-full); background: var(--color-primary-ghost); color: var(--color-primary); font-size: 11px; }
+.node-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.node-attachments img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-border-light); }
 
 .empty {
   font-size: 13px;

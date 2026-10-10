@@ -196,16 +196,6 @@ async def compute_allowed_actions(
             "requires_owner": (ticket.state, effective) == ("pending", "open"),
             "label": ACTION_LABELS.get(action, action),
         })
-    # 多步链推进（转派）：与"处理人打回"同为 open→pending 边，但语义是
-    # 链前进，执行走 /transfer 端点——单独下发按钮元数据，与边推导的动作并存
-    if ticket.state == "open" and await transfer_permission_error(db, ticket, user) is None:
-        actions.append({
-            "action": "transfer",
-            "target_state": "pending",
-            "requires_reason": False,   # 留空自动填"本步完成，转派下一部门"
-            "requires_owner": False,
-            "label": ACTION_LABELS.get("transfer", "转派"),
-        })
     return actions
 
 
@@ -297,6 +287,165 @@ def snapshot_people(ticket: Ticket, body=None) -> dict:
         "dispatcher_id_snapshot": dispatcher_id if dispatcher_id is not None else ticket.dispatcher_id,
         "owner_id_snapshot": owner_id if owner_id is not None else ticket.owner_id,
     }
+
+
+def snapshot_node(ticket: Ticket, *, state: str | None = None) -> dict:
+    """Capture every field needed to put a ticket back at this workflow node."""
+    return {
+        "state": state or ticket.state,
+        "category_id": ticket.category_id,
+        "group_id": ticket.group_id,
+        "skill_group_id": ticket.skill_group_id,
+        "handler_skill_group_id": ticket.handler_skill_group_id,
+        "owner_id": ticket.owner_id,
+        "first_owner_id": ticket.first_owner_id,
+        "dispatcher_id": ticket.dispatcher_id,
+        "returned_to_user_id": ticket.returned_to_user_id,
+        "dispatch_chain_steps": ticket.dispatch_chain_steps,
+        "dispatch_step_index": ticket.dispatch_step_index,
+        "resolved": False if state == "open" else ticket.resolved,
+        "solved_at": None if state == "open" else (ticket.solved_at.isoformat() if ticket.solved_at else None),
+    }
+
+
+async def push_node(db: AsyncSession, ticket: Ticket, *, state: str | None = None) -> None:
+    previous_log_id = (await db.execute(
+        select(TicketStateLog.id).where(TicketStateLog.ticket_id == ticket.id)
+        .order_by(TicketStateLog.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    node = snapshot_node(ticket, state=state)
+    node["previous_log_id"] = previous_log_id or 0
+    ticket.return_checkpoints = [*(ticket.return_checkpoints or []), node]
+    ticket.legacy_return_cursor_log_id = None
+
+
+def restore_node(ticket: Ticket, node: dict) -> None:
+    for field in (
+        "state", "category_id", "group_id", "skill_group_id", "handler_skill_group_id",
+        "owner_id", "first_owner_id", "dispatcher_id", "returned_to_user_id",
+        "dispatch_chain_steps", "dispatch_step_index", "resolved",
+    ):
+        setattr(ticket, field, node[field])
+    ticket.solved_at = datetime.fromisoformat(node["solved_at"]) if node["solved_at"] else None
+
+
+async def _legacy_previous_node(db: AsyncSession, ticket: Ticket) -> tuple[dict | None, int | None]:
+    """Infer one previous node from pre-checkpoint tickets; reject ambiguity."""
+    query = select(TicketStateLog).where(TicketStateLog.ticket_id == ticket.id)
+    if ticket.legacy_return_cursor_log_id == 0:
+        return None, None
+    if ticket.legacy_return_cursor_log_id is not None:
+        query = query.where(TicketStateLog.id < ticket.legacy_return_cursor_log_id)
+    logs = list((await db.execute(query.order_by(TicketStateLog.id.desc()).limit(50))).scalars().all())
+    latest = next((log for log in logs if log.action_type not in ("return", "reopen")), None)
+    if latest is None or latest.action_type in ("create", "resubmit"):
+        return None, latest.id if latest else None
+    node = snapshot_node(ticket)
+    if latest.action_type == "transfer" and ticket.state == "pending":
+        steps = ticket.dispatch_chain_steps or []
+        index = ticket.dispatch_step_index
+        if index is None or index < 1 or index >= len(steps):
+            return None, latest.id
+        from app.services.dispatch_chain import prescribe_dept
+        prescribed = await prescribe_dept(db, steps[index - 1]["department_code"])
+        if prescribed is None:
+            return None, latest.id
+        node.update(state="open", skill_group_id=prescribed["skill_group_id"],
+                    handler_skill_group_id=prescribed["skill_group_id"],
+                    owner_id=latest.operator_id, dispatcher_id=latest.dispatcher_id_snapshot,
+                    dispatch_step_index=index - 1)
+    elif latest.action_type == "refine" and ticket.state in ("pending", "open"):
+        from app.models.category import TicketCategory
+        from app.services.dispatch_chain import judging_department, prescribe_dept, resolve_chain
+        parent_id = (await db.execute(
+            select(TicketCategory.parent_id).where(TicketCategory.id == ticket.category_id)
+        )).scalar_one_or_none()
+        if parent_id is None:
+            return None, latest.id
+        department = await judging_department(db, parent_id)
+        prescribed = await prescribe_dept(db, department) if department else None
+        previous_log = next((log for log in logs if log.id < latest.id), None)
+        previous_chain = await resolve_chain(db, parent_id)
+        if previous_log is None or prescribed is None:
+            return None, latest.id
+        node.update(category_id=parent_id, skill_group_id=prescribed["skill_group_id"],
+                    handler_skill_group_id=prescribed["skill_group_id"],
+                    owner_id=previous_log.owner_id_snapshot,
+                    dispatcher_id=previous_log.dispatcher_id_snapshot,
+                    dispatch_chain_steps=previous_chain["steps"] if previous_chain else None,
+                    dispatch_step_index=0)
+    elif latest.action_type == "dispatch" and ticket.state == "open":
+        node.update(state="pending", owner_id=None)
+    elif latest.action_type == "resolve" and ticket.state == "resolved":
+        node.update(state="open", resolved=False, solved_at=None)
+    elif latest.action_type == "hold" and ticket.state == "on_hold":
+        node.update(state="open")
+    else:
+        return None, latest.id
+    return node, latest.id
+
+
+async def _legacy_is_initial(db: AsyncSession, ticket: Ticket, cursor: int) -> bool:
+    action = (await db.execute(
+        select(TicketStateLog.action_type).where(TicketStateLog.id == cursor,
+                                                 TicketStateLog.ticket_id == ticket.id)
+    )).scalar_one_or_none()
+    return action in ("create", "resubmit")
+
+
+async def apply_return(db: AsyncSession, ticket: Ticket, *, operator: User, reason: str) -> TicketStateLog:
+    """Return to the prior workflow node, restoring its category and assignee."""
+    if not reason.strip():
+        raise HTTPException(400, detail="退回原因不能为空")
+    permission_target = {
+        "pending": "returned", "open": "pending", "on_hold": "open", "resolved": "open",
+    }.get(ticket.state)
+    if permission_target is None:
+        raise HTTPException(422, detail="当前状态不能退回")
+    error = await transition_permission_error(db, ticket, permission_target, operator)
+    if error is not None:
+        raise ForbiddenError(error)
+
+    old_state = ticket.state
+    checkpoints = ticket.return_checkpoints or []
+    if checkpoints:
+        node = checkpoints[-1]
+        ticket.return_checkpoints = checkpoints[:-1]
+        restore_node(ticket, node)
+        if not ticket.return_checkpoints:
+            ticket.legacy_return_cursor_log_id = node.get("previous_log_id", 0) + 1
+    else:
+        node, cursor = await _legacy_previous_node(db, ticket)
+        if node is not None:
+            restore_node(ticket, node)
+            ticket.legacy_return_cursor_log_id = cursor
+        elif ticket.state == "pending" and cursor is not None and await _legacy_is_initial(db, ticket, cursor):
+            # Initial node: the creator is the only previous participant.
+            ticket.state = "returned"
+            ticket.owner_id = ticket.creator_id
+            ticket.returned_to_user_id = ticket.creator_id
+            ticket.legacy_return_cursor_log_id = cursor
+        else:
+            raise HTTPException(422, detail="历史工单缺少可确认的上一节点，无法安全退回")
+    if old_state == "resolved":
+        ticket.satisfaction = None
+    db.expire(ticket, ["category", "skill_group", "handler_skill_group", "owner", "dispatcher", "returned_to_user", "first_owner", "group"])
+    ticket.has_returned = True
+    now = datetime.now(timezone.utc)
+    last = (await db.execute(
+        select(TicketStateLog).where(TicketStateLog.ticket_id == ticket.id)
+        .order_by(TicketStateLog.created_at.desc(), TicketStateLog.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    log = TicketStateLog(
+        ticket_id=ticket.id, from_state=old_state, to_state=ticket.state,
+        operator_id=operator.id, reason=reason,
+        duration_minutes=int((now - last.created_at).total_seconds() / 60) if last else None,
+        action_type="reopen" if old_state == "resolved" else "return",
+        **snapshot_people(ticket),
+    )
+    db.add(log)
+    await db.flush()
+    return log
 
 
 async def is_dispatcher(db: AsyncSession, user_id: int, skill_group_id: int | None) -> bool:
@@ -621,6 +770,7 @@ async def apply_refine(
             step_index = 0
             move_dept = steps[0]["department_code"]
 
+    await push_node(db, ticket)
     ticket.category_id = target.id
     ticket.dispatch_chain_steps = steps or ticket.dispatch_chain_steps
     ticket.dispatch_step_index = step_index if steps else ticket.dispatch_step_index
@@ -709,6 +859,7 @@ async def apply_transfer(
 
     # 步骤推进 + 部门落位（owner 由下面 open→pending 的副作用清空，
     # 下一部门对接人在 pending→open 分派时指定处理人）
+    await push_node(db, ticket)
     ticket.dispatch_step_index = next_index
     ticket.skill_group_id = rx["skill_group_id"]
     ticket.handler_skill_group_id = rx["skill_group_id"]
@@ -745,6 +896,7 @@ async def apply_transition(
     dispatcher_id: int | None = None,
     hold_until: str | None = None,
     action_type: str | None = None,
+    allow_intermediate_transfer: bool = False,
 ) -> TicketStateLog | None:
     """单条工单状态流转的唯一执行入口。
 
@@ -762,8 +914,8 @@ async def apply_transition(
     返回写入的 TicketStateLog；to_state 与当前状态相同（no-op）时返回 None。
     不负责 commit——由调用方按各自的请求边界提交。
     """
-    # 中间节点提交处理结果即完成本步，直接进入链的下一部门；
-    # 只有最后一个节点才能把整张工单置为“已处理”。
+    # 中间节点只能通过处理说明完成本步并进入下一部门；
+    # 直接 PATCH 状态不能绕过办理记录。
     steps = ticket.dispatch_chain_steps or []
     if (
         ticket.state == "on_hold"
@@ -778,6 +930,8 @@ async def apply_transition(
         and ticket.dispatch_step_index is not None
         and ticket.dispatch_step_index + 1 < len(steps)
     ):
+        if not allow_intermediate_transfer:
+            raise HTTPException(422, detail="请提交处理说明，完成当前节点并流转至下一部门")
         return await apply_transfer(db, ticket, operator=operator, reason=reason)
 
     # 1. 业务约束
@@ -805,6 +959,14 @@ async def apply_transition(
     precondition = transition_precondition_error(ticket, to_state)
     if precondition is not None:
         raise HTTPException(422, detail=precondition)
+
+    action = action_for(ticket.state, to_state, action_type)
+    if action in RETURN_ACTIONS:
+        return await apply_return(db, ticket, operator=operator, reason=reason or "")
+    if action == "dispatch":
+        await push_node(db, ticket)
+    elif action == "resolve":
+        await push_node(db, ticket, state="open" if ticket.state == "on_hold" else None)
 
     old_state = ticket.state
     now = datetime.now(timezone.utc)

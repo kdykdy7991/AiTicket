@@ -26,7 +26,6 @@ from app.schemas.ticket import (
     TicketCreateResponse,
     TicketDetail,
     TicketRefine,
-    TicketTransfer,
     TicketUpdate,
     DuplicateWarning,
 )
@@ -41,7 +40,6 @@ from app.services.state_machine import (
     action_for,
     apply_initial_state,
     apply_refine,
-    apply_transfer,
     apply_transition,
     compute_allowed_actions,
     compute_article_actions,
@@ -876,25 +874,6 @@ async def refine_ticket_category(
         raise NotFoundError("工单", ticket_id)
 
     await apply_refine(db, ticket, new_category_id=body.category_id, operator=user)
-    await db.commit()
-    return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
-
-
-@router.post("/tickets/{ticket_id}/transfer", response_model=TicketCreateResponse)
-async def transfer_ticket_to_next_dept(
-    ticket_id: int,
-    body: TicketTransfer,
-    db: AsyncSession = Depends(get_db),
-    cat_idx: CategoryIndexes = Depends(get_category_indexes),
-    user: User = Depends(get_current_user),
-):
-    """转派：多步链本步完成，推进到链的下一部门（收口在 apply_transfer）。"""
-    result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
-    ticket = result.scalar_one_or_none()
-    if not ticket:
-        raise NotFoundError("工单", ticket_id)
-
-    await apply_transfer(db, ticket, operator=user, reason=body.reason)
     await db.commit()
     return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
 

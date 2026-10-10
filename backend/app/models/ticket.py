@@ -52,6 +52,9 @@ class Ticket(Base):
     # index = 当前步骤（0 起）；两者同时为 null 表示该单不走链（旧路由/即时办结）。
     dispatch_chain_steps: Mapped[list | None] = mapped_column(JSON, nullable=True)
     dispatch_step_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Snapshots taken before entering each new workflow node. A return pops one.
+    return_checkpoints: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    legacy_return_cursor_log_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     # 重复/升级
     is_draft: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

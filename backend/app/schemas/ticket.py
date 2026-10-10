@@ -75,11 +75,6 @@ class TicketRefine(BaseModel):
     category_id: int
 
 
-class TicketTransfer(BaseModel):
-    """转派请求（多步链）：本步完成，推进到链的下一部门。"""
-    reason: str | None = None  # 留空自动填"本步完成，转派「下一部门」"
-
-
 class TicketBrief(BaseModel):
     id: int
     number: str | None = None

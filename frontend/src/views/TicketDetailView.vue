@@ -12,15 +12,7 @@
           <span class="ticket-number">{{ ticket.number || '未编号' }}</span>
           <StateTag :state="ticket.state" />
           <div class="header-actions">
-            <!-- V0.21：转派（链推进一步） -->
-            <el-button
-              v-if="transferAction"
-              type="primary"
-              size="small"
-              class="header-action-btn"
-              @click="openTransferDialog"
-            >转派</el-button>
-            <el-button v-if="canReturn" type="danger" size="small" class="header-action-btn" @click="openReturnDialog">退 回</el-button>
+            <el-button v-if="canReturn" :type="isResuming ? 'primary' : 'danger'" size="small" class="header-action-btn" @click="openReturnDialog">{{ isResuming ? '恢复处理' : '退 回' }}</el-button>
             <el-button v-if="canCancel" type="danger" size="small" class="header-action-btn" @click="openCancelDialog">撤销</el-button>
           </div>
         </div>
@@ -36,23 +28,14 @@
               :current-owner-name="(ticket as any).owner_name || ''"
               :current-dispatcher-name="(ticket as any).dispatcher_name || ''"
               :current-creator-name="(ticket as any).creator_name || ''"
-              :replies-by-log="replyPlacement.byLogId"
+              :articles-by-log="articlePlacement"
+              :ticket="ticket"
+              :closure-log-id="closureLogId"
             />
           </div>
           <div v-if="(ticket as any).description" class="ticket-description">
             <h3 class="ticket-description-label"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M15 3v5h4M8 12h8M8 16h6"/></svg>问题描述</h3>
             <div class="ticket-description-body">{{ (ticket as any).description }}</div>
-          </div>
-
-          <!-- 处理记录：内容性信息（处理说明/补充/催办/附件/归档回访） -->
-          <div v-if="hasContentRecords" class="timeline-card">
-            <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4.5V3h6v1.5M9 10h6M9 14h6M9 18h4"/></svg>处理记录</h3>
-            <TicketContentRecords
-              :ticket="ticket"
-              :replies="replyPlacement.unmatched"
-              :additions="(ticket.articles || []).filter(a => a.type === 'addition')"
-              :reminders="(ticket.articles || []).filter(a => a.type === 'reminder')"
-            />
           </div>
 
           <!-- 已退回工单：补充后重新提交 -->
@@ -211,7 +194,6 @@
             <p class="dispatch-card-hint">指派后工单将变为「处理中」，由所选处理人负责跟进。</p>
           </div>
 
-          <ArticleTimeline :articles="ticket.articles" />
           <ReplyEditor
             v-if="!isTerminalState && (ticket.can_reply || ticket.can_addition || ticket.can_remind)"
             :ticket="ticket"
@@ -229,12 +211,12 @@
       </div>
 
       <!-- 退回弹窗 -->
-      <el-dialog v-model="returnDialogVisible" title="退回工单" width="420px" top="15vh" :close-on-click-modal="false">
-        <p class="dialog-hint">退回后工单将返回上一状态，处理人也会同步回退。请填写退回原因：</p>
-        <el-input v-model="returnReason" type="textarea" :rows="3" placeholder="请填写退回原因" maxlength="500" show-word-limit />
+      <el-dialog v-model="returnDialogVisible" :title="isResuming ? '恢复处理' : '退回工单'" width="420px" top="15vh" :close-on-click-modal="false">
+        <p class="dialog-hint">{{ isResuming ? '恢复后由当前处理人继续办理。请填写恢复说明：' : '退回后工单将返回上一办理节点，分类、部门和处理人同步回退。请填写退回原因：' }}</p>
+        <el-input v-model="returnReason" type="textarea" :rows="3" :placeholder="isResuming ? '请填写恢复说明' : '请填写退回原因'" maxlength="500" show-word-limit />
         <template #footer>
           <el-button @click="returnDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="returning" :disabled="!returnReason.trim()" @click="confirmReturn">确认退回</el-button>
+          <el-button type="primary" :loading="returning" :disabled="!returnReason.trim()" @click="confirmReturn">{{ isResuming ? '确认恢复' : '确认退回' }}</el-button>
         </template>
       </el-dialog>
 
@@ -248,17 +230,6 @@
         </template>
       </el-dialog>
 
-      <!-- 转派弹窗：链本步完成，推进到下一部门 -->
-      <el-dialog v-model="transferDialogVisible" title="转派" width="440px" top="15vh" :close-on-click-modal="false">
-        <p class="dialog-hint">
-          本步处理完成，工单将按分派链转派至下一部门{{ nextDeptName ? `：「${nextDeptName}」` : '' }}。
-        </p>
-        <el-input v-model="transferReason" type="textarea" :rows="2" placeholder="转派说明（选填，留空自动填写「本步完成，转派下一部门」）" maxlength="500" show-word-limit />
-        <template #footer>
-          <el-button @click="transferDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="transferring" @click="confirmTransfer">确认转派</el-button>
-        </template>
-      </el-dialog>
 
     </template>
   </div>
@@ -273,53 +244,66 @@ import { ticketApi } from '@/api/tickets'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Group, AllowedAction } from '@/types'
 import StateTag from '@/components/common/StateTag.vue'
-import ArticleTimeline from '@/components/ticket/ArticleTimeline.vue'
 import ReplyEditor from '@/components/ticket/ReplyEditor.vue'
 import TicketOverview from '@/components/ticket/TicketOverview.vue'
 import StateLogTimeline from '@/components/ticket/StateLogTimeline.vue'
-import TicketContentRecords from '@/components/ticket/TicketContentRecords.vue'
 
 const route = useRoute()
 const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
-const replyPlacement = computed(() => {
+const articlePlacement = computed(() => {
   const byLogId = new Map<number, any[]>()
-  const unmatched: any[] = []
-  const logs = (ticket.value as any)?.state_logs || []
-  const replies = ((ticket.value as any)?.articles || []).filter((a: any) => a.type === 'reply')
-  for (const reply of replies) {
-    let log = logs.find((entry: any) => String(entry.id) === String(reply.state_key))
-    if (!log) {
+  const logs = [...((ticket.value as any)?.state_logs || [])].sort((a: any, b: any) => a.id - b.id)
+  const articles = (ticket.value as any)?.articles || []
+  const nodeAt = (time: string) =>
+    [...logs].reverse().find((entry: any) =>
+      new Date(entry.entered_at).getTime() <= new Date(time).getTime(),
+    ) || logs[0]
+  const processingNodeBefore = (completion: any) =>
+    [...logs].reverse().find((entry: any) =>
+      entry.id < completion.id && ['open', 'on_hold'].includes(entry.to_state_key),
+    )
+  for (const article of articles) {
+    let log: any
+    if (article.type === 'reply') {
+      log = logs.find((entry: any) => String(entry.id) === String(article.state_key))
       // 旧处理说明可能只保存了状态名；按操作人及提交时间找对应的完成节点。
-      const senderId = reply.origin_by?.id
+      const senderId = article.origin_by?.id
       const candidates = logs.filter((entry: any) =>
         ['resolve', 'transfer'].includes(entry.action_type) &&
         (!senderId || entry.changed_by?.id === senderId),
       )
-      log = candidates.sort((a: any, b: any) =>
-        Math.abs(new Date(a.entered_at).getTime() - new Date(reply.created_at).getTime()) -
-        Math.abs(new Date(b.entered_at).getTime() - new Date(reply.created_at).getTime()),
+      if (!log) log = candidates.sort((a: any, b: any) =>
+        Math.abs(new Date(a.entered_at).getTime() - new Date(article.created_at).getTime()) -
+        Math.abs(new Date(b.entered_at).getTime() - new Date(article.created_at).getTime()),
       )[0]
+      if (log && ['resolve', 'transfer'].includes(log.action_type)) {
+        log = processingNodeBefore(log) || log
+      }
+      log ||= nodeAt(article.created_at)
+    } else {
+      // 补充和催办没有精确节点 ID，以发生时间归入当时的流程节点。
+      log = nodeAt(article.created_at)
     }
-    if (!log) {
-      unmatched.push(reply)
-      continue
-    }
-    byLogId.set(log.id, [...(byLogId.get(log.id) || []), reply])
+    if (log) byLogId.set(log.id, [...(byLogId.get(log.id) || []), article])
   }
-  return { byLogId, unmatched }
+  for (const items of byLogId.values()) {
+    items.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+  }
+  return byLogId
 })
-const hasContentRecords = computed(() => {
+const closureLogId = computed<number | null>(() => {
   const t = ticket.value as any
-  if (!t) return false
-  const hasArticle = (t.articles || []).some((article: any) =>
-    ['addition', 'reminder'].includes(article.type),
-  ) || replyPlacement.value.unmatched.length > 0
-  return hasArticle || t.state_key === 'archived' || !!t.archive_notes ||
-    t.is_callbacked === true || !!t.satisfaction ||
-    !!t.callback_details || !!t.unsatisfied_reason
+  if (!t) return null
+  const logs = t.state_logs || []
+  const archive = [...logs].reverse().find((entry: any) => entry.action_type === 'archive' || entry.to_state_key === 'archived')
+  if (archive) return archive.id
+  if (t.is_callbacked || t.archive_notes || t.callback_details || t.satisfaction) {
+    return logs[logs.length - 1]?.id ?? null
+  }
+  return null
 })
 
 // ── V0.86：所有按钮可见性来自后端 allowed_actions（唯一事实来源）──
@@ -344,19 +328,11 @@ const returnAction = computed<AllowedAction | undefined>(
   () => findAction('return') || findAction('reopen') || findAction('resume'),
 )
 const canReturn = computed(() => !!returnAction.value)
+const isResuming = computed(() => returnAction.value?.action === 'resume')
 
 const canCancel = computed(() => !!findAction('cancel'))
 const canArchiveFromResolved = computed(() => !!findAction('archive'))
 const canResubmit = computed(() => !!findAction('resubmit'))
-
-// ── V0.21 分派链快照：进度条与转派弹窗的"下一部门"提示 ──
-const chainSteps = computed<{ order: number; department_code: string }[]>(
-  () => (ticket.value as any)?.dispatch_chain_steps ?? [],
-)
-const currentStepIndex = computed(() => (ticket.value as any)?.dispatch_step_index ?? 0)
-const nextDeptName = computed(
-  () => chainSteps.value[currentStepIndex.value + 1]?.department_code ?? '',
-)
 
 // ── 问题判断（原「分诊」）：能力位与选项全部来自后端 can_refine / refine_options ──
 // 后端已判定「状态允许 + 当前账号是该分类链首部门的判断人」，前端不再重复判断，
@@ -401,33 +377,6 @@ async function onPickRefineCategory(categoryId: number) {
     ElMessage.error(detail || '分类更新失败')
   } finally {
     refining.value = false
-  }
-}
-
-// ── 转派（transfer）：后端 allowed_actions 下发的链推进动作 ──
-const transferAction = computed<AllowedAction | undefined>(() => findAction('transfer'))
-const transferDialogVisible = ref(false)
-const transferReason = ref('')
-const transferring = ref(false)
-
-function openTransferDialog() {
-  transferReason.value = ''
-  transferDialogVisible.value = true
-}
-
-async function confirmTransfer() {
-  transferring.value = true
-  try {
-    await ticketApi.transfer((ticket.value as any).id, transferReason.value.trim())
-    ElMessage.success('已转派至下一部门')
-    transferDialogVisible.value = false
-    ticketStore.refreshCurrentInList()
-    await loadTicket()
-  } catch (e: any) {
-    const detail = e?.response?.data?.error?.message || e?.response?.data?.detail
-    ElMessage.error(detail || '转派失败')
-  } finally {
-    transferring.value = false
   }
 }
 
@@ -674,7 +623,7 @@ function openReturnDialog() {
 
 async function confirmReturn() {
   if (!returnReason.value.trim()) {
-    ElMessage.warning('请填写退回原因')
+    ElMessage.warning(isResuming.value ? '请填写恢复说明' : '请填写退回原因')
     return
   }
   const action = returnAction.value
@@ -689,7 +638,7 @@ async function confirmReturn() {
       state: action.target_state,
       reason: returnReason.value.trim(),
     } as any)
-    ElMessage.success('工单已退回')
+    ElMessage.success(isResuming.value ? '工单已恢复处理' : '工单已退回')
     returnDialogVisible.value = false
     ticketStore.refreshCurrentInList()
     await loadTicket()

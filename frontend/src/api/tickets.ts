@@ -123,7 +123,7 @@ function stateStrToObj(key: string): any {
   return map[key] || { name: key, state_type: 'open' }
 }
 
-/** 后端 article 字段映射到前端 ArticleTimeline 期望的结构 */
+/** 后端沟通记录映射为处理流程节点可展示的数据。 */
 function adaptArticle(a: any): any {
   // type: reply/addition/reminder
   // sender_type：后端没有此字段，根据 type 推断（客服回复/note/追加/催办都算 agent）
@@ -289,12 +289,6 @@ export const ticketApi = {
   // 分诊：判断人把分类细化一级（域动作，POST 后端返回最新详情）
   async refine(id: number, categoryId: number): Promise<any> {
     const res: any = await api.post(`/tickets/${id}/refine`, { category_id: categoryId })
-    return res.data
-  },
-
-  // 转派：多步链本步完成，推进到链的下一部门（reason 留空后端自动填）
-  async transfer(id: number, reason?: string): Promise<any> {
-    const res: any = await api.post(`/tickets/${id}/transfer`, { reason: reason || null })
     return res.data
   },
 

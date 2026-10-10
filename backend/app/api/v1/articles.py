@@ -173,6 +173,7 @@ async def create_article(
     # 处理说明：只有当前处理人可提交，且工单须处于处理中/暂缓
     # 中间链节点提交后转派下一部门；链末节点提交后进入「已处理」。
     reply_log = None
+    handling_log = None
     if type == "reply":
         if ticket.owner_id is None or user.id != ticket.owner_id:
             raise HTTPException(
@@ -227,6 +228,9 @@ async def create_article(
     if type == "addition" and not append_reason:
         raise HTTPException(422, detail="补充类型必须填写补充原因")
 
+    if type == "reply" and not body.strip():
+        raise HTTPException(422, detail="请填写处理说明")
+
     if type == "reminder":
         content = body.strip() if body else ""
         if not content:
@@ -235,37 +239,21 @@ async def create_article(
             raise HTTPException(422, detail=f"催办内容最多 {URGE_MAX_LENGTH} 字")
 
     if type == "reply":
-        # 由统一执行入口判断是转派下一部门还是整单办结。
-        # （文章级规则——owner-only、状态集合、角色——在上方已校验）
-        reply_log = await apply_transition(db, ticket, to_state="resolved", operator=user)
-
-        # 计算上一状态停留时长的最新日志（执行入口已写入），用于同节点查重
-        last_q = await db.execute(
+        # 处理说明属于提交人正在办理的节点，而不是随后生成的完成/流转节点。
+        handling_log = (await db.execute(
             select(TicketStateLog)
-            .where(TicketStateLog.ticket_id == ticket_id)
-            .order_by(TicketStateLog.created_at.desc()).limit(1)
-        )
-        last = last_q.scalar_one_or_none()
-
-        # 同一 resolved 节点下只能有一条处理说明
-        if last and last.to_state == "resolved":
-            existing = await db.execute(
-                select(Article).where(
-                    Article.ticket_id == ticket_id,
-                    Article.type == "reply",
-                    Article.state_key == str(last.id),
-                )
-            )
-            if existing.scalar_one_or_none():
-                raise HTTPException(
-                    status.HTTP_409_CONFLICT,
-                    detail="当前状态下已存在处理说明"
-                )
+            .where(TicketStateLog.ticket_id == ticket_id,
+                   TicketStateLog.to_state.in_(("open", "on_hold")))
+            .order_by(TicketStateLog.id.desc()).limit(1)
+        )).scalar_one_or_none()
+        # 由统一执行入口判断是流转下一部门还是整单办结。
+        reply_log = await apply_transition(db, ticket, to_state="resolved", operator=user,
+                                           allow_intermediate_transfer=True)
 
     article = Article(
         ticket_id=ticket_id, type=type, sender_id=user.id,
         body=body,
-        state_key=str(reply_log.id) if reply_log else (ticket.state if type == "reminder" else None),
+        state_key=str(handling_log.id if handling_log else reply_log.id) if reply_log else (ticket.state if type == "reminder" else None),
         append_reason=append_reason if type == "addition" else None,
     )
     db.add(article)
