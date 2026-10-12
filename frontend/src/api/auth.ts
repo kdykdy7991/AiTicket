@@ -18,6 +18,20 @@ interface BackendLoginResponse {
   user: BackendUserInfo
 }
 
+export interface CasdoorConfig {
+  enabled: boolean
+  authorization_endpoint?: string
+  client_id?: string
+  redirect_origins?: string[]
+}
+
+export interface CasdoorExchange {
+  code: string
+  code_verifier: string
+  nonce: string
+  redirect_uri: string
+}
+
 /** 把后端字段映射到前端 User 类型 */
 function adaptUser(u: BackendUserInfo) {
   return {
@@ -34,6 +48,24 @@ function adaptUser(u: BackendUserInfo) {
 }
 
 export const authApi = {
+  async casdoorConfig(): Promise<CasdoorConfig> {
+    return api.get<unknown, CasdoorConfig>('/auth/casdoor/config')
+  },
+
+  async casdoorLogin(body: CasdoorExchange): Promise<LoginResponse> {
+    const res = await api.post<unknown, BackendLoginResponse>('/auth/casdoor/exchange', body)
+    return { access_token: res.access_token, refresh_token: res.refresh_token, token_type: res.token_type, expires_in: res.expires_in, user: adaptUser(res.user) as any }
+  },
+
+  async casdoorLink(body: CasdoorExchange): Promise<void> {
+    await api.post('/auth/casdoor/link', body)
+  },
+
+  async casdoorChallenge(verifier: string): Promise<string> {
+    const result = await api.post<unknown, { challenge: string }>('/auth/casdoor/challenge', { code_verifier: verifier })
+    return result.challenge
+  },
+
   async login(payload: LoginPayload): Promise<LoginResponse> {
     // 兼容前端旧 payload：{ email, password } → { username, password }
     const body = {
@@ -44,6 +76,8 @@ export const authApi = {
     return {
       access_token: res.access_token,
       refresh_token: res.refresh_token,
+      token_type: res.token_type,
+      expires_in: res.expires_in,
       user: adaptUser(res.user) as any,
     }
   },
@@ -55,6 +89,8 @@ export const authApi = {
     return {
       access_token: res.access_token,
       refresh_token: res.refresh_token,
+      token_type: res.token_type,
+      expires_in: res.expires_in,
       user: adaptUser(res.user) as any,
     }
   },

@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     AGENT_EMBED_CLIENT_SECRET: str = ""
     AGENT_EMBED_HOST_ORIGINS: str = ""
 
+    # Casdoor OIDC: issuer must be reachable by both browser and API container.
+    CASDOOR_ISSUER: str = ""
+    CASDOOR_CLIENT_ID: str = ""
+    CASDOOR_CLIENT_SECRET: str = ""
+    CASDOOR_REDIRECT_ORIGINS: str = ""
+
     # Ticket
     TICKET_NUMBER_PREFIX: str = "TKT"
 

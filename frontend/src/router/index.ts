@@ -11,6 +11,12 @@ const routes: RouteRecordRaw[] = [
     meta: { layout: 'auth', public: true },
   },
   {
+    path: '/auth/casdoor/callback',
+    name: 'CasdoorCallback',
+    component: () => import('@/views/CasdoorCallbackView.vue'),
+    meta: { layout: 'auth', public: true },
+  },
+  {
     path: '/',
     redirect: '/tickets',
   },

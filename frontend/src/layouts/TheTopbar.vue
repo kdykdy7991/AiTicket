@@ -22,6 +22,9 @@
             <el-dropdown-item command="changePassword">
               修改密码
             </el-dropdown-item>
+            <el-dropdown-item v-if="authStore.isAdmin && casdoorEnabled" command="bindCasdoor">
+              绑定 Casdoor 账号
+            </el-dropdown-item>
             <el-dropdown-item divided command="logout">
               退出登录
             </el-dropdown-item>
@@ -34,22 +37,35 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
+import { authApi } from '@/api/auth'
+import { startCasdoor } from '@/auth/casdoor'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const authStore = useAuthStore()
 
 const changePasswordVisible = ref(false)
+const casdoorEnabled = ref(false)
 
-function onCommand(cmd: string) {
+onMounted(async () => {
+  if (authStore.isAdmin) {
+    try { casdoorEnabled.value = (await authApi.casdoorConfig()).enabled } catch { /* optional integration */ }
+  }
+})
+
+async function onCommand(cmd: string) {
   if (cmd === 'logout') {
     authStore.logout()
     router.push({ name: 'Login' })
   } else if (cmd === 'changePassword') {
     changePasswordVisible.value = true
+  } else if (cmd === 'bindCasdoor') {
+    try { await startCasdoor('link') }
+    catch (error) { ElMessage.error(error instanceof Error ? error.message : '无法连接 Casdoor') }
   }
 }
 </script>

@@ -26,21 +26,34 @@
         </el-button>
       </el-form-item>
     </el-form>
+    <el-button v-if="casdoorEnabled" class="casdoor-login" size="large" @click="onCasdoorLogin">使用 Casdoor 登录</el-button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
+import { authApi } from '@/api/auth'
+import { startCasdoor } from '@/auth/casdoor'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const casdoorEnabled = ref(false)
+
+onMounted(async () => {
+  try { casdoorEnabled.value = (await authApi.casdoorConfig()).enabled } catch { /* keep local login available */ }
+})
+
+async function onCasdoorLogin() {
+  try { await startCasdoor('login') }
+  catch (error) { ElMessage.error(error instanceof Error ? error.message : '无法连接 Casdoor') }
+}
 
 const form = reactive({ email: '', password: '' })
 
@@ -110,6 +123,7 @@ async function onLogin() {
 .login-form {
   width: 100%;
 }
+.casdoor-login { width: 100%; margin-top: 8px; }
 .login-form :deep(.el-form-item) {
   margin-bottom: 20px;
 }

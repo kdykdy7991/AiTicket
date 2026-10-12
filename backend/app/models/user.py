@@ -24,6 +24,8 @@ class User(Base):
     # 实现"一个账号同时只能一人在线"（后登录者顶掉前者）
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     dingtalk_id: Mapped[str | None] = mapped_column(String(100))
+    casdoor_issuer: Mapped[str | None] = mapped_column(String(255))
+    casdoor_subject: Mapped[str | None] = mapped_column(String(255))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())

@@ -30,6 +30,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(payload: LoginPayload) {
     const res = await authApi.login(payload)
+    completeLogin(res)
+  }
+
+  function completeLogin(res: { access_token: string; refresh_token: string; user: User }) {
     accessToken.value = res.access_token
     refreshToken.value = res.refresh_token
     user.value = res.user
@@ -52,6 +56,6 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     accessToken, refreshToken, user,
     isLoggedIn, userRole, isAdmin, isAgent, displayName,
-    login, logout,
+    login, completeLogin, logout,
   }
 })
