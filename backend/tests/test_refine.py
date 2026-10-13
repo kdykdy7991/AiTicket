@@ -32,11 +32,18 @@ CATS = [
     (2322, 2301, "硬件故障", 3, 4),
 ]
 
-# 表A 链：2301/2322 → 售后；2302 → 平台运维组
+# 表A 链：业务保障细分类完成处理后，售后单独致电反馈。
 CHAINS = [
     (2301, [{"order": 1, "department_code": "售后"}]),
-    (2302, [{"order": 1, "department_code": "平台运维组"}]),
-    (2322, [{"order": 1, "department_code": "售后"}]),
+    (2302, [
+        {"order": 1, "department_code": "平台运维组"},
+        {"order": 2, "department_code": "售后", "stage": "phone_feedback"},
+    ]),
+    (2322, [
+        {"order": 1, "department_code": "售后", "stage": "judgement"},
+        {"order": 2, "department_code": "售后"},
+        {"order": 3, "department_code": "售后", "stage": "phone_feedback"},
+    ]),
 ]
 
 
@@ -153,7 +160,7 @@ async def test_refine_switches_chain_and_dept(renv):
     assert d["category_id"] == 2302
     assert d["skill_group_name"] == "平台运维组"
     assert d["dispatcher_id"] == renv["platform_user"]
-    assert d["dispatch_chain_steps"] == [{"order": 1, "department_code": "平台运维组"}]
+    assert d["dispatch_chain_steps"] == CHAINS[1][1]
     assert d["dispatch_step_index"] == 0
     # 能力位随之更新：2302 是末级
     assert d["can_refine"] is False
@@ -204,7 +211,7 @@ async def test_refine_open_switches_owner(renv):
 
 
 async def test_refine_continue_rule_same_dept(renv):
-    """接续规则：新链首步 == 当前判断部门（售后）→ 单步链原地不动，owner 保留。"""
+    """硬件故障由售后判断并处理，再交给售后单独致电反馈。"""
     t = await renv["create_ticket"]()
     await set_existing_open_ticket(renv, t["id"])
 
@@ -213,8 +220,21 @@ async def test_refine_continue_rule_same_dept(renv):
     assert d["category_id"] == 2322
     assert d["skill_group_name"] == "售后"
     assert d["owner_id"] == renv["aftersale_user"]
-    assert d["dispatch_chain_steps"] == [{"order": 1, "department_code": "售后"}]
-    assert d["dispatch_step_index"] == 0
+    assert d["dispatch_chain_steps"] == CHAINS[2][1]
+    assert d["dispatch_step_index"] == 1
+
+    with as_user(renv["aftersale_user"], "handler"):
+        reply = await renv["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "硬件故障已处理"},
+        )
+    assert reply.status_code == 201, reply.text
+    feedback_response = await renv["client"].get(f"/api/v1/tickets/{t['id']}")
+    assert feedback_response.status_code == 200, feedback_response.text
+    feedback = feedback_response.json()
+    assert feedback["state"] == "pending"
+    assert feedback["dispatch_step_index"] == 2
+    assert feedback["skill_group_name"] == "售后"
 
 
 async def test_refine_reject_non_child(renv):

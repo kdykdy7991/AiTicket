@@ -42,8 +42,8 @@ class ResponsibilitySlots(NamedTuple):
     推导方式：从当前分类沿 parent 链上溯，逐层看该分类有没有链：
 
     - 当前分类**无启用子节点**（叶子，判断已结束）→ 它自己的链是**处理链**：
-      ``steps[-1]``（最后一环）是**问题处理部门**（真正干活的），
-      ``steps[:-1]``（中间环节）是**流转节点**；祖先的链首构成**问题判断组**
+      排除判断与致电反馈步骤后，最后一环是**问题处理部门**（真正干活的），
+      之前的环节是**流转节点**；祖先的链首构成**问题判断组**
     - 当前分类**有启用子节点**（判断节点，如业务保障/星座大系统）→ 它的链首
       还要继续分诊，计入**问题判断组**，处理部门待分诊确定（None）
 
@@ -78,7 +78,10 @@ async def build_responsibility_index(db: AsyncSession) -> dict[int, Responsibili
     for row in (await db.execute(
         select(DispatchChain).where(DispatchChain.enabled == True)  # noqa: E712
     )).scalars().all():
-        depts = [s.get("department_code") for s in (row.steps or []) if s.get("department_code")]
+        depts = [
+            s.get("department_code") for s in (row.steps or [])
+            if s.get("department_code") and s.get("stage") not in ("judgement", "phone_feedback")
+        ]
         if depts:
             chains[row.category_id] = depts
 

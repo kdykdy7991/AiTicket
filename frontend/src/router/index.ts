@@ -70,6 +70,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '智能助手', requiresAdmin: true },
   },
   {
+    path: '/knowledge',
+    name: 'KnowledgeBase',
+    component: () => import('@/views/KnowledgeBaseView.vue'),
+    meta: { title: '知识库', requiresAdmin: true },
+  },
+  {
     path: '/admin',
     meta: { requiresAdmin: true },
     children: [

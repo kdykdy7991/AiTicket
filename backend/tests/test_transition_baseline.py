@@ -371,28 +371,30 @@ async def test_resubmit_returned_to_pending(env):
 async def test_hold_open_to_on_hold(env):
     t = await env["create_ticket"]()
     await env["dispatch"](t["id"], env["handler_id"])
-    # 缺 reason → 400
+    # 暂缓功能已停用，隐藏按钮之外还必须阻断直接 API 调用。
     r0 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "on_hold"})
-    assert r0.status_code == 400, r0.text
-    # 带 reason + hold_until → 200
+    assert r0.status_code == 422, r0.text
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "on_hold", "reason": "等待备件", "hold_until": "2027-03-01T00:00:00",
     })
-    assert r.status_code == 200, r.text
-    assert r.json()["state"] == "on_hold"
+    assert r.status_code == 422, r.text
     tk = await db_ticket(env, t["id"])
-    assert tk.hold_until is not None      # hold_until 不在 detail 里暴露，直接查库
+    assert tk.state == "open"
+    assert tk.hold_until is None
     logs = await db_logs(env, t["id"])
-    assert (logs[-1].from_state, logs[-1].to_state) == ("open", "on_hold")
-    assert logs[-1].reason == "等待备件"
+    assert logs[-1].action_type == "dispatch"
 
 
-async def test_resume_on_hold_to_open(env):
+async def test_resume_on_hold_to_open(env, monkeypatch):
+    import app.services.state_machine as state_machine
     t = await env["create_ticket"]()
     await env["dispatch"](t["id"], env["handler_id"])
+    # 模拟停用前已经暂缓的工单；之后恢复默认关闭状态。
+    monkeypatch.setattr(state_machine, "HOLD_ENABLED", True)
     await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "on_hold", "reason": "等待备件",
     })
+    monkeypatch.setattr(state_machine, "HOLD_ENABLED", False)
     # 恢复处理也需要 reason（requires_reason on_hold→open=True 现状）
     r0 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "open"})
     assert r0.status_code == 400, r0.text
@@ -651,8 +653,10 @@ def test_action_map_covers_all_reachable_transitions():
     assert action_for("unknown", "unknown") is None
 
 
-async def test_action_type_full_chain(env):
+async def test_action_type_full_chain(env, monkeypatch):
     """一条工单走完常规链路，每步 Flow Log 的 action_type 正确。"""
+    import app.services.state_machine as state_machine
+    monkeypatch.setattr(state_machine, "HOLD_ENABLED", True)  # 历史暂缓日志兼容性
     t = await env["create_ticket"]()
 
     async def last_action():
@@ -765,10 +769,9 @@ async def test_allowed_actions_open_owner_and_capabilities(env):
     with as_user(env["handler_id"], "agent"):
         d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
     acts = _action_map(d)
-    # 当前处理人：可处理/暂缓/打回；撤销只给创建者 → 不出现
-    assert set(acts) == {"resolve", "return", "hold"}
+    # 当前处理人：可处理/打回；暂缓停用，撤销只给创建者。
+    assert set(acts) == {"resolve", "return"}
     assert acts["resolve"]["requires_reason"] is False
-    assert acts["hold"]["requires_reason"] is True
     assert acts["return"]["requires_reason"] is True
     # 文章能力位（owner 身份）
     assert d["can_reply"] is True
@@ -832,11 +835,11 @@ async def test_allowed_action_executes_successfully(env):
     acts2 = _action_map(d2)
     # requires_reason 的动作不带 reason 必须 400，带 reason 才 200
     r_bad = await env["client"].patch(
-        f"/api/v1/tickets/{t['id']}", json={"state": acts2["hold"]["target_state"]}
+        f"/api/v1/tickets/{t['id']}", json={"state": acts2["return"]["target_state"]}
     )
     assert r_bad.status_code == 400
     r_ok = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "state": acts2["hold"]["target_state"], "reason": "等待备件"})
+        "state": acts2["return"]["target_state"], "reason": "需重新处理"})
     assert r_ok.status_code == 200
 
 

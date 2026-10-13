@@ -102,7 +102,7 @@ app.mount(settings.PUBLIC_UPLOAD_URL, StaticFiles(directory=settings.UPLOAD_DIR)
 
 
 # ── Routers ───────────────────────────────────────────────
-from app.api.v1 import auth, articles, tickets, common, mcp_read, agent_embed, casdoor
+from app.api.v1 import auth, articles, tickets, common, mcp_read, agent_embed, casdoor, knowledge_mock, knowledge
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(casdoor.router, prefix="/api/v1")
@@ -118,6 +118,7 @@ app.include_router(common.stats_router, prefix="/api/v1")
 app.include_router(common.routing_router, prefix="/api/v1")
 app.include_router(mcp_read.router, prefix="/api/v1")
 app.include_router(agent_embed.router, prefix="/api/v1")
+app.include_router(knowledge.router if settings.RAG_SERVICE_TOKEN else knowledge_mock.router, prefix="/api/v1")
 
 
 # ── Health ───────────────────────────────────────────────

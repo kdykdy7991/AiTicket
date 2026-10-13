@@ -131,6 +131,7 @@ const STATE_FALLBACK: Record<string, string> = {
 
 function actionName(log: TicketStateLog): string {
   const t = log.action_type || ''
+  if (t === 'transfer' && log.reason?.includes('售后致电反馈')) return '流转至售后致电反馈'
   if (ACTION_NAMES[t]) return ACTION_NAMES[t]
   const st = log.to_state_key || ''
   return STATE_FALLBACK[st] || '状态变更'
@@ -173,6 +174,10 @@ const currentStage = computed(() => {
   const state = props.currentState || nodes.value[nodes.value.length - 1]?.log.to_state_key
   if (!state || TERMINAL_STATES.has(state)) return null
   const enteredAt = nodes.value[nodes.value.length - 1]?.ts || ''
+  const steps = props.ticket?.dispatch_chain_steps || []
+  const isPhoneFeedback = steps[props.ticket?.dispatch_step_index]?.stage === 'phone_feedback'
+  if (isPhoneFeedback && state === 'pending') return { title: '待指派售后致电反馈人', personLabel: '对接人', person: props.currentDispatcherName || '', enteredAt }
+  if (isPhoneFeedback && state === 'open') return { title: '待售后致电反馈', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }
   if (state === 'pending') return { title: '待分派处理人', personLabel: '对接人', person: props.currentDispatcherName || '', enteredAt }
   if (state === 'open') return { title: '待提交处理说明', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }
   if (state === 'on_hold') return { title: '暂缓处理中', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }

@@ -9,7 +9,7 @@
           @click="activeTab = 'reply'"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,17 4,12 9,7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-          处理说明
+          {{ isPhoneFeedback ? '致电反馈' : '处理说明' }}
         </button>
         <button
           v-if="canAppend"
@@ -80,7 +80,7 @@
       <!-- 当前状态下已有处理说明 -->
       <div v-if="activeTab === 'reply' && hasSummary" class="disabled-hint">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-        当前状态下已提交处理说明，流转到下一状态后可继续补充。
+        当前状态下已提交{{ isPhoneFeedback ? '致电反馈' : '处理说明' }}，流转到下一状态后可继续补充。
       </div>
 
       <!-- 追加模式：必须填追加原因 -->
@@ -106,13 +106,6 @@
         </span>
         <div class="reply-actions-right">
           <el-button
-            v-if="canHold"
-            class="hold-btn"
-            @click="openHoldDialog"
-          >
-            暂缓处理
-          </el-button>
-          <el-button
             type="primary"
             :loading="submitting"
             @click="onSubmit"
@@ -129,32 +122,6 @@
       您当前无权在该工单提交处理说明、补充或催办。
     </div>
 
-    <!-- 暂缓处理弹窗 -->
-    <el-dialog
-      v-model="holdDialogVisible"
-      title="暂缓处理"
-      width="420px"
-      top="15vh"
-      :close-on-click-modal="false"
-    >
-      <div class="hold-form">
-        <p class="hold-hint">暂缓后工单将进入「暂缓处理」状态，处理人保持不变。</p>
-        <el-form-item label="暂缓原因" required style="margin-top: 12px">
-          <el-input
-            v-model="holdReason"
-            type="textarea"
-            :rows="3"
-            placeholder="请填写暂缓原因"
-            maxlength="500"
-            show-word-limit
-          />
-        </el-form-item>
-      </div>
-      <template #footer>
-        <el-button @click="holdDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="holding" :disabled="!holdReason.trim()" @click="confirmHold">确认暂缓</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -162,7 +129,7 @@
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { useTicketStore } from '@/stores/ticket'
 import { ElMessage } from 'element-plus'
-import type { Article, ArticleCreatePayload, TicketDetail, AllowedAction } from '@/types'
+import type { Article, ArticleCreatePayload, TicketDetail } from '@/types'
 
 const props = defineProps<{
   ticket: TicketDetail
@@ -192,14 +159,10 @@ const willTransferAfterReply = computed(() => {
   return t.state === 'open' && t.dispatch_step_index != null &&
     t.dispatch_step_index + 1 < steps.length
 })
-
-const allowedActions = computed<AllowedAction[]>(
-  () => (props.ticket as any).allowed_actions ?? [],
-)
-const holdAction = computed<AllowedAction | undefined>(
-  () => allowedActions.value.find(a => a.action === 'hold'),
-)
-const canHold = computed(() => !!holdAction.value)
+const isPhoneFeedback = computed(() => {
+  const t = props.ticket as any
+  return t.dispatch_chain_steps?.[t.dispatch_step_index]?.stage === 'phone_feedback'
+})
 
 // 当前状态对应的状态日志节点 id（后端用 state_log id 作为处理说明的 state_key）
 const currentStateLogId = computed(() => {
@@ -225,8 +188,9 @@ const placeholder = computed(() => {
     return '请输入催办内容，提交后将通知当前处理人并在时间线记录...'
   }
   if (hasSummary.value) {
-    return '当前状态下已提交处理说明'
+    return `当前状态下已提交${isPhoneFeedback.value ? '致电反馈' : '处理说明'}`
   }
+  if (isPhoneFeedback.value) return '请填写售后致电反馈结果，提交后交客服回访归档...'
   return willTransferAfterReply.value
     ? '请输入本部门处理说明，提交后将流转至下一部门...'
     : '请输入处理说明，提交后将标记为已处理...'
@@ -235,7 +199,7 @@ const placeholder = computed(() => {
 const submitLabel = computed(() => {
   if (activeTab.value === 'addition') return '补充记录'
   if (activeTab.value === 'reminder') return '发起催办'
-  return willTransferAfterReply.value ? '提交并流转' : '提交处理说明'
+  return isPhoneFeedback.value ? '提交致电反馈' : willTransferAfterReply.value ? '提交并流转' : '提交处理说明'
 })
 
 // 附件处理
@@ -302,7 +266,7 @@ watch([canReply, canAppend, canRemind], ([replyAllowed, appendAllowed, remindAll
 
 async function onSubmit() {
   if (activeTab.value === 'reply' && hasSummary.value) {
-    ElMessage.warning('当前状态下已提交处理说明')
+    ElMessage.warning(`当前状态下已提交${isPhoneFeedback.value ? '致电反馈' : '处理说明'}`)
     return
   }
   if (activeTab.value === 'addition' && !appendReason.value.trim()) {
@@ -336,7 +300,7 @@ async function onSubmit() {
     appendReason.value = ''
     clearAttachments()
     const msgMap: Record<string, string> = {
-      reply: willTransferAfterReply.value ? '处理说明已提交，已流转至下一部门' : '处理说明已提交',
+      reply: isPhoneFeedback.value ? '致电反馈已提交，工单已交客服回访归档' : willTransferAfterReply.value ? '处理说明已提交，已流转至下一部门' : '处理说明已提交',
       addition: '补充已记录',
       reminder: '催办已发起',
     }
@@ -350,37 +314,6 @@ async function onSubmit() {
   }
 }
 
-// ── 暂缓处理 ──────────────────────────────────────
-const holdDialogVisible = ref(false)
-const holdReason = ref('')
-const holding = ref(false)
-
-function openHoldDialog() {
-  holdReason.value = ''
-  holdDialogVisible.value = true
-}
-
-async function confirmHold() {
-  if (!holdReason.value.trim()) {
-    ElMessage.warning('请填写暂缓原因')
-    return
-  }
-  holding.value = true
-  try {
-    await ticketStore.updateTicket((props.ticket as any).id, {
-      state: holdAction.value?.target_state || 'on_hold',
-      reason: holdReason.value.trim(),
-    } as any)
-    ElMessage.success('工单已暂缓')
-    holdDialogVisible.value = false
-    emit('submitted')
-  } catch (e: any) {
-    const detail = e?.response?.data?.error?.message || e?.response?.data?.detail
-    ElMessage.error(detail || '暂缓失败')
-  } finally {
-    holding.value = false
-  }
-}
 </script>
 
 <style scoped>
@@ -469,10 +402,6 @@ async function confirmHold() {
   margin-left: auto;
 }
 
-.hold-btn {
-  font-weight: 600;
-}
-
 .addition-hint {
   display: inline-flex;
   align-items: center;
@@ -545,9 +474,4 @@ async function confirmHold() {
   background: rgba(0, 0, 0, 0.7);
 }
 
-.hold-form .hold-hint {
-  margin: 0;
-  color: var(--color-text-secondary);
-  font-size: 14px;
-}
 </style>

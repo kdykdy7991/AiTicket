@@ -197,7 +197,7 @@ async def test_ticket_detail_exposes_correct_l1_l2_path(seeded_categories):
     from app.models.dispatch import DispatchChain
     from app.models.group import SkillGroup, UserSkillGroup
     from app.services.category_utils import build_lineage_index
-    from scripts.seed import DISPATCH_CHAINS
+    from scripts.seed import DISPATCH_CHAINS, dispatch_chain_steps
 
     c, disp_id, engine = seeded_categories
     # 正式建单必填对接部门/对接人；链配置决定落位，测试库没跑 seed 故手动补
@@ -210,7 +210,7 @@ async def test_ticket_detail_exposes_correct_l1_l2_path(seeded_categories):
         for cid, depts, note in DISPATCH_CHAINS:
             s.add(DispatchChain(
                 category_id=cid,
-                steps=[{"order": i + 1, "department_code": d} for i, d in enumerate(depts)],
+                steps=dispatch_chain_steps(cid, depts),
                 note=note,
             ))
         await s.commit()
@@ -251,7 +251,7 @@ async def test_responsibility_slots_judgement_vs_handling(seeded_categories):
     """
     from app.models.dispatch import DispatchChain
     from app.services.category_utils import build_responsibility_index
-    from scripts.seed import DISPATCH_CHAINS
+    from scripts.seed import DISPATCH_CHAINS, dispatch_chain_steps
 
     _c, _dispatcher_id, engine = seeded_categories
     # conftest 每次 TRUNCATE，dispatch_chains 需重灌（分类已由 seeded_categories 灌好）
@@ -259,7 +259,7 @@ async def test_responsibility_slots_judgement_vs_handling(seeded_categories):
         for cid, depts, note in DISPATCH_CHAINS:
             s.add(DispatchChain(
                 category_id=cid,
-                steps=[{"order": i + 1, "department_code": d} for i, d in enumerate(depts)],
+                steps=dispatch_chain_steps(cid, depts),
                 note=note,
             ))
         await s.commit()
@@ -303,6 +303,7 @@ async def test_responsibility_slots_judgement_vs_handling(seeded_categories):
     # 判断方=处理方的场景（硬件故障 note 明确说明）
     hw = slots(2322)
     assert hw.handling_department == "售后"
+    assert hw.transit_departments == ()
 
     # 多步链（审核→执行）：中间环节=流转节点，最后一环=处理部门
     change = slots(2203)  # 套餐变更：[市场生态部, 业务支撑组]

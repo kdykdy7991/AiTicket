@@ -23,6 +23,7 @@ from test_workflow_regression import _next_phone, action_sequence, as_user
 
 CATS = [
     (2203, None, "套餐变更", 1, 1),
+    (2298, None, "反馈流转测试", 1, 3),
     (2299, None, "平台复核", 1, 2),
 ]
 
@@ -66,6 +67,10 @@ async def tenv(client):
         ])
         s.add_all([
             DispatchChain(category_id=2203, steps=STEPS),
+            DispatchChain(category_id=2298, steps=[
+                {"order": 1, "department_code": "平台运维组"},
+                {"order": 2, "department_code": "售后", "stage": "phone_feedback"},
+            ]),
             DispatchChain(category_id=2299, steps=[{"order": 1, "department_code": "平台运维组"}]),
         ])
         await s.commit()
@@ -152,6 +157,38 @@ async def test_transfer_advances_chain(tenv):
             select(Ticket).where(Ticket.id == t["id"])
         )).scalar_one()
         assert ticket.has_returned is False, "转派是链前进，不是退回"
+
+
+async def test_handling_reply_requires_aftersales_feedback_before_resolved(tenv):
+    t = await tenv["create_ticket"](category_id=2298)
+    t = await tenv["patch"](t["id"], {"state": "open", "owner_id": tenv["platform_user"]})
+    with as_user(tenv["platform_user"], "handler"):
+        reply = await tenv["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "专业处理已完成"},
+        )
+    assert reply.status_code == 201, reply.text
+    pending = await tenv["get"](t["id"])
+    assert pending["state"] == "pending"
+    assert pending["skill_group_name"] == "售后"
+    assert pending["dispatch_step_index"] == 1
+    assert pending["dispatch_chain_steps"][1]["stage"] == "phone_feedback"
+
+    await tenv["patch"](t["id"], {"state": "open", "owner_id": tenv["aftersale_user"]})
+    feedback_stage = await tenv["get"](t["id"])
+    assert "resolve" not in {a["action"] for a in feedback_stage["allowed_actions"]}
+    direct_resolve = await tenv["client"].patch(
+        f"/api/v1/tickets/{t['id']}", json={"state": "resolved"}
+    )
+    assert direct_resolve.status_code == 422
+    with as_user(tenv["aftersale_user"], "handler"):
+        feedback = await tenv["client"].post(
+            f"/api/v1/tickets/{t['id']}/articles",
+            data={"type": "reply", "body": "已致电客户反馈处理结果"},
+        )
+    assert feedback.status_code == 201, feedback.text
+    assert (await tenv["get"](t["id"]))["state"] == "resolved"
+    assert await action_sequence(tenv, t["id"]) == ["create", "dispatch", "transfer", "dispatch", "resolve"]
 
 
 async def test_transfer_custom_reason(tenv):

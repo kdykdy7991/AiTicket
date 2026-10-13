@@ -149,8 +149,10 @@ async def test_standard_closed_loop(env):
     assert await action_sequence(env, t["id"]) == ["create", "dispatch", "resolve", "archive"]
 
 
-async def test_exception_branch_chain(env):
+async def test_exception_branch_chain(env, monkeypatch):
     """异常分支链：暂缓 → 恢复 → 打回 → 退回 → 重新提交 → 撤销。"""
+    import app.services.state_machine as state_machine
+    monkeypatch.setattr(state_machine, "HOLD_ENABLED", True)  # 历史链路兼容性
     t = await env["create_ticket"]()
     await env["patch"](t["id"], {"state": "open", "owner_id": env["handler_id"]})
 

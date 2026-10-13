@@ -216,7 +216,7 @@ export interface Ticket {
   can_remind?: boolean
 
   // —— V0.21 分派链快照与分诊能力位（仅详情接口返回）——
-  dispatch_chain_steps?: { order: number; department_code: string }[] | null
+  dispatch_chain_steps?: { order: number; department_code: string; stage?: 'judgement' | 'phone_feedback' }[] | null
   dispatch_step_index?: number | null
   can_refine?: boolean
   refine_options?: { id: number; name: string; level?: number }[]

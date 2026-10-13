@@ -479,14 +479,28 @@ DISPATCH_CHAINS: list[tuple[int, list[str], str]] = [
     (2203, ["市场生态部", "业务支撑组"], "套餐变更：审核→执行，两步"),
     (2204, ["经营管理部", "财务"],       "业财对账：审核→开票，两步"),
     (2301, ["售后"],               "业务保障：客服判到此级，售后在此分诊（L2 四选一）"),
-    (2302, ["平台运维组"],         "售后分诊后直达"),
+    (2302, ["平台运维组", "售后"], "应用平台处理后由售后致电反馈"),
     (2310, ["星座大系统负责人"],   "售后分诊到此，负责人在此再判断（L3 三选一）"),
-    (2311, ["软件开发组"],         "L3 判断结束，直达"),
-    (2312, ["测运控组"],           "L3 判断结束，直达"),
-    (2313, ["整星产品"],           "L3 判断结束，直达"),
-    (2321, ["终端研发"],           "售后分诊后直达"),
-    (2322, ["售后"],               "硬件故障：判断方=处理方；含故障排查/寄修子流程"),
+    (2311, ["软件开发组", "售后"], "核心网处理后由售后致电反馈"),
+    (2312, ["测运控组", "售后"], "测运控处理后由售后致电反馈"),
+    (2313, ["整星产品", "售后"], "卫星系统处理后由售后致电反馈"),
+    (2321, ["终端研发", "售后"], "终端软件处理后由售后致电反馈"),
+    (2322, ["售后", "售后", "售后"], "硬件故障：售后判断、处理、致电反馈依次办理"),
 ]
+
+FEEDBACK_CATEGORY_IDS = {2302, 2311, 2312, 2313, 2321, 2322}
+
+
+def dispatch_chain_steps(category_id: int, departments: list[str]) -> list[dict]:
+    steps = []
+    for index, department in enumerate(departments):
+        step = {"order": index + 1, "department_code": department}
+        if category_id in FEEDBACK_CATEGORY_IDS and index == len(departments) - 1:
+            step["stage"] = "phone_feedback"
+        elif category_id == 2322 and index == 0:
+            step["stage"] = "judgement"
+        steps.append(step)
+    return steps
 
 # ── 分派设计 V0.21 §4 表A/表B 补齐（链部门代称 → skill_groups）──
 # DISPATCH_CHAINS 里的部门代称若 skill_groups 不存在，派单引擎按名字查不到部门。
@@ -822,10 +836,7 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
         # ── dispatch_chains（分派设计 V0.21 §4，重复执行幂等刷新为权威值）──
         print("[Phase 9] Seeding dispatch_chains...")
         for cat_id, depts, note in DISPATCH_CHAINS:
-            steps = [
-                {"order": i + 1, "department_code": d}
-                for i, d in enumerate(depts)
-            ]
+            steps = dispatch_chain_steps(cat_id, depts)
             await db.execute(
                 text("""
                     INSERT INTO dispatch_chains

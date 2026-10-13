@@ -77,6 +77,9 @@ STATES_REQUIRE_REASON_FROM: dict[str, set[str]] = {
 # 终态（不可再流转）
 TERMINAL_STATES = {"archived", "cancelled"}
 
+# 暂缓入口暂时停用；已有 on_hold 工单仍可恢复处理。
+HOLD_ENABLED = False
+
 # ── Flow Log 动作类型 ─────────────────────────────────────────────
 # 由 (from_state, to_state) 推导"这次流转是什么业务动作"。
 # 集合完全来自上面的 TRANSITIONS 真实流转表（每条可达边恰好一票），
@@ -175,13 +178,21 @@ async def compute_allowed_actions(
     for to_state in TRANSITIONS.get(ticket.state, []):
         effective = enforce_business_constraints(ticket, to_state, log_rewrite=False)
         action = action_for(ticket.state, effective)
+        if action == "hold" and not HOLD_ENABLED:
+            continue
         if (
             action == "resolve"
             and ticket.dispatch_chain_steps
             and ticket.dispatch_step_index is not None
-            and ticket.dispatch_step_index + 1 < len(ticket.dispatch_chain_steps)
+            and (
+                ticket.dispatch_step_index + 1 < len(ticket.dispatch_chain_steps)
+                or (
+                    0 <= ticket.dispatch_step_index < len(ticket.dispatch_chain_steps)
+                    and ticket.dispatch_chain_steps[ticket.dispatch_step_index].get("stage") == "phone_feedback"
+                )
+            )
         ):
-            continue  # 中间节点完成处理走 transfer，不能整单办结
+            continue  # 中间节点/售后致电反馈须提交记录，不能直接整单办结
         if action is None or (action, effective) in seen:
             continue
         if await transition_permission_error(db, ticket, effective, user) is not None:
@@ -878,7 +889,7 @@ async def apply_transfer(
         ticket,
         to_state="pending",
         operator=operator,
-        reason=reason or f"本步完成，转派「{next_dept}」",
+        reason=reason or ("本步完成，流转至售后致电反馈" if steps[next_index].get("stage") == "phone_feedback" else f"本步完成，转派「{next_dept}」"),
         action_type="transfer",
     )
     await db.flush()
@@ -917,6 +928,15 @@ async def apply_transition(
     # 中间节点只能通过处理说明完成本步并进入下一部门；
     # 直接 PATCH 状态不能绕过办理记录。
     steps = ticket.dispatch_chain_steps or []
+    if ticket.state == "open" and to_state == "on_hold" and not HOLD_ENABLED:
+        raise HTTPException(422, detail="暂缓处理功能已停用")
+    is_phone_feedback = (
+        ticket.dispatch_step_index is not None
+        and 0 <= ticket.dispatch_step_index < len(steps)
+        and steps[ticket.dispatch_step_index].get("stage") == "phone_feedback"
+    )
+    if is_phone_feedback and to_state == "resolved" and not allow_intermediate_transfer:
+        raise HTTPException(422, detail="请提交售后致电反馈记录后完成当前节点")
     if (
         ticket.state == "on_hold"
         and to_state == "resolved"

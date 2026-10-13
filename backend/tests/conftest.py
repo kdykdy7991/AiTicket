@@ -23,6 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
+# Tests must never select the live RAG router from a developer's local .env.
+os.environ["RAG_SERVICE_TOKEN"] = ""
+
 from app.core.database import Base, get_db  # noqa: E402
 from app.core.deps import get_current_user  # noqa: E402
 from app.main import app  # noqa: E402

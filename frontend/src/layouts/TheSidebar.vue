@@ -91,6 +91,7 @@ const iconTrigger = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none"
 const iconSLA = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>'
 const iconMail = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,7 12,13 2,7"/></svg>'
 const iconAssistant = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="15" rx="3"/><path d="M8 20v2m8-2v2M12 2v3M8 11h.01M16 11h.01M8 15c1.2 1 2.5 1.5 4 1.5s2.8-.5 4-1.5"/></svg>'
+const iconKnowledge = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v17H6.5A2.5 2.5 0 0 1 4 17.5z"/><path d="M4 17.5A2.5 2.5 0 0 1 6.5 15H20"/><path d="M9 7h7M9 10h5"/></svg>'
 
 const mainMenu = computed(() => {
   const items = [
@@ -106,6 +107,7 @@ const mainMenu = computed(() => {
   }
   if (authStore.isAdmin) {
     items.push({ path: '/assistant', label: '智能助手', icon: iconAssistant })
+    items.push({ path: '/knowledge', label: '知识库', icon: iconKnowledge })
   }
   return items
 })
