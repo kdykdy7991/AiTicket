@@ -58,7 +58,7 @@ const t = computed<any>(() => props.ticket)
 function userName(user?: User | null) { return user ? `${user.firstname || ''}${user.lastname || ''}` : '' }
 const customerName = computed(() => t.value.customer_name || userName(t.value.customer) || '—')
 const regionText = computed(() => t.value.region_name || [t.value.region?.province, t.value.region?.city, t.value.region?.district, t.value.region?.station].filter(Boolean).join(' / '))
-const channelText = computed(() => ({ web: 'Web', email: '邮件', phone: '电话', wechat: '微信', app: 'App' } as Record<string, string>)[t.value.channel] || '—')
+const channelText = computed(() => ({ web: 'Web', email: '邮件', phone: '电话', wechat: '微信服务号/公众号', app: 'App', internal: '内部' } as Record<string, string>)[t.value.channel] || '—')
 const satisfactionText = computed(() => ({ satisfied: '满意', average: '一般', dissatisfied: '不满意', unrated: '未评价' } as Record<string, string>)[t.value.satisfaction] || t.value.satisfaction)
 function formatTime(value?: string) { return value ? dayjs(value).format('YYYY/MM/DD HH:mm:ss') : '—' }
 </script>

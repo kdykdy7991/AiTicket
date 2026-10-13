@@ -134,7 +134,7 @@ export interface TicketPriority {
   customer_type_restriction?: CustomerType | null
 }
 
-export type TicketChannel = 'web' | 'email' | 'phone' | 'wechat' | 'app'
+export type TicketChannel = 'web' | 'email' | 'phone' | 'wechat' | 'app' | 'internal'
 
 /** V0.86：后端生成的状态动作元数据（详情接口 allowed_actions，前端按钮唯一渲染依据） */
 export interface AllowedAction {

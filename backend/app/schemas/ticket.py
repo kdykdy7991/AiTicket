@@ -1,6 +1,7 @@
 """Pydantic schemas for tickets."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -8,7 +9,7 @@ from pydantic import BaseModel, Field
 class TicketCreate(BaseModel):
     description: str = Field(default="", max_length=10000)
     priority: str = Field(default="p4_enterprise")
-    channel: str = Field(default="phone")
+    channel: Literal["phone", "wechat", "internal"] = "phone"
     customer_type: str = Field(default="personal")
     customer_name: str | None = Field(default=None, max_length=100)
     customer_phone: str = Field(..., min_length=1, max_length=20)

@@ -114,11 +114,9 @@
             </el-form-item>
             <el-form-item label="工单来源" prop="channel" class="form-col">
               <el-select v-model="form.channel" placeholder="选择来源" style="width: 100%">
-                <el-option label="Web" value="web" />
-                <el-option label="邮件" value="email" />
                 <el-option label="电话" value="phone" />
-                <el-option label="微信服务号" value="wechat" />
-                <el-option label="App" value="app" />
+                <el-option label="微信服务号/公众号" value="wechat" />
+                <el-option label="内部" value="internal" />
               </el-select>
             </el-form-item>
           </div>
@@ -188,7 +186,7 @@ const form = reactive({
   skill_group_id: null as number | null,
   dispatcher_id: null as number | null,
   priority_id: null as number | null,
-  channel: 'phone' as 'web' | 'email' | 'phone' | 'wechat' | 'app',
+  channel: 'phone' as 'phone' | 'wechat' | 'internal',
   body: '',
 })
 
@@ -389,7 +387,7 @@ onMounted(async () => {
       form.category_l2_id = (draft as any).category_l2_id || null
       form.skill_group_id = draft.skill_group_id || form.skill_group_id
       form.dispatcher_id = (draft as any).dispatcher_id || null
-      form.channel = draft.channel || form.channel
+      form.channel = draft.channel === 'wechat' || draft.channel === 'internal' ? draft.channel : 'phone'
       form.body = (draft as any).description || form.body
       // 优先级：从后端字符串反查 ID
       const stateStrToPriority = (s: string) => {

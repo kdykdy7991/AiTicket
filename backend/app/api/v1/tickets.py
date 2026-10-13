@@ -563,7 +563,7 @@ async def export_tickets(
         "p1_urgent": "P1 特别重大事件", "p2_high": "P2 重大事件", "p3_normal": "P3 较大事件", "p4_enterprise": "P4 一般事件",
     }
     customer_type_labels = {"personal": "个人", "enterprise": "政企"}
-    channel_labels = {"phone": "电话", "wechat": "微信服务号", "web": "Web", "app": "App"}
+    channel_labels = {"phone": "电话", "wechat": "微信服务号/公众号", "internal": "内部", "web": "Web", "email": "邮件", "app": "App"}
     satisfaction_labels = {"satisfied": "满意", "average": "一般", "dissatisfied": "不满意", "unrated": "未评价"}
 
     # 列定义：(表头, 取值函数)
