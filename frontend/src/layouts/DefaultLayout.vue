@@ -2,9 +2,9 @@
   <el-container class="default-layout">
     <TheSidebar />
     <el-container direction="vertical">
-      <TheTopbar />
+      <TheTopbar v-if="route.name !== 'KnowledgeBase'" />
       <el-main class="main-content">
-        <div class="content-wrapper" :class="{ 'content-wrapper--assistant': route.name === 'AgentAssistant', 'content-wrapper--ticket-create': route.name === 'TicketCreate' }">
+        <div class="content-wrapper" :class="{ 'content-wrapper--assistant': route.name === 'AgentAssistant', 'content-wrapper--knowledge': route.name === 'KnowledgeBase', 'content-wrapper--ticket-create': route.name === 'TicketCreate' || route.name === 'TicketCreateDesign' }">
           <slot />
         </div>
       </el-main>
@@ -43,7 +43,7 @@ const route = useRoute()
   padding: 0;
   animation: none;
 }
-
+.content-wrapper--knowledge { max-width: none; padding: 0; animation: none; }
 .content-wrapper--ticket-create {
   box-sizing: border-box;
   width: 100%;

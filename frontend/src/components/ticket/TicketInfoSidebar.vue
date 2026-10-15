@@ -298,7 +298,7 @@ const totalSLAMinutes = computed(() => {
 
 function channelLabel(c: TicketChannel): string {
   const map: Record<TicketChannel, string> = {
-    web: 'Web', email: '邮件', phone: '电话', wechat: '微信服务号/公众号', app: 'App', internal: '内部',
+    web: '在线客服', email: '邮件', phone: '语音', wechat: '微信服务号/公众号', app: 'App', internal: '内部转办',
   }
   return map[c]
 }

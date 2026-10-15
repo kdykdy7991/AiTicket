@@ -3,7 +3,7 @@
     <nav class="crumb"><router-link to="/tickets">工单管理</router-link><span>›</span><strong>创建工单</strong></nav>
     <h1>创建工单</h1>
     <form novalidate @submit.prevent="submitTicket">
-      <TicketFormSection title="工单信息" icon="Setting" hint="（工单号保存后生成）"><div class="grid system-grid"><div v-for="item in systemInfo" :key="item.label" class="field"><label>{{ item.label }}</label><input :value="item.value" readonly class="readonly" /></div><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div></div></TicketFormSection>
+      <TicketFormSection title="工单信息" icon="Setting" hint="（工单号提交后生成）"><div class="grid system-grid"><div v-for="item in systemInfo" :key="item.label" class="field"><label>{{ item.label }}</label><input :value="item.value" readonly class="readonly" /></div><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div></div></TicketFormSection>
       <TicketFormSection title="客户信息" icon="User"><div class="grid customer-grid">
         <div class="field"><label for="customerName" class="required">客户名称</label><input id="customerName" v-model.trim="form.customerName" placeholder="请输入客户名称" :class="{ invalid: errors.customerName }" /><small v-if="errors.customerName" class="error">{{ errors.customerName }}</small></div>
         <div class="field"><label for="companyName" class="required">单位全称</label><input id="companyName" v-model.trim="form.companyName" placeholder="请输入单位全称" :class="{ invalid: errors.companyName }" /><small v-if="errors.companyName" class="error">{{ errors.companyName }}</small></div>
@@ -27,45 +27,88 @@
         <div class="field"><label for="faultLocation" class="required">故障发生地理位置</label><input id="faultLocation" v-model.trim="form.faultLocation" placeholder="经纬度或文字地址" :class="{ invalid: errors.faultLocation }" /><small class="help">优先经纬度，也可填写文字地址</small><small v-if="errors.faultLocation" class="error">{{ errors.faultLocation }}</small></div>
         <fieldset class="field radio-field"><legend class="required">是否批量故障</legend><div class="radio-options"><label><input v-model="form.batchFault" type="radio" value="yes" /> 是</label><label><input v-model="form.batchFault" type="radio" value="no" /> 否</label></div><small v-if="errors.batchFault" class="error">{{ errors.batchFault }}</small></fieldset>
       </div></TicketFormSection>
-      <div class="form-actions"><button type="button" class="cancel" @click="router.push('/tickets')">取消</button><button type="button" class="secondary" @click="saveDraft">保存草稿</button><button type="submit" class="primary">提交工单</button></div>
+      <div class="form-actions"><button type="button" class="cancel" :disabled="busy" @click="router.push('/tickets')">取消</button><button type="button" class="secondary" :disabled="busy" @click="saveDraft">{{ busy ? '保存中…' : '保存草稿' }}</button><button type="submit" class="primary" :disabled="busy">{{ busy ? '处理中…' : '提交工单' }}</button></div>
     </form>
   </main>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { metaApi } from '@/api/overviews'
+import api from '@/api'
 import TicketFormSection from '@/components/ticket-create/TicketFormSection.vue'
-import { categoryOptions, initialTicketForm, type CategoryName, type TicketCreateDesignForm } from '@/types/ticketCreateDesign'
-const router = useRouter(), auth = useAuthStore()
+import { initialTicketForm, type CategoryName, type TicketCreateDesignForm } from '@/types/ticketCreateDesign'
+import type { TicketCategory } from '@/types'
+
+const router = useRouter(), route = useRoute(), auth = useAuthStore()
 const channels = ['语音', '在线客服', '内部转办']
 const industries = ['物联网', '海洋渔业', '水利', '能源', '未提供']
 const expectedResults = ['解释说明', '远程排查', '上门检修', '换终端', '退费', '销户', '体验优化']
 const recurrenceOptions = ['必现', '偶发', '仅特定时段']
 const priorities = ['P1', 'P2', 'P3', 'P4']
-const categoryNames = Object.keys(categoryOptions) as CategoryName[]
+const categoryNames: CategoryName[] = ['咨询', '投诉', '业务运营', '业务保障']
+const rootNames: Record<CategoryName, string> = { 咨询: '客户咨询', 投诉: '服务投诉', 业务运营: '业务运营', 业务保障: '业务保障' }
+const priorityCodes: Record<string, string> = { P1: 'p1_urgent', P2: 'p2_high', P3: 'p3_normal', P4: 'p4_enterprise' }
+const channelCodes: Record<string, string> = { 语音: 'phone', 在线客服: 'web', 内部转办: 'internal' }
 const form = reactive<TicketCreateDesignForm>(initialTicketForm())
 const errors = reactive<Partial<Record<keyof TicketCreateDesignForm, string>>>({})
+const categories = ref<TicketCategory[]>([])
+const categoriesLoaded = ref(false)
+const draftId = ref<number | null>(null)
+const busy = ref(false)
 const now = ref(new Date().toLocaleString('sv-SE').replace('T', ' '))
+let clockTimer: number | undefined
 const systemInfo = computed(() => [
-  { label: '工单号', value: '保存后自动生成' },
-  { label: '受理工号', value: auth.user?.id == null ? '当前账号' : String(auth.user.id) },
-  { label: '受理人', value: auth.displayName || '张晓婷' },
-  { label: '受理班组', value: auth.user?.groups?.[0]?.name || '客服一组' },
+  { label: '工单号', value: '提交后自动生成' },
+  { label: '受理工号', value: (auth.user as any)?.username || '当前账号' },
+  { label: '受理人', value: auth.displayName || '当前用户' },
+  { label: '受理班组', value: (auth.user as any)?.group?.name || auth.user?.groups?.[0]?.name || '当前所属班组' },
   { label: '受理时间', value: now.value },
 ])
-const subcategoryOptions = computed(() => form.category ? categoryOptions[form.category] : [])
+const rootCategory = computed(() => form.category ? categories.value.find(c => c.parent_id == null && c.name === rootNames[form.category as CategoryName]) : undefined)
+const subcategoryRows = computed(() => categories.value.filter(c => c.parent_id === rootCategory.value?.id))
+const subcategoryOptions = computed(() => subcategoryRows.value.map(c => c.name))
+const selectedCategoryId = computed(() => subcategoryRows.value.find(c => c.name === form.subcategory)?.id)
 const numberRequired = computed(() => form.category === '业务运营' || form.category === '业务保障')
-onMounted(() => {
+
+onMounted(async () => {
+  clockTimer = window.setInterval(() => { now.value = new Date().toLocaleString('sv-SE') }, 1000)
   try {
-    const saved = JSON.parse(localStorage.getItem('ticket_create_design_draft') || 'null')
-    if (saved && typeof saved === 'object') {
-      Object.assign(form, initialTicketForm(), saved)
-      if (form.category && !categoryOptions[form.category]?.includes(form.subcategory)) form.subcategory = ''
-    }
-  } catch { /* 损坏的草稿不影响新建 */ }
+    categories.value = await metaApi.getCategories()
+    categoriesLoaded.value = true
+    if (form.subcategory && !subcategoryOptions.value.includes(form.subcategory)) form.subcategory = ''
+  } catch { ElMessage.error('分类加载失败，请刷新页面后重试') }
+  const id = Number(route.query.draft_id)
+  if (Number.isInteger(id) && id > 0) {
+    try {
+      const ticket: any = await api.get(`/tickets/${id}`)
+      if (!ticket.is_draft) throw new Error('非草稿')
+      draftId.value = id
+      form.channel = ({ phone: '语音', web: '在线客服', internal: '内部转办' } as Record<string,string>)[ticket.channel] || '在线客服'
+      form.customerName = ticket.customer_name || ''
+      form.companyName = ticket.customer_company || ''
+      form.industry = ticket.industry || ''
+      form.callerPhone = ticket.customer_phone || ''
+      form.contactPhone = ticket.contact_phone || ''
+      form.email = ticket.customer_email || ''
+      form.satelliteNumber = ticket.satellite_number || ''
+      const root = categories.value.find(c => c.id === ticket.category_l1_id)
+      form.category = (Object.keys(rootNames) as CategoryName[]).find(k => rootNames[k] === root?.name) || ''
+      form.subcategory = categories.value.find(c => c.id === ticket.category_id)?.name || ''
+      form.businessOpportunity = ticket.is_opportunity == null ? '' : ticket.is_opportunity ? 'yes' : 'no'
+      form.expectedResult = ticket.expected_result || ''
+      form.priority = (Object.keys(priorityCodes).find(k => priorityCodes[k] === ticket.priority)) || 'P2'
+      form.description = ticket.description || ''
+      form.faultTime = ticket.fault_occurred_at ? new Date(ticket.fault_occurred_at).toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16) : ''
+      form.recurrence = ticket.fault_recurrence || ''
+      form.faultLocation = ticket.fault_location || ''
+      form.batchFault = ticket.is_batch_fault == null ? '' : ticket.is_batch_fault ? 'yes' : 'no'
+    } catch { ElMessage.error('草稿加载失败') }
+  }
 })
+onUnmounted(() => { if (clockTimer !== undefined) window.clearInterval(clockTimer) })
 function onCategoryChange() {
   form.subcategory = ''
   for (const key of Object.keys(errors)) delete errors[key as keyof TicketCreateDesignForm]
@@ -81,15 +124,56 @@ function validate(): boolean {
   if (form.callerPhone && !phone.test(form.callerPhone)) errors.callerPhone = '请输入有效的手机号或固定电话'
   if (form.contactPhone && !phone.test(form.contactPhone)) errors.contactPhone = '请输入有效的手机号或固定电话'
   if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = '请输入有效的邮箱地址'
+  if (!categoriesLoaded.value || !selectedCategoryId.value) errors.subcategory ||= '分类尚未加载或未选择'
   return !Object.keys(errors).length
 }
-// Mock 持久化：与正式工单 API 隔离，避免设计稿字段写入不兼容接口。
-function saveDraft() { localStorage.setItem('ticket_create_design_draft', JSON.stringify({ ...form })); ElMessage.success('草稿已保存') }
-function submitTicket() {
+function payload(isDraft: boolean) {
+  return {
+    intake_form: true, is_draft: isDraft,
+    customer_type: 'enterprise', customer_name: form.customerName.trim() || null,
+    customer_company: form.companyName.trim() || null, industry: form.industry || null,
+    customer_phone: form.callerPhone.trim(),
+    customer_phone_type: form.callerPhone.startsWith('1') ? 'mobile' : 'landline',
+    contact_phone: form.contactPhone.trim() || null, customer_email: form.email.trim() || null,
+    channel: channelCodes[form.channel] || 'web', priority: priorityCodes[form.priority] || 'p2_high',
+    category_id: selectedCategoryId.value || null, description: form.description.trim(),
+    complaint_level: form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
+    satellite_number: form.satelliteNumber.trim() || null,
+    is_opportunity: form.businessOpportunity ? form.businessOpportunity === 'yes' : null,
+    expected_result: form.expectedResult || null,
+    fault_occurred_at: form.category === '业务保障' && form.faultTime ? new Date(form.faultTime).toISOString() : null,
+    fault_recurrence: form.category === '业务保障' ? form.recurrence || null : null,
+    fault_location: form.category === '业务保障' ? form.faultLocation.trim() || null : null,
+    is_batch_fault: form.category === '业务保障' && form.batchFault ? form.batchFault === 'yes' : null,
+  }
+}
+async function saveDraft() {
+  if (busy.value) return
+  busy.value = true
+  try {
+    const res: any = draftId.value
+      ? await api.patch(`/tickets/drafts/${draftId.value}`, payload(true))
+      : await api.post('/tickets', payload(true))
+    draftId.value = res.data.id
+    await router.replace({ path: '/tickets/new', query: { draft_id: draftId.value } })
+    ElMessage.success('草稿已保存')
+  } catch { /* API 拦截器显示错误 */ }
+  finally { busy.value = false }
+}
+async function submitTicket() {
+  if (busy.value) return
   if (!validate()) { ElMessage.warning('请检查标记的字段'); return }
-  localStorage.setItem('ticket_create_design_last_submit', JSON.stringify({ ...form, submittedAt: new Date().toISOString() }))
-  localStorage.removeItem('ticket_create_design_draft')
-  ElMessage.success('工单模拟提交成功')
+  busy.value = true
+  try {
+    const res: any = await api.post('/tickets', payload(false))
+    if (draftId.value) {
+      try { await api.delete(`/tickets/drafts/${draftId.value}`, { silent: true }) }
+      catch { ElMessage.warning('工单已创建，但旧草稿未能删除，请稍后手动清理') }
+    }
+    ElMessage.success('工单提交成功')
+    await router.push(`/tickets/${res.data.id}`)
+  } catch { /* API 拦截器显示错误 */ }
+  finally { busy.value = false }
 }
 </script>
 <style scoped>

@@ -1,61 +1,56 @@
-# 工单知识库与 RAG Server 对接设计（待双方确认）
+# 工单知识库与 RAG Server 对接
 
-## 边界与现状
+知识库页面是**只读的知识消费入口**。RAG Server 管理知识库与文档、执行检索、生成 Document Presentation；工单侧只负责展示：检索结果、文档摘要、文档重点、命中片段和图片资产。不提供文档管理、知识条目编写、AI 汇总回答、原文件预览或下载。
 
-- RAG Server 保存原文件、文档信息、知识库关系、检索片段和最终文档授权；工单系统不复制文件或片段，不解析文档入库。
-- 工单系统实现知识库页面及同源后端代理。当前工单库没有 RAG `collection_id` / `document_id` 字段，也没有知识库或文档级 ACL。
-- 下表中的 RAG 路径是对方已有的 Web 接口草案，**尚未具备面向接入项目的服务认证和授权，不可直接接入或暴露给浏览器**。
-- 工单前端使用 Vue 3、Element Plus；API 请求当前带本地 JWT Bearer。原生 PDF 阅读器发起的文件请求不能自动携带该请求头。
+## 接口
 
-## 页面与接口映射
+工单后端用 `RAG_API_URL`、`RAG_SERVICE_TOKEN` 和 `X-Audit-User-ID: ticket:<用户ID>` 调用项目只读 API；浏览器只调用同源的 `/api/v1/knowledge/*`。知识库目前仅管理员可见。
 
-| 页面动作 | 工单后端拟提供的同源接口 | RAG Server 草案接口 |
+| 页面动作 | 工单接口 | RAG 项目接口 |
 | --- | --- | --- |
-| 知识库首页 | `GET /api/v1/knowledge/collections` | `GET /api/v1/collections` |
-| 文档列表、文件名/格式筛选 | `GET /api/v1/knowledge/collections/{collection_id}/documents` | `GET /api/v1/collections/{collection_id}/documents` |
-| 知识库内检索 | `POST /api/v1/knowledge/collections/{collection_id}/queries` | `POST /api/v1/collections/{collection_id}/queries` |
-| 文档详情 | `GET /api/v1/knowledge/documents/{document_id}` | `GET /api/v1/documents/{document_id}` |
-| 片段来源位置 | `GET /api/v1/knowledge/documents/{document_id}/chunks/{chunk_id}` | `GET /api/v1/documents/{document_id}/chunks/{chunk_id}` |
-| 原文件 | `GET /api/v1/knowledge/documents/{document_id}/file` | `GET /api/v1/documents/{document_id}/preview` |
+| 选择授权知识库 | `GET /api/v1/knowledge/collections` | `GET /api/v1/collections` |
+| 检索选定知识库 | `POST /api/v1/knowledge/collections/{collection_id}/queries` | `POST /api/v1/collections/{collection_id}/queries` |
+| 读取文档摘要 / 重点 / 图片 | `GET /api/v1/knowledge/documents/{document_id}/presentation` | `GET /api/v1/documents/{document_id}/presentation` |
+| 读取图片资产 | `GET /api/v1/knowledge/assets/{asset_id}` | `GET /api/v1/assets/{asset_id}` |
+| 展开命中上下文 | `GET /api/v1/knowledge/documents/{document_id}/chunks/{chunk_id}` | `GET /api/v1/documents/{document_id}/chunks/{chunk_id}` |
 
-工单后端只接受固定配置的 RAG Server 基址和以上路径；`collection_id`、`document_id`、`chunk_id` 作为路径参数校验，不能接受任意目标 URL。列表保留 `limit`、`cursor`、`q`、`file_type` 等约定参数，检索保留 `query`、`top_k`、`mode`。分页、排序和允许的取值范围待正式契约确认。
+检索结果直接使用 `document_id`、`chunk_id`、`document_name`、可选 `page`、`text`，以及可选的 `document_summary_preview`、`has_presentation`、`images` / `asset_ids`。页面不显示相关度、检索分数、总结果数或 AI 回答。知识库选择器只列项目凭证获准的知识库，每次只检索当前选中的知识库，不支持“全部知识库”。
 
-知识库首页、列表、搜索、详情、片段和文件各自都要由 RAG Server 按接入项目做授权过滤。项目无权访问的知识库、文档、片段统一向工单侧返回 404；工单登录失效返回工单自身的 401。RAG 服务凭证失效不能透传成工单侧 401，否则当前前端会误以为用户登录失效并清除本地会话；应转为集成故障响应并记录服务端日志与 `request_id`。
+`presentation` 接口：
 
-## 身份与权限
+- `presentation_status = ready`：展示 `summary`（文档摘要）、`key_points`（文档重点）、`related_assets`（图片资产）
+- `pending`：摘要区显示“摘要生成中”，不锁死页面
+- `failed`：不暴露技术错误，显示“暂未生成文档摘要”
+- `404`（该文档没有 presentation）：摘要区整体不渲染，不留空卡片
+- `key_points` 为空：重点内容区不渲染
 
-1. 浏览器只向工单后端发送现有登录凭证。工单后端调用 `get_current_user` 验证用户处于启用状态且会话版本有效。
-2. 工单后端用本项目专用的 RAG 服务凭证调用 RAG Server。服务凭证不得进入前端或 URL。后续接入系统各使用独立凭证。
-3. RAG Server 根据已认证的服务凭证识别接入项目，由其管理员维护“项目 → 可访问知识库”的授权关系。文档首版继承所属知识库权限，所有读取接口使用同一规则。
-4. 工单后端决定本系统哪些登录用户可以进入知识库，并可向 RAG Server 传递经过验证的用户 ID 用于审计；该 ID 首版不参与 RAG 授权。RAG Server 不接受未认证客户端自行声明的项目或用户身份。
+`assets` 接口只转发 `image/*`，非图片返回 415；不代理原文件，不返回文件路径或下载地址。
 
-同一项目内获准进入知识库的用户共享该项目的知识库范围。服务凭证格式、轮换、审计用户 ID 的传递方式、项目授权维护界面与 401/403/404 错误映射仍待 RAG Server 固化。正式授权可用前，不开放真实知识库数据页面。若先做工单侧页面测试，只使用本地模拟数据。
+片段可能包含 Markdown。列表页把表格折叠成提示文字；详情与相邻片段按 Markdown 渲染，包括表格、标题、列表、引用和代码。渲染器禁用原始 HTML、链接和图片，表格超宽时在卡片内横向滚动；关键词在解析后的文字节点上高亮。RAG 原文保持不变。
 
-## 工单侧模拟实现
+工单侧不代理原文件接口，也不提供下载；不展示 `source_path`。片段文本发送到浏览器后仍可被复制；当前设计只保护原始文件及其版式。
 
-工单项目现有 `/knowledge` 页面及同源 `/api/v1/knowledge/*` 模拟接口，用于验证知识库浏览、文件名与格式筛选、检索来源、详情和原文件展示。模拟数据仅包含代码中固定的示例知识库和文件，不调用 RAG Server。前后端均限制管理员访问；后端需设置 `KNOWLEDGE_MOCK_ENABLED=true`，开发 Compose 默认启用，应用配置默认关闭。页面明确标注“模拟数据”。DOCX 暂提供下载回退。
+## 前端结构
 
-工单后端另已实现真实 RAG 读取代理：配置 `RAG_API_URL` 和 `RAG_SERVICE_TOKEN` 并重启 API 后，使用真实代理替换模拟接口。开发 Compose 的 RAG 地址默认指向 `http://10.113.114.88:8770`，凭证需在工单项目根目录 `.env` 中设置，不能提交到 Git。代理按当前登录用户生成 `X-Audit-User-ID: ticket:<用户ID>`，RAG 按项目凭证授权。PDF 预览会话和 Range 请求转发已在真实接口上验证；浏览器阅读器的视觉效果仍需人工验收。
+页面组件只依赖内部视图模型，RAG 字段调整只改 adapter：
 
-从项目根目录启动开发 API 时使用 `docker compose --env-file .env -f backend/docker-compose.yml up -d --no-deps --force-recreate api`，明确让 Compose 读取根目录凭证。2026-10-13 已用 ticket 项目凭证验证 `skdy-common` 列表（13 篇）和文件代理：2 篇 PDF 的原文件可读，Range 返回 206，越界返回 416；其余 11 篇原文件接口返回 `DOCUMENT_NOT_FOUND`，原因是 RAG 侧未保存原上传文件。页面因此将 `ready` 表述为“已索引”，无法预览时明确提示重新上传。检索结果点击后只打开文档，不展示页码或额外的“来源位置”区域。
+- `src/api/knowledge.ts`：RAG 原始类型与接口调用（`RagCitation` / `RagPresentation`）
+- `src/utils/knowledgeAdapter.ts`：原始结构 → `KnowledgeSearchResult` / `KnowledgePresentation` / `KnowledgeAsset` / `KnowledgeSnippet`
+- `src/types/knowledge.ts`：页面视图模型
+- `src/views/KnowledgeBaseView.vue`：页面状态机（未查询 / 查询中 / 有结果 / 无结果 / 检索失败 / 无权限）
+- `src/components/knowledge/`：结果列表、详情区、右侧辅助栏、Markdown 渲染、图片查看器
 
-## 原文件预览
+页面状态：
 
-- **PDF**：使用浏览器原生阅读器，从文档首页打开。工单页面不提供页码输入、自动跳页或片段高亮。
-- **图片**：浏览器内展示原文件。**TXT/CSV**：按文本读取、保留换行并限制过大文件的浏览器渲染量。
-- **DOCX**：在 Vue 页面评估框架无关的 `docx-preview` 对原文件的渲染效果；渲染失败时提供原文件下载。RAG Server 转 PDF/HTML 是后续可选能力，不作为首版前置条件。
-- **章节定位**：首版不展示片段的章节定位；检索结果只显示片段文字及所属文档。
-- 文档详情需稳定提供或可推断 `filename`、媒体类型/文件类型、`size_bytes`、`status`、`page_count` 与原文件是否可用；其中 `preview_available` 尚不存在，需在正式契约中确定是否新增。无原文件的 404 应有明确错误码。
+1. 初始未查询：轻量示例词，不做插画
+2. 查询中：列表 skeleton，详情保持上一个内容
+3. 有结果：三栏（结果 / 详情 / 辅助）
+4. 无结果：不展示低相关度结果，提供改词与换库
+5. 检索失败 / 无权限：单独提示
+6. 切换知识库：清空结果与选中态
 
-### 原生 PDF 的同源预览会话
+知识库筛选 chips 中的“全部”不是让 RAG 跨库检索：前端按顺序对每个授权知识库分别调用检索接口，按文档去重后合并展示；任一库失败只回退到失败提示（全部失败时）。
 
-工单后端提供经 JWT 认证的 `POST /api/v1/knowledge/documents/{document_id}/preview-session`，为当前用户和指定文档建立五分钟的只读预览会话。浏览器随后通过同源 `GET .../documents/{document_id}/file` 请求文件；会话凭证放在限定该文档文件路径的 `HttpOnly`、`SameSite=Lax` Cookie 中，不把 JWT、RAG 服务凭证或会话凭证放到文件 URL。服务端会话绑定用户、文档、会话版本与过期时间；每次文件请求仍由工单后端用本项目凭证向 RAG Server 读取，工单后端负责校验本地用户的预览会话。Cookie 的 `Secure` 属性在 HTTPS 环境启用。
+详情头部提供两个前端操作：`在新窗口打开` 以 `?collection=&doc=&chunk=` 深链打开当前命中片段（只读取片段详情与 presentation，不重新检索）；`加入常用` 把 document_id 存入浏览器 localStorage，仅本地记住常用文档。结果列表支持“相关度优先 / 文档名称”排序，不涉及检索分数展示。
 
-文件代理流式转发，不一次性读入内存。已在真实 PDF 上验证 `Range` 请求、`206 Partial Content`、`416 Range Not Satisfiable`、`Content-Range` 和 `Accept-Ranges`；浏览器中的手动翻页与大文件加载仍需界面验收。
-
-## 双方进入联调的条件
-
-1. RAG Server 完成项目服务认证、“项目 → 知识库”授权和六类接口的一致授权过滤，提供凭证轮换方式与 OpenAPI 契约。
-2. 双方确认列表、检索、详情、片段及文件的必要字段、分页、错误码；尤其确认媒体类型、原文件缺失和无权访问的行为。
-3. 工单侧完成后端代理、预览会话、页面和 DOCX 渲染评估；凭证只配置在后端。
-4. 用有权/无权项目验证 RAG 授权隔离，用获准/未获准的工单用户验证本地入口与预览会话；再用 PDF 大文件实测页码跳转、Range 全链路与会话过期行为。
+右侧辅助栏只在有图片资产或相关文档时出现；两者都为空时隐藏整栏，主区域自动扩宽。

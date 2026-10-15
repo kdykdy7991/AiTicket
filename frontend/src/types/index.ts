@@ -168,6 +168,15 @@ export interface Ticket {
   device_sn: string | null
   contact_name: string | null
   contact_phone: string | null
+  industry?: string | null
+  customer_email?: string | null
+  satellite_number?: string | null
+  is_opportunity?: boolean | null
+  expected_result?: string | null
+  fault_occurred_at?: string | null
+  fault_recurrence?: string | null
+  fault_location?: string | null
+  is_batch_fault?: boolean | null
   region: TicketRegion | null
   region_name: string | null
   category_l1: TicketCategory | null

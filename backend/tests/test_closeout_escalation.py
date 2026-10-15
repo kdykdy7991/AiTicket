@@ -8,8 +8,11 @@
 """
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest_asyncio
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -102,7 +105,8 @@ async def test_migration_revision_applied(closeout_env):
     factory = async_sessionmaker(closeout_env["engine"], class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
         head = (await s.execute(text("SELECT version_num FROM alembic_version"))).scalar_one()
-    assert head == "m7p9q0r1s2t3"  # m7p9q0r1s2t3 分类树扁平化后为新 head
+    config = Config(str(Path(__file__).resolve().parents[1] / "alembic.ini"))
+    assert head == ScriptDirectory.from_config(config).get_current_head()
 
 
 async def test_escalation_chain_shape(closeout_env):

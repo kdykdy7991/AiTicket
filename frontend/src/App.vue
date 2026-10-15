@@ -2,6 +2,9 @@
   <AuthLayout v-if="route.meta.layout === 'auth'">
     <RouterView />
   </AuthLayout>
+  <TicketCreateDesignLayout v-else-if="route.meta.layout === 'ticket-design'">
+    <RouterView />
+  </TicketCreateDesignLayout>
   <DefaultLayout v-else>
     <AgentAssistantView v-if="assistantStarted" v-show="route.name === 'AgentAssistant'" />
     <RouterView v-if="route.name !== 'AgentAssistant'" />
@@ -12,6 +15,7 @@
 import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AuthLayout from '@/layouts/AuthLayout.vue'
+import TicketCreateDesignLayout from '@/layouts/TicketCreateDesignLayout.vue'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import AgentAssistantView from '@/views/AgentAssistantView.vue'
 

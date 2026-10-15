@@ -1,240 +1,110 @@
 <template>
-  <div class="knowledge-view">
-    <header class="page-heading">
-      <div>
-        <h1>知识库</h1>
-        <p>按知识库浏览文档，或检索问题并查看原文出处</p>
-      </div>
-      <el-tag v-if="knowledgeMode === 'mock'" type="warning" effect="plain">模拟数据</el-tag>
-    </header>
-
-    <el-alert v-if="knowledgeMode === 'mock'" type="info" :closable="false" show-icon class="demo-notice"
-      title="当前仅用于页面和接口结构测试；尚未连接 RAG Server 的真实文档。" />
-
-    <div class="workspace">
-      <aside class="collection-panel">
-        <div class="panel-title">知识库</div>
-        <div v-if="loadingCollections" class="muted">加载中…</div>
-        <button v-for="item in collections" :key="item.id" type="button"
-          class="collection-item" :class="{ selected: selectedCollection === item.id }"
-          @click="chooseCollection(item.id)">
-          <span class="collection-name">{{ item.name }}</span>
-          <span class="collection-count">{{ item.document_count }} 篇</span>
-        </button>
-        <el-empty v-if="!loadingCollections && collections.length === 0" description="暂无知识库" :image-size="64" />
-      </aside>
-
-      <main class="document-panel">
-        <template v-if="selectedCollection">
-          <div class="toolbar">
-            <div>
-              <h2>{{ selectedCollectionName }}</h2>
-              <span>浏览文档与原文来源</span>
-            </div>
-            <div class="toolbar-filters">
-              <el-input v-model="filterText" clearable placeholder="按文件名筛选" @keyup.enter="loadDocuments()" />
-              <el-select v-model="fileType" placeholder="全部格式" style="width: 130px" @change="loadDocuments()">
-                <el-option label="全部格式" value="" />
-                <el-option label="PDF" value="pdf" />
-                <el-option label="SVG" value="svg" />
-                <el-option label="文本" value="txt" />
-                <el-option label="DOCX" value="docx" />
-              </el-select>
-              <el-button @click="loadDocuments()">筛选</el-button>
-            </div>
-          </div>
-
-          <div class="query-bar">
-            <el-input v-model="queryText" placeholder="检索当前知识库内容" clearable @keyup.enter="searchKnowledge" />
-            <el-button type="primary" :loading="searching" @click="searchKnowledge">检索</el-button>
-          </div>
-
-          <section v-if="searchVisible" class="results">
-            <div class="section-heading"><h3>检索结果</h3><el-button text @click="searchVisible = false">收起</el-button></div>
-            <el-empty v-if="citations.length === 0" description="没有找到相关片段" :image-size="60" />
-            <button v-for="item in citations" :key="item.chunk_id" class="citation" type="button" @click="openDocument(item.document_id)">
-              <strong>{{ item.document_name }}</strong>
-              <p>{{ item.text }}</p>
-            </button>
-          </section>
-
-          <section class="document-list" v-loading="loadingDocuments">
-            <div class="section-heading"><h3>文档</h3><span>{{ documents.length }} 篇</span></div>
-            <el-empty v-if="!loadingDocuments && documents.length === 0" description="暂无文档" :image-size="68" />
-            <button v-for="item in documents" :key="item.id" class="document-row" type="button" @click="openDocument(item.id)">
-              <span class="file-icon">{{ item.file_type.toUpperCase() }}</span>
-              <span class="file-main"><strong>{{ item.filename }}</strong><small>{{ formatSize(item.size_bytes) }} · {{ item.status === 'ready' ? '已索引' : item.status }}</small></span>
-              <span class="open-label">查看原文 ›</span>
-            </button>
-            <el-button v-if="nextCursor" class="more-btn" :loading="loadingDocuments" @click="loadMore">加载更多</el-button>
-          </section>
-        </template>
-        <el-empty v-else description="选择一个知识库" />
-      </main>
-    </div>
-
-    <el-drawer v-model="previewOpen" :title="activeDocument?.filename || '原文预览'" size="min(980px, 92vw)"
-      append-to-body modal-class="knowledge-preview-modal" :lock-scroll="true" @closed="clearPreview">
-      <div v-loading="loadingPreview" class="preview-body">
-        <div v-if="activeDocument" class="preview-meta">
-          <span>{{ activeDocument.file_type.toUpperCase() }} · {{ formatSize(activeDocument.size_bytes) }}</span>
-          <a v-if="previewUrl" :href="previewUrl" :download="activeDocument.filename">下载原文件</a>
-        </div>
-        <iframe v-if="activeDocument?.file_type === 'pdf' && previewUrl" :src="previewUrl" class="file-frame" title="PDF 原文" />
-        <img v-else-if="activeDocument && ['svg', 'png', 'jpg', 'jpeg', 'gif', 'webp'].includes(activeDocument.file_type) && previewUrl" :src="previewUrl" class="preview-image" alt="原文图片" />
-        <pre v-else-if="activeDocument?.file_type === 'txt' && previewText" class="preview-text">{{ previewText }}</pre>
-        <div v-else-if="activeDocument?.file_type === 'docx' && previewUrl" class="docx-fallback">
-          <p>DOCX 原文已获取。在线渲染效果将在接入真实样本时评估。</p>
-          <a :href="previewUrl" :download="activeDocument.filename">下载 DOCX 文件</a>
-        </div>
-        <el-empty v-else-if="!loadingPreview" description="此文档暂不可预览" />
-      </div>
-    </el-drawer>
+  <main class="knowledge-page"><div class="knowledge-content">
+    <header class="page-header"><h1>知识库</h1><span>检索企业知识，辅助工单处理与问题定位</span></header>
+    <form class="search-bar" @submit.prevent="search"><el-input v-model="queryInput" clearable size="large" placeholder="搜索知识库（文档标题、内容、关键词）" @clear="search"><template #prefix><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></template></el-input><button type="submit" :disabled="searching">{{ searching ? '搜索中…' : '搜索' }}</button></form>
+    <div class="toolbar"><div class="collection-chips"><button type="button" :class="{ active: collectionId === ALL }" @click="selectCollection(ALL)">全部</button><button v-for="collection in collections" :key="collection.id" type="button" :class="{ active: collectionId === collection.id }" @click="selectCollection(collection.id)">{{ collection.name }}</button></div><label class="sort-control"><span class="sr-only">排序方式</span><select v-model="sortMode"><option value="recent">最近更新</option><option value="name">文档名称</option></select></label></div>
+    <div class="result-count" aria-live="polite">{{ searching ? '正在搜索…' : loading ? '正在加载文档…' : `共 ${visibleDocuments.length} 个文档` }}</div>
+    <div v-if="accessDenied" class="page-state"><h2>暂无知识库访问权限</h2><p>请联系管理员开通知识库权限。</p></div>
+    <div v-else-if="error" class="page-state"><h2>知识库加载失败</h2><p>暂时无法获取文档，请稍后重试。</p><button type="button" @click="reload">重试</button></div>
+    <div v-else-if="loading" class="document-grid" aria-label="文档加载中"><div v-for="index in 6" :key="index" class="card-skeleton"><div class="cover-skeleton"/><div class="line-skeleton"/><div class="line-skeleton short"/></div></div>
+    <div v-else-if="searching" class="page-state"><h2>正在搜索知识库…</h2><p>正在查找与关键词相关的文档。</p></div>
+    <div v-else-if="!visibleDocuments.length" class="page-state"><h2>{{ activeQuery ? '没有找到相关文档' : '暂无文档' }}</h2><p>{{ activeQuery ? '试试更换关键词，或切换知识库范围。' : '当前知识库中还没有可浏览的文档。' }}</p></div>
+    <div v-else class="document-grid"><DocumentCard v-for="document in visibleDocuments" :key="document.id" :title="documentTitle(document)" :file-type="fileType(document)" :summary="presentationCache[document.id]?.summary || ''" :presentation-state="presentationCache[document.id]?.status || 'loading'" :tags="documentTags(document)" :updated-at="dateLabel(document)" @visible="ensurePresentation(document.id)" @open="openDocument(document)" /></div>
   </div>
+    <DocumentDetailDrawer :visible="drawerVisible" :document="selectedDocument" :presentation="selectedDocument ? presentationCache[selectedDocument.id] || null : null" :loading="selectedDocument ? !!presentationLoading[selectedDocument.id] : false" :title="selectedDocument ? documentTitle(selectedDocument) : ''" :file-type="selectedDocument ? fileType(selectedDocument) : ''" :updated-at="selectedDocument ? dateLabel(selectedDocument) : ''" :tags="selectedDocument ? documentTags(selectedDocument) : []" @close="drawerVisible = false" @copy="copyContent" @quote="quoteToTicket" @preview-asset="openAsset" />
+    <KnowledgeAssetViewer :asset="previewAsset" :visible="previewVisible" @close="previewVisible = false" />
+  </main>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { knowledgeApi, type KnowledgeCollection, type KnowledgeDocument, type KnowledgeCitation } from '@/api/knowledge'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import type { AxiosError } from 'axios'
+import { knowledgeApi, type KnowledgeCollection, type KnowledgeDocument } from '@/api/knowledge'
+import DocumentCard from '@/components/knowledge/DocumentCard.vue'
+import DocumentDetailDrawer from '@/components/knowledge/DocumentDetailDrawer.vue'
+import KnowledgeAssetViewer from '@/components/knowledge/KnowledgeAssetViewer.vue'
+import type { KnowledgeAsset, KnowledgePresentation } from '@/types/knowledge'
+import { toPresentation } from '@/utils/knowledgeAdapter'
 
+const ALL = 'all'
 const collections = ref<KnowledgeCollection[]>([])
-const knowledgeMode = ref<'mock' | 'rag' | null>(null)
-const selectedCollection = ref('')
 const documents = ref<KnowledgeDocument[]>([])
-const nextCursor = ref<string | null>(null)
-const filterText = ref('')
-const fileType = ref('')
-const queryText = ref('')
-const citations = ref<KnowledgeCitation[]>([])
-const searchVisible = ref(false)
-const loadingCollections = ref(false)
-const loadingDocuments = ref(false)
+const collectionId = ref(ALL)
+const queryInput = ref('')
+const activeQuery = ref('')
+const sortMode = ref<'recent' | 'name'>('recent')
+const loading = ref(true)
 const searching = ref(false)
-const previewOpen = ref(false)
-const loadingPreview = ref(false)
-const activeDocument = ref<KnowledgeDocument | null>(null)
-const previewUrl = ref('')
-const previewText = ref('')
-const selectedCollectionName = computed(() => collections.value.find(c => c.id === selectedCollection.value)?.name || '')
+const error = ref(false)
+const accessDenied = ref(false)
+const searchIds = ref<string[] | null>(null)
+const selectedDocument = ref<KnowledgeDocument | null>(null)
+const drawerVisible = ref(false)
+const previewAsset = ref<KnowledgeAsset | null>(null)
+const previewVisible = ref(false)
+const presentationCache = reactive<Record<string, KnowledgePresentation>>({})
+const presentationLoading = reactive<Record<string, boolean>>({})
+const presentationRequests = new Map<string, Promise<void>>()
+let requestVersion = 0
 
-function formatSize(bytes: number) { return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB` }
-function clearPreview() {
-  if (previewUrl.value.startsWith('blob:')) URL.revokeObjectURL(previewUrl.value)
-  previewUrl.value = ''
-  previewText.value = ''
-  activeDocument.value = null
+const scopedDocuments = computed(() => collectionId.value === ALL ? documents.value : documents.value.filter(item => item.collection_id === collectionId.value))
+const visibleDocuments = computed(() => {
+  const rows = searchIds.value ? scopedDocuments.value.filter(item => searchIds.value?.includes(item.id)) : scopedDocuments.value
+  return [...rows].sort((a, b) => sortMode.value === 'name'
+    ? documentTitle(a).localeCompare(documentTitle(b), 'zh-Hans-CN')
+    : (Date.parse(b.updated_at || b.created_at || '') || 0) - (Date.parse(a.updated_at || a.created_at || '') || 0) || documentTitle(a).localeCompare(documentTitle(b), 'zh-Hans-CN'))
+})
+function documentTitle(document: KnowledgeDocument): string { return (document.title || document.filename || '未命名文档').replace(/\.[^.]+$/, '') }
+function fileType(document: KnowledgeDocument): string { return (document.file_type || document.filename?.split('.').pop() || '').toUpperCase() }
+function dateLabel(document: KnowledgeDocument): string { const date = document.updated_at || document.created_at; if (!date) return ''; const parsed = new Date(date); return Number.isNaN(parsed.getTime()) ? '' : `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}` }
+function documentTags(document: KnowledgeDocument): string[] { return Array.isArray(document.tags) ? document.tags.filter(Boolean).slice(0, 3) : [] }
+async function allPages<T>(load: (cursor?: string) => Promise<{ items: T[]; page_info: { has_more: boolean; next_cursor: string | null } }>): Promise<T[]> {
+  const rows: T[] = []; const seen = new Set<string>(); let cursor: string | undefined
+  do { const page = await load(cursor); rows.push(...page.items); if (!page.page_info?.has_more || !page.page_info.next_cursor || seen.has(page.page_info.next_cursor)) break; cursor = page.page_info.next_cursor; seen.add(cursor) } while (true)
+  return rows
 }
-function chooseCollection(id: string) {
-  selectedCollection.value = id
-  filterText.value = ''
-  fileType.value = ''
-  searchVisible.value = false
-  citations.value = []
-  loadDocuments()
-}
-async function loadCollections() {
-  loadingCollections.value = true
+async function reload() {
+  const version = ++requestVersion; loading.value = true; error.value = false; accessDenied.value = false
   try {
-    knowledgeMode.value = (await knowledgeApi.status()).mode
-    const result = await knowledgeApi.collections()
-    collections.value = result.items
-    if (result.items[0]) chooseCollection(result.items[0].id)
-  } catch { /* API interceptor displays the error */ }
-  finally { loadingCollections.value = false }
+    const foundCollections = await allPages(cursor => knowledgeApi.collections(cursor)); if (version !== requestVersion) return
+    collections.value = foundCollections
+    const pages = await Promise.all(foundCollections.map(collection => allPages(cursor => knowledgeApi.documents(collection.id, { cursor })))); if (version !== requestVersion) return
+    documents.value = Array.from(new Map(pages.flat().map(document => [document.id, document])).values())
+    if (activeQuery.value) await runSearch(version)
+  } catch (cause) { if (version !== requestVersion) return; accessDenied.value = (cause as AxiosError)?.response?.status === 403; error.value = !accessDenied.value }
+  finally { if (version === requestVersion) loading.value = false }
 }
-async function loadDocuments(cursor?: string) {
-  if (!selectedCollection.value) return
-  loadingDocuments.value = true
-  try {
-    const result = await knowledgeApi.documents(selectedCollection.value, { q: filterText.value, file_type: fileType.value, cursor })
-    documents.value = cursor ? [...documents.value, ...result.items] : result.items
-    nextCursor.value = result.page_info.next_cursor
-  } catch { /* API interceptor displays the error */ }
-  finally { loadingDocuments.value = false }
+async function ensurePresentation(id: string): Promise<void> {
+  if (presentationCache[id] || presentationRequests.has(id)) return presentationRequests.get(id)
+  presentationLoading[id] = true
+  const pending = knowledgeApi.presentation(id).then(raw => { presentationCache[id] = toPresentation(raw) }).catch(() => { presentationCache[id] = { status: 'failed', summary: '', keyPoints: [], assets: [] } }).finally(() => { presentationLoading[id] = false; presentationRequests.delete(id) })
+  presentationRequests.set(id, pending); return pending
 }
-function loadMore() { if (nextCursor.value) loadDocuments(nextCursor.value) }
-async function searchKnowledge() {
-  if (!selectedCollection.value || !queryText.value.trim()) return
+async function runSearch(version: number) {
+  const query = activeQuery.value; if (!query) { searchIds.value = null; searching.value = false; return }
   searching.value = true
   try {
-    const result = await knowledgeApi.query(selectedCollection.value, queryText.value.trim())
-    citations.value = result.citations
-    searchVisible.value = true
-  } catch { /* API interceptor displays the error */ }
-  finally { searching.value = false }
+    const scope = collectionId.value === ALL ? collections.value : collections.value.filter(item => item.id === collectionId.value)
+    const titleIds = scopedDocuments.value.filter(item => documentTitle(item).toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(item => item.id)
+    const responses = await Promise.allSettled(scope.map(collection => knowledgeApi.query(collection.id, query)))
+    if (version !== requestVersion) return
+    const hits = responses.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof knowledgeApi.query>>> => result.status === 'fulfilled').flatMap(result => result.value.citations || []).map(hit => hit.document_id)
+    if (responses.length && responses.every(result => result.status === 'rejected') && !titleIds.length) throw new Error('search failed')
+    searchIds.value = [...new Set([...titleIds, ...hits])]
+  } catch { if (version === requestVersion) { error.value = true; searchIds.value = [] } }
+  finally { if (version === requestVersion) searching.value = false }
 }
-async function openDocument(id: string) {
-  clearPreview()
-  previewOpen.value = true
-  loadingPreview.value = true
-  try {
-    const detail = await knowledgeApi.detail(id)
-    activeDocument.value = detail
-    if (knowledgeMode.value === 'rag' && detail.file_type === 'pdf') {
-      await knowledgeApi.previewSession(id)
-      previewUrl.value = knowledgeApi.previewUrl(id)
-    } else {
-      const file = await knowledgeApi.file(id)
-      previewUrl.value = URL.createObjectURL(file)
-      if (detail.file_type === 'txt') previewText.value = await file.text()
-    }
-  } catch { /* API interceptor displays the server error */ }
-  finally { loadingPreview.value = false }
-}
-watch(previewOpen, open => document.body.classList.toggle('knowledge-preview-open', open))
-onMounted(loadCollections)
-onUnmounted(() => {
-  document.body.classList.remove('knowledge-preview-open')
-  clearPreview()
-})
+function search() { activeQuery.value = queryInput.value.trim(); const version = ++requestVersion; if (!activeQuery.value) { searchIds.value = null; searching.value = false; error.value = false; return }; void runSearch(version) }
+function selectCollection(id: string) { collectionId.value = id; if (activeQuery.value) search(); else searchIds.value = null }
+function openDocument(document: KnowledgeDocument) { selectedDocument.value = document; drawerVisible.value = true; void ensurePresentation(document.id) }
+function openAsset(asset: KnowledgeAsset) { if (!asset.contentType.startsWith('image')) return; previewAsset.value = asset; previewVisible.value = true }
+function contentText(): string { const document = selectedDocument.value; const presentation = document && presentationCache[document.id]; if (!document || !presentation) return ''; return [documentTitle(document), presentation.summary, presentation.keyPoints.length ? `关键要点\n${presentation.keyPoints.map((point, index) => `${index + 1}. ${point}`).join('\n')}` : ''].filter(Boolean).join('\n\n') }
+async function copyContent() { try { await navigator.clipboard.writeText(contentText()); ElMessage.success('文档内容已复制') } catch { ElMessage.error('复制失败，请检查剪贴板权限') } }
+async function quoteToTicket() { const document = selectedDocument.value; if (!document) return; try { await navigator.clipboard.writeText(`【知识库引用：${documentTitle(document)}】\n${contentText()}`); ElMessage.success('引用内容已复制，可粘贴到工单') } catch { ElMessage.error('复制失败，请检查剪贴板权限') } }
+onMounted(reload)
 </script>
 
 <style scoped>
-.knowledge-view { padding: 26px 30px 40px; color: var(--color-text-primary); }
-.page-heading, .toolbar, .section-heading, .preview-meta { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
-.page-heading h1 { margin: 0; font-size: 26px; }
-.page-heading p, .toolbar span { margin: 5px 0 0; color: var(--color-text-secondary); font-size: 13px; }
-.demo-notice { margin: 20px 0; }
-.workspace { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 18px; align-items: start; }
-.collection-panel, .document-panel { background: var(--color-bg-card); border: 1px solid var(--color-border-light); border-radius: 14px; padding: 18px; }
-.panel-title { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
-.collection-item { width: 100%; display: flex; flex-direction: column; align-items: flex-start; gap: 5px; border: 0; border-radius: 10px; padding: 12px; margin: 2px 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-.collection-item:hover, .collection-item.selected { background: #f0efff; }
-.collection-item.selected .collection-name { color: #5146c9; }
-.collection-name { font-weight: 650; }
-.collection-count, .muted { color: var(--color-text-tertiary); font-size: 12px; }
-.toolbar { flex-wrap: wrap; }
-.toolbar h2 { font-size: 20px; margin: 0; }
-.toolbar-filters, .query-bar { display: flex; gap: 9px; }
-.toolbar-filters { align-items: center; }
-.toolbar-filters .el-input { width: 180px; }
-.query-bar { margin: 22px 0; }
-.query-bar .el-input { flex: 1; }
-.section-heading { margin-bottom: 12px; }
-.section-heading h3 { margin: 0; font-size: 16px; }
-.section-heading span { color: var(--color-text-tertiary); font-size: 12px; }
-.results { border: 1px solid var(--color-border-light); border-radius: 10px; padding: 15px; margin-bottom: 22px; }
-.citation { width: 100%; display: block; background: #f8f8fd; border: 1px solid transparent; border-radius: 9px; padding: 12px; text-align: left; margin: 8px 0; cursor: pointer; color: inherit; }
-.citation:hover, .document-row:hover { border-color: #bbb5f4; }
-.citation p { color: var(--color-text-secondary); font-size: 13px; margin: 7px 0 0; }
-.document-row { width: 100%; display: flex; align-items: center; gap: 14px; text-align: left; border: 1px solid var(--color-border-light); border-radius: 10px; background: white; padding: 14px; margin-bottom: 9px; cursor: pointer; color: inherit; }
-.file-icon { flex: none; min-width: 52px; text-align: center; background: #eeedff; color: #5547ca; border-radius: 7px; padding: 10px 4px; font-size: 11px; font-weight: 750; }
-.file-main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-.file-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-main small { color: var(--color-text-tertiary); }
-.open-label { margin-left: auto; color: #594ec5; font-size: 12px; flex: none; }
-.more-btn { width: 100%; margin-top: 10px; }
-.preview-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.preview-meta { color: var(--color-text-secondary); font-size: 12px; padding-bottom: 12px; }
-.preview-meta a, .docx-fallback a { color: #5547ca; }
-.file-frame { flex: 1; width: 100%; min-height: 0; border: 1px solid var(--color-border-light); border-radius: 8px; }
-.preview-image { display: block; max-width: 100%; max-height: 100%; object-fit: contain; margin: auto; }
-.preview-text { flex: 1; min-height: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #f7f8fb; border-radius: 10px; padding: 20px; line-height: 1.75; }
-.docx-fallback { padding: 40px 18px; text-align: center; background: #f7f8fb; border-radius: 10px; }
-@media (max-width: 850px) { .knowledge-view { padding: 16px; } .workspace { grid-template-columns: 1fr; } .toolbar-filters { width: 100%; flex-wrap: wrap; } }
-</style>
-
-<style>
-body.knowledge-preview-open .main-content { overflow-y: hidden; }
-.knowledge-preview-modal .el-drawer__body { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.knowledge-page{min-height:100%;background:#f8f9f8;color:#1e2938}.knowledge-content{max-width:1640px;margin:0 auto;padding:30px clamp(22px,2.5vw,46px) 60px}.page-header{display:flex;align-items:baseline;gap:18px;margin-bottom:26px}.page-header h1{font-size:23px;line-height:1.3;margin:0;font-weight:750}.page-header span{color:#8c96a4;font-size:13px}.search-bar{display:flex;gap:12px}.search-bar :deep(.el-input){flex:1}.search-bar :deep(.el-input__wrapper){min-height:40px;border-radius:6px;box-shadow:0 0 0 1px #e2e6e9 inset!important}.search-bar button{width:88px;border:0;border-radius:6px;background:#777f4e;color:#fff;font-size:14px;cursor:pointer}.search-bar button:hover:not(:disabled){background:#666e3f}.search-bar button:disabled{opacity:.65;cursor:wait}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:16px}.collection-chips{display:flex;flex-wrap:wrap;gap:8px}.collection-chips button{border:1px solid transparent;border-radius:6px;background:#fff;padding:6px 12px;color:#394459;font-size:12px;cursor:pointer}.collection-chips button.active{border-color:#a9ad84;background:#f2f2e9;color:#555d3b}.sort-control select{border:0;background:transparent;color:#677182;font-size:12px;cursor:pointer}.result-count{margin:22px 0 15px;color:#7a8492;font-size:13px}.document-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}.page-state{min-height:260px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;border:1px solid #e9ecea;border-radius:10px;background:#fff}.page-state h2{font-size:16px;margin:0 0 8px}.page-state p{font-size:13px;color:#85909f;margin:0}.page-state button{margin-top:17px;border:1px solid #a8ad83;border-radius:6px;background:#fff;padding:7px 18px;color:#666e41;cursor:pointer}.card-skeleton{border:1px solid #e9ecea;border-radius:11px;background:#fff;padding:20px}.cover-skeleton{aspect-ratio:1.78;border-radius:8px;background:#eef0ec}.line-skeleton{height:14px;margin-top:17px;border-radius:4px;background:#eef0ec}.line-skeleton.short{width:65%;margin-top:11px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}@media(min-width:1700px){.document-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:1199px){.document-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:680px){.knowledge-content{padding:24px 16px 40px}.page-header{display:block}.page-header span{display:block;margin-top:5px}.document-grid{grid-template-columns:1fr}.search-bar button{width:72px}.toolbar{align-items:flex-start}.sort-control{white-space:nowrap}}
 </style>

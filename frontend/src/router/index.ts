@@ -46,6 +46,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '创建工单' },
   },
   {
+    path: '/tickets/create-design',
+    name: 'TicketCreateDesign',
+    component: () => import('@/views/TicketCreateDesignView.vue'),
+    meta: { title: '创建工单', requiresAgent: true },
+  },
+  {
     path: '/tickets/drafts',
     name: 'TicketDrafts',
     component: () => import('@/views/TicketDraftsView.vue'),

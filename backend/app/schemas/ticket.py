@@ -9,13 +9,23 @@ from pydantic import BaseModel, Field
 class TicketCreate(BaseModel):
     description: str = Field(default="", max_length=10000)
     priority: str = Field(default="p4_enterprise")
-    channel: Literal["phone", "wechat", "internal"] = "phone"
+    channel: Literal["phone", "wechat", "web", "internal"] = "phone"
     customer_type: str = Field(default="personal")
     customer_name: str | None = Field(default=None, max_length=100)
-    customer_phone: str = Field(..., min_length=1, max_length=20)
+    customer_phone: str = Field(default="", max_length=20)
     customer_phone_type: str | None = Field(default=None, max_length=20)  # 来电号码类型: mobile / landline
-    contact_phone: str | None = None
-    customer_company: str | None = None
+    contact_phone: str | None = Field(default=None, max_length=20)
+    customer_company: str | None = Field(default=None, max_length=200)
+    industry: str | None = Field(default=None, max_length=50)
+    customer_email: str | None = Field(default=None, max_length=255)
+    satellite_number: str | None = Field(default=None, max_length=100)
+    is_opportunity: bool | None = None
+    expected_result: str | None = Field(default=None, max_length=50)
+    fault_occurred_at: datetime | None = None
+    fault_recurrence: str | None = Field(default=None, max_length=30)
+    fault_location: str | None = Field(default=None, max_length=255)
+    is_batch_fault: bool | None = None
+    intake_form: bool = False
     customer_level: str | None = "normal"
     device_sn: str | None = None
     region_id: int | None = None
@@ -150,6 +160,15 @@ class AllowedAction(BaseModel):
 class TicketDetail(TicketBrief):
     description: str
     customer_company: str | None = None
+    industry: str | None = None
+    customer_email: str | None = None
+    satellite_number: str | None = None
+    is_opportunity: bool | None = None
+    expected_result: str | None = None
+    fault_occurred_at: datetime | None = None
+    fault_recurrence: str | None = None
+    fault_location: str | None = None
+    is_batch_fault: bool | None = None
     customer_level: str | None = None
     device_sn: str | None = None
     region_id: int | None = None

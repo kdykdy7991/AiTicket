@@ -5,15 +5,20 @@
       <div class="info-column">
         <div class="info-row"><span>问题分类</span><strong>{{ t.category_path || [t.category_l1?.name, t.category_l2?.name].filter(Boolean).join(' / ') || '—' }}</strong></div>
         <div v-if="t.symptom" class="info-row"><span>故障现象</span><strong>{{ t.symptom }}</strong></div>
+        <div v-if="t.satellite_number" class="info-row"><span>卫星物联网码号</span><strong>{{ t.satellite_number }}</strong></div>
+        <div v-if="t.expected_result" class="info-row"><span>客户期望结果</span><strong>{{ t.expected_result }}</strong></div>
+        <div v-if="t.is_opportunity != null" class="info-row"><span>商机工单</span><strong>{{ t.is_opportunity ? '是' : '否' }}</strong></div>
         <div class="info-row"><span>创建人</span><strong>{{ t.creator_name || '—' }}</strong></div>
       </div>
       <div class="info-column">
         <div class="info-row"><span>客户</span><strong>{{ customerName }}</strong></div>
         <div class="info-row"><span>客户类型</span><strong>{{ t.customer_type === 'enterprise' ? '企业' : '个人' }}</strong></div>
         <div v-if="t.organization?.name" class="info-row"><span>单位名称</span><strong>{{ t.organization.name }}</strong></div>
+        <div v-if="t.industry" class="info-row"><span>行业</span><strong>{{ t.industry }}</strong></div>
         <div v-if="t.customer_phone" class="info-row"><span>来电号码</span><strong>{{ t.customer_phone }}</strong></div>
         <div v-if="t.contact_name" class="info-row"><span>联系人</span><strong>{{ t.contact_name }}</strong></div>
         <div class="info-row"><span>联系号码</span><strong>{{ t.contact_phone || '—' }}</strong></div>
+        <div v-if="t.customer_email" class="info-row"><span>邮箱</span><strong>{{ t.customer_email }}</strong></div>
         <div v-if="regionText" class="info-row"><span>区域</span><strong>{{ regionText }}</strong></div>
         <div v-if="t.device_sn" class="info-row"><span>设备 SN</span><strong>{{ t.device_sn }}</strong></div>
       </div>
@@ -28,6 +33,16 @@
         <div class="info-row"><span>创建时间</span><strong>{{ formatTime(t.created_at) }}</strong></div>
         <div class="info-row"><span>最后更新</span><strong>{{ formatTime(t.updated_at) }}</strong></div>
         <div v-if="t.escalation_at" class="info-row"><span>处理时限</span><strong>{{ formatTime(t.escalation_at) }}</strong></div>
+      </div>
+    </div>
+    <div v-if="t.fault_occurred_at || t.fault_recurrence || t.fault_location || t.is_batch_fault != null" class="overview-grid section-divider">
+      <div class="info-column">
+        <div v-if="t.fault_occurred_at" class="info-row"><span>故障发生时间</span><strong>{{ formatTime(t.fault_occurred_at) }}</strong></div>
+        <div v-if="t.fault_recurrence" class="info-row"><span>故障复现规律</span><strong>{{ t.fault_recurrence }}</strong></div>
+      </div>
+      <div class="info-column">
+        <div v-if="t.fault_location" class="info-row"><span>故障地理位置</span><strong>{{ t.fault_location }}</strong></div>
+        <div v-if="t.is_batch_fault != null" class="info-row"><span>批量故障</span><strong>{{ t.is_batch_fault ? '是' : '否' }}</strong></div>
       </div>
     </div>
     <div v-if="t.resolution || t.root_cause || t.solution || t.is_callbacked || t.satisfaction" class="section-divider responsibility">
@@ -58,7 +73,7 @@ const t = computed<any>(() => props.ticket)
 function userName(user?: User | null) { return user ? `${user.firstname || ''}${user.lastname || ''}` : '' }
 const customerName = computed(() => t.value.customer_name || userName(t.value.customer) || '—')
 const regionText = computed(() => t.value.region_name || [t.value.region?.province, t.value.region?.city, t.value.region?.district, t.value.region?.station].filter(Boolean).join(' / '))
-const channelText = computed(() => ({ web: 'Web', email: '邮件', phone: '电话', wechat: '微信服务号/公众号', app: 'App', internal: '内部' } as Record<string, string>)[t.value.channel] || '—')
+const channelText = computed(() => ({ web: '在线客服', email: '邮件', phone: '语音', wechat: '微信服务号/公众号', app: 'App', internal: '内部转办' } as Record<string, string>)[t.value.channel] || '—')
 const satisfactionText = computed(() => ({ satisfied: '满意', average: '一般', dissatisfied: '不满意', unrated: '未评价' } as Record<string, string>)[t.value.satisfaction] || t.value.satisfaction)
 function formatTime(value?: string) { return value ? dayjs(value).format('YYYY/MM/DD HH:mm:ss') : '—' }
 </script>

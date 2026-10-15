@@ -14,7 +14,7 @@
           </svg>
           导出
         </el-button>
-        <el-button type="primary" @click="router.push({ name: 'TicketCreate' })" class="create-btn">
+        <el-button v-if="authStore.isAgent" type="primary" @click="router.push({ name: 'TicketCreate' })" class="create-btn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right: 6px">
             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
           </svg>
@@ -104,6 +104,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
+import { useAuthStore } from '@/stores/auth'
 import { ticketApi } from '@/api/tickets'
 import TicketFilters from '@/components/ticket/TicketFilters.vue'
 import TicketTable from '@/components/ticket/TicketTable.vue'
@@ -112,6 +113,7 @@ import type { TicketFilters as Filters, ExportColumn } from '@/types'
 
 const router = useRouter()
 const ticketStore = useTicketStore()
+const authStore = useAuthStore()
 const currentPage = ref(1)
 
 // 快捷分类标签：全部 + 7 个状态（id 与后端 STATE_ID_TO_KEY 1..7 对应）+ 已超时

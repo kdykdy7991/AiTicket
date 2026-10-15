@@ -1,6 +1,13 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
+// silent: 调用方自行处理错误（例如 404 表示“暂无该数据”），不弹全局提示
+declare module 'axios' {
+  interface AxiosRequestConfig {
+    silent?: boolean
+  }
+}
+
 const api = axios.create({
   baseURL: '/api/v1',
   timeout: 15000,
@@ -20,11 +27,12 @@ let lastAuthNotice = 0
 api.interceptors.response.use(
   response => response.data,
   error => {
+    const silent = error.config?.silent === true
     const msg = error.response?.data?.error?.message
       || error.response?.data?.detail
       || '请求失败'
     // 临时调试：打印 404 的请求 URL
-    if (error.response?.status === 404) {
+    if (error.response?.status === 404 && !silent) {
       console.error('[404]', error.config?.method?.toUpperCase(), error.config?.baseURL + error.config?.url)
     }
     if (error.response?.status === 401) {
@@ -43,7 +51,7 @@ api.interceptors.response.use(
         }
         window.location.href = '/login'
       }
-    } else {
+    } else if (!silent) {
       ElMessage.error(msg)
     }
     return Promise.reject(error)

@@ -2,6 +2,7 @@
 
 import csv
 import io
+import re
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -191,6 +192,15 @@ def _ticket_to_detail(
         refine_denied_reason=refine_denied_reason,
         description=t.description,
         customer_company=t.customer_company,
+        industry=t.industry,
+        customer_email=t.customer_email,
+        satellite_number=t.satellite_number,
+        is_opportunity=t.is_opportunity,
+        expected_result=t.expected_result,
+        fault_occurred_at=t.fault_occurred_at,
+        fault_recurrence=t.fault_recurrence,
+        fault_location=t.fault_location,
+        is_batch_fault=t.is_batch_fault,
         customer_level=t.customer_level,
         device_sn=t.device_sn,
         region_id=t.region_id,
@@ -563,7 +573,7 @@ async def export_tickets(
         "p1_urgent": "P1 特别重大事件", "p2_high": "P2 重大事件", "p3_normal": "P3 较大事件", "p4_enterprise": "P4 一般事件",
     }
     customer_type_labels = {"personal": "个人", "enterprise": "政企"}
-    channel_labels = {"phone": "电话", "wechat": "微信服务号/公众号", "internal": "内部", "web": "Web", "email": "邮件", "app": "App"}
+    channel_labels = {"phone": "语音", "wechat": "微信服务号/公众号", "internal": "内部转办", "web": "在线客服", "email": "邮件", "app": "App"}
     satisfaction_labels = {"satisfied": "满意", "average": "一般", "dissatisfied": "不满意", "unrated": "未评价"}
 
     # 列定义：(表头, 取值函数)
@@ -750,6 +760,15 @@ async def update_draft(
     ticket.customer_phone_type = body.customer_phone_type
     ticket.contact_phone = body.contact_phone
     ticket.customer_company = body.customer_company
+    ticket.industry = body.industry
+    ticket.customer_email = body.customer_email
+    ticket.satellite_number = body.satellite_number
+    ticket.is_opportunity = body.is_opportunity
+    ticket.expected_result = body.expected_result
+    ticket.fault_occurred_at = body.fault_occurred_at
+    ticket.fault_recurrence = body.fault_recurrence
+    ticket.fault_location = body.fault_location
+    ticket.is_batch_fault = body.is_batch_fault
     ticket.customer_level = body.customer_level
     ticket.device_sn = body.device_sn
     ticket.region_id = body.region_id
@@ -802,6 +821,8 @@ async def get_ticket(
     ticket = result.scalar_one_or_none()
     if not ticket:
         raise NotFoundError("工单", ticket_id)
+    if ticket.is_draft and ticket.creator_id != user.id:
+        raise NotFoundError("草稿", ticket_id)
     terminal_ops = await _get_terminal_operators(db, [ticket_id])
     # 后端唯一事实来源：动作/能力元数据全部由 state_machine 的真实规则生成
     allowed_actions = await compute_allowed_actions(db, ticket, user)
@@ -897,6 +918,61 @@ async def create_ticket(
     if body.is_instant_resolve:
         raise HTTPException(422, detail="即时咨询不记录工单")
 
+    if not body.is_draft:
+        if not body.customer_phone.strip():
+            raise HTTPException(422, detail="来电号码不能为空")
+        if body.intake_form:
+            lineage = cat_idx.lineage.get(body.category_id) if body.category_id else None
+            root_id = lineage.l1.id if lineage and lineage.l1 else None
+            required = {
+                "客户名称": body.customer_name, "单位全称": body.customer_company,
+                "行业": body.industry, "一级/二级分类": lineage.l2 if lineage else None,
+                "客户期望结果": body.expected_result, "客户问题详情": body.description,
+            }
+            missing = [label for label, value in required.items() if not value]
+            if body.is_opportunity is None:
+                missing.append("是否为商机工单")
+            if root_id in (2201, 2301) and not body.satellite_number:
+                missing.append("卫星物联网码号")
+            if root_id == 2301:
+                for label, value in (
+                    ("故障发生时间", body.fault_occurred_at),
+                    ("故障复现规律", body.fault_recurrence),
+                    ("故障发生地理位置", body.fault_location),
+                    ("是否批量故障", body.is_batch_fault),
+                ):
+                    if value is None or value == "":
+                        missing.append(label)
+            if missing:
+                raise HTTPException(422, detail=f"请填写：{'、'.join(missing)}")
+            if root_id not in (1001, 2101, 2201, 2301):
+                raise HTTPException(422, detail="请选择有效的一级分类")
+            if body.priority not in ("p1_urgent", "p2_high", "p3_normal", "p4_enterprise"):
+                raise HTTPException(422, detail="优先级无效")
+            if len(body.description) > 1000:
+                raise HTTPException(422, detail="客户问题详情不能超过1000字")
+            if body.industry not in ("物联网", "海洋渔业", "水利", "能源", "未提供"):
+                raise HTTPException(422, detail="行业无效")
+            if body.expected_result not in ("解释说明", "远程排查", "上门检修", "换终端", "退费", "销户", "体验优化"):
+                raise HTTPException(422, detail="客户期望结果无效")
+            if root_id == 2301 and body.fault_recurrence not in ("必现", "偶发", "仅特定时段"):
+                raise HTTPException(422, detail="故障复现规律无效")
+            if not re.fullmatch(r"(?:1[3-9]\d{9}|0\d{2,3}-?\d{7,8})", body.customer_phone):
+                raise HTTPException(422, detail="来电号码格式不正确")
+            if body.contact_phone and not re.fullmatch(r"(?:1[3-9]\d{9}|0\d{2,3}-?\d{7,8})", body.contact_phone):
+                raise HTTPException(422, detail="联系号码格式不正确")
+            if body.customer_email and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", body.customer_email):
+                raise HTTPException(422, detail="邮箱格式不正确")
+            body.complaint_level = (
+                {"一般投诉": "一般", "重要投诉": "重要", "重大投诉": "重大"}.get(lineage.l2.name)
+                if root_id == 2101 and lineage and lineage.l2 else None
+            )
+            if root_id != 2301:
+                body.fault_occurred_at = None
+                body.fault_recurrence = None
+                body.fault_location = None
+                body.is_batch_fault = None
+
 
     # Auto-match responsibility：分派链（表A dispatch_chains）优先，
     # 无链回退旧 category_routing_rules（双轨过渡，设计 §8.3）。
@@ -940,6 +1016,11 @@ async def create_ticket(
             customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
             customer_company=body.customer_company,
             customer_level=body.customer_level, device_sn=body.device_sn,
+            industry=body.industry, customer_email=body.customer_email,
+            satellite_number=body.satellite_number, is_opportunity=body.is_opportunity,
+            expected_result=body.expected_result, fault_occurred_at=body.fault_occurred_at,
+            fault_recurrence=body.fault_recurrence, fault_location=body.fault_location,
+            is_batch_fault=body.is_batch_fault,
             region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
@@ -996,7 +1077,8 @@ async def create_ticket(
 
         # Dispatcher required for formal tickets
         if not body.dispatcher_id:
-            raise HTTPException(422, detail="建单时必须指定部门对接人")
+            detail = "所选分类尚未配置对接人，请联系管理员" if body.intake_form else "建单时必须指定部门对接人"
+            raise HTTPException(422, detail=detail)
 
         ticket = Ticket(
             number=number, description=body.description,
@@ -1006,6 +1088,11 @@ async def create_ticket(
             customer_phone=body.customer_phone, customer_phone_type=body.customer_phone_type, contact_phone=body.contact_phone,
             customer_company=body.customer_company,
             customer_level=body.customer_level, device_sn=body.device_sn,
+            industry=body.industry, customer_email=body.customer_email,
+            satellite_number=body.satellite_number, is_opportunity=body.is_opportunity,
+            expected_result=body.expected_result, fault_occurred_at=body.fault_occurred_at,
+            fault_recurrence=body.fault_recurrence, fault_location=body.fault_location,
+            is_batch_fault=body.is_batch_fault,
             region_id=body.region_id, region_name=body.region_name, category_id=body.category_id,
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
