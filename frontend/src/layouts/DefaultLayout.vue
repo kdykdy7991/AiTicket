@@ -4,7 +4,7 @@
     <el-container direction="vertical">
       <TheTopbar />
       <el-main class="main-content">
-        <div class="content-wrapper" :class="{ 'content-wrapper--assistant': route.name === 'AgentAssistant' }">
+        <div class="content-wrapper" :class="{ 'content-wrapper--assistant': route.name === 'AgentAssistant', 'content-wrapper--ticket-create': route.name === 'TicketCreate' }">
           <slot />
         </div>
       </el-main>
@@ -42,6 +42,14 @@ const route = useRoute()
   max-width: none;
   padding: 0;
   animation: none;
+}
+
+.content-wrapper--ticket-create {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1480px;
+  margin-inline: auto;
+  padding: 24px clamp(16px, 2.5vw, 36px);
 }
 
 @keyframes page-in {
