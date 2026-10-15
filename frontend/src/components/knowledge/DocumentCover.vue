@@ -26,9 +26,9 @@ const icon = computed(() => /终端|设备|sim|卡/.test(lower.value) ? 'device'
 // 封面色只由文件类型决定；标题关键词仅决定右下角的辅助图标。
 const tone = computed(() => {
   switch (props.fileType.trim().toUpperCase()) {
-    case 'DOC': case 'DOCX': return 'olive'
+    case 'DOC': case 'DOCX': return 'blue'
     case 'PDF': return 'sand'
-    case 'MD': case 'MARKDOWN': return 'blue'
+    case 'MD': case 'MARKDOWN': return 'olive'
     case 'TXT': case 'RTF': return 'green'
     default: return 'neutral'
   }
