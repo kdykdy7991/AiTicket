@@ -207,6 +207,8 @@ def _ticket_to_detail(
         symptom=t.symptom,
         creator_id=t.creator_id,
         creator_name=t.creator.name if t.creator else None,
+        creator_username=t.creator.username if t.creator else None,
+        creator_group_name=t.creator.group.name if t.creator and t.creator.group else None,
         first_owner_id=t.first_owner_id,
         first_owner_name=t.first_owner.name if t.first_owner else None,
         is_escalated=t.is_escalated,

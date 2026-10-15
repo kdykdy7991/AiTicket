@@ -20,23 +20,7 @@
 
       <div class="detail-body">
         <div class="detail-main">
-          <div class="sidebar-card flow-card">
-            <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h4a6 6 0 0 1 6 5"/></svg>处理流程</h3>
-            <StateLogTimeline
-              :logs="ticket.state_logs || []"
-              :current-state="(ticket as any).state_key"
-              :current-owner-name="(ticket as any).owner_name || ''"
-              :current-dispatcher-name="(ticket as any).dispatcher_name || ''"
-              :current-creator-name="(ticket as any).creator_name || ''"
-              :articles-by-log="articlePlacement"
-              :ticket="ticket"
-              :closure-log-id="closureLogId"
-            />
-          </div>
-          <div v-if="(ticket as any).description" class="ticket-description">
-            <h3 class="ticket-description-label"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M15 3v5h4M8 12h8M8 16h6"/></svg>问题描述</h3>
-            <div class="ticket-description-body">{{ (ticket as any).description }}</div>
-          </div>
+          <TicketDetailInformation :ticket="ticket" />
 
           <!-- 已退回工单：补充后重新提交 -->
           <div v-if="canResubmit" class="resubmit-card">
@@ -216,7 +200,19 @@
           </div>
         </div>
         <aside class="detail-sidebar">
-          <TicketOverview :ticket="ticket" />
+          <div class="sidebar-card flow-card">
+            <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h4a6 6 0 0 1 6 5"/></svg>处理时间流</h3>
+            <StateLogTimeline
+              :logs="ticket.state_logs || []"
+              :current-state="(ticket as any).state_key"
+              :current-owner-name="(ticket as any).owner_name || ''"
+              :current-dispatcher-name="(ticket as any).dispatcher_name || ''"
+              :current-creator-name="(ticket as any).creator_name || ''"
+              :articles-by-log="articlePlacement"
+              :ticket="ticket"
+              :closure-log-id="closureLogId"
+            />
+          </div>
         </aside>
       </div>
 
@@ -255,7 +251,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Group, AllowedAction, TicketCategory } from '@/types'
 import StateTag from '@/components/common/StateTag.vue'
 import ReplyEditor from '@/components/ticket/ReplyEditor.vue'
-import TicketOverview from '@/components/ticket/TicketOverview.vue'
+import TicketDetailInformation from '@/components/ticket/TicketDetailInformation.vue'
 import StateLogTimeline from '@/components/ticket/StateLogTimeline.vue'
 
 const route = useRoute()
@@ -823,14 +819,6 @@ async function confirmCancel() {
   letter-spacing: -0.02em;
 }
 
-.ticket-description {
-  background: var(--color-bg-card);
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-}
-
-.ticket-description-label,
 .timeline-section-title {
   display: flex;
   align-items: center;
@@ -841,13 +829,6 @@ async function confirmCancel() {
   margin: 0 0 20px;
 }
 .section-title-icon { width: 19px; height: 19px; flex: none; color: var(--color-primary); }
-
-.ticket-description-body {
-  font-size: 14px;
-  color: var(--color-text-primary);
-  line-height: 1.7;
-  white-space: pre-wrap;
-}
 
 .detail-body {
   display: flex;
@@ -861,7 +842,7 @@ async function confirmCancel() {
   min-width: 0;
 }
 .detail-sidebar {
-  width: min(420px, 38%);
+  width: min(360px, 34%);
   flex-shrink: 0;
   align-self: flex-start;
   position: sticky;
@@ -872,12 +853,6 @@ async function confirmCancel() {
   flex-direction: column;
   gap: 16px;
 }
-.detail-sidebar :deep(.overview-card) { padding: 20px; }
-.detail-sidebar :deep(.overview-grid) { grid-template-columns: minmax(0, 1fr); gap: 14px; }
-.detail-sidebar :deep(.info-column) { gap: 14px; }
-.detail-sidebar :deep(.info-column + .info-column) { border-left: 0; padding-left: 0; }
-.detail-sidebar :deep(.info-row) { grid-template-columns: 104px minmax(0, 1fr); gap: 10px; }
-.detail-sidebar :deep(.section-divider) { margin-top: 20px; padding-top: 20px; }
 .sidebar-card {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border-light);

@@ -2,8 +2,9 @@
   <main class="page">
     <nav class="crumb"><router-link to="/tickets">工单管理</router-link><span>›</span><strong>创建工单</strong></nav>
     <h1>创建工单</h1>
-    <form novalidate @submit.prevent="submitTicket">
-      <TicketFormSection title="工单信息" icon="Setting" hint="（工单号提交后生成）"><div class="grid system-grid"><div v-for="item in systemInfo" :key="item.label" class="field"><label>{{ item.label }}</label><input :value="item.value" readonly class="readonly" /></div><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div></div></TicketFormSection>
+    <form id="ticket-create-form" novalidate @submit.prevent="submitTicket">
+      <div class="create-layout"><div class="form-main">
+      <TicketFormSection title="工单信息" icon="MessageBox"><div class="grid intake-grid"><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div></div></TicketFormSection>
       <TicketFormSection title="客户信息" icon="User"><div class="grid customer-grid">
         <div class="field"><label for="customerName" class="required">客户名称</label><input id="customerName" v-model.trim="form.customerName" placeholder="请输入客户名称" :class="{ invalid: errors.customerName }" /><small v-if="errors.customerName" class="error">{{ errors.customerName }}</small></div>
         <div class="field"><label for="companyName" class="required">单位全称</label><input id="companyName" v-model.trim="form.companyName" placeholder="请输入单位全称" :class="{ invalid: errors.companyName }" /><small v-if="errors.companyName" class="error">{{ errors.companyName }}</small></div>
@@ -27,8 +28,17 @@
         <div class="field"><label for="faultLocation" class="required">故障发生地理位置</label><input id="faultLocation" v-model.trim="form.faultLocation" placeholder="经纬度或文字地址" :class="{ invalid: errors.faultLocation }" /><small class="help">优先经纬度，也可填写文字地址</small><small v-if="errors.faultLocation" class="error">{{ errors.faultLocation }}</small></div>
         <fieldset class="field radio-field"><legend class="required">是否批量故障</legend><div class="radio-options"><label><input v-model="form.batchFault" type="radio" value="yes" /> 是</label><label><input v-model="form.batchFault" type="radio" value="no" /> 否</label></div><small v-if="errors.batchFault" class="error">{{ errors.batchFault }}</small></fieldset>
       </div></TicketFormSection>
-      <div class="form-actions"><button type="button" class="cancel" :disabled="busy" @click="router.push('/tickets')">取消</button><button type="button" class="secondary" :disabled="busy" @click="saveDraft">{{ busy ? '保存中…' : '保存草稿' }}</button><button type="submit" class="primary" :disabled="busy">{{ busy ? '处理中…' : '提交工单' }}</button></div>
+      </div><aside class="form-sidebar" aria-label="系统记录"><section class="record-card"><h2><span class="record-icon"><Setting /></span>系统记录<span class="readonly-badge">只读</span></h2><dl><div v-for="item in systemInfo" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section></aside></div>
     </form>
+    <Teleport to="body">
+      <div class="form-actions" :style="{ left: uiStore.sidebarCollapsed ? '68px' : '240px' }">
+        <div class="required-progress" role="status" :aria-label="`必填完成度 ${completedRequired}/${requiredFields.length}`">
+          <span class="progress-ring" :style="{ '--progress': `${requiredPercent}%` }"><span>{{ requiredPercent }}%</span></span>
+          <span class="progress-copy"><span>必填完成度</span><strong>{{ completedRequired }} / {{ requiredFields.length }}</strong></span>
+        </div>
+        <div class="action-buttons"><button type="button" class="cancel" :disabled="busy" @click="router.push('/tickets')">取消</button><button type="button" class="secondary" :disabled="busy" @click="saveDraft">{{ busy ? '保存中…' : '保存草稿' }}</button><button type="submit" form="ticket-create-form" class="primary" :disabled="busy">{{ busy ? '处理中…' : '提交工单' }}</button></div>
+      </div>
+    </Teleport>
   </main>
 </template>
 <script setup lang="ts">
@@ -36,13 +46,15 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
+import { useUIStore } from '@/stores/ui'
 import { metaApi } from '@/api/overviews'
 import api from '@/api'
 import TicketFormSection from '@/components/ticket-create/TicketFormSection.vue'
 import { initialTicketForm, type CategoryName, type TicketCreateDesignForm } from '@/types/ticketCreateDesign'
 import type { TicketCategory } from '@/types'
+import { Setting } from '@element-plus/icons-vue'
 
-const router = useRouter(), route = useRoute(), auth = useAuthStore()
+const router = useRouter(), route = useRoute(), auth = useAuthStore(), uiStore = useUIStore()
 const channels = ['语音', '在线客服', '内部转办']
 const industries = ['物联网', '海洋渔业', '水利', '能源', '未提供']
 const expectedResults = ['解释说明', '远程排查', '上门检修', '换终端', '退费', '销户', '体验优化']
@@ -62,9 +74,9 @@ const now = ref(new Date().toLocaleString('sv-SE').replace('T', ' '))
 let clockTimer: number | undefined
 const systemInfo = computed(() => [
   { label: '工单号', value: '提交后自动生成' },
-  { label: '受理工号', value: (auth.user as any)?.username || '当前账号' },
-  { label: '受理人', value: auth.displayName || '当前用户' },
-  { label: '受理班组', value: (auth.user as any)?.group?.name || auth.user?.groups?.[0]?.name || '当前所属班组' },
+  { label: '受理工号', value: (auth.user as any)?.username || '—' },
+  { label: '受理人', value: auth.displayName || '—' },
+  { label: '受理班组', value: (auth.user as any)?.group?.name || auth.user?.groups?.[0]?.name || '—' },
   { label: '受理时间', value: now.value },
 ])
 const rootCategory = computed(() => form.category ? categories.value.find(c => c.parent_id == null && c.name === rootNames[form.category as CategoryName]) : undefined)
@@ -72,6 +84,21 @@ const subcategoryRows = computed(() => categories.value.filter(c => c.parent_id 
 const subcategoryOptions = computed(() => subcategoryRows.value.map(c => c.name))
 const selectedCategoryId = computed(() => subcategoryRows.value.find(c => c.name === form.subcategory)?.id)
 const numberRequired = computed(() => form.category === '业务运营' || form.category === '业务保障')
+const requiredFields = computed<(keyof TicketCreateDesignForm)[]>(() => {
+  const fields: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'category', 'subcategory', 'businessOpportunity', 'expectedResult', 'priority', 'description']
+  if (numberRequired.value) fields.push('satelliteNumber')
+  if (form.category === '业务保障') fields.push('faultTime', 'recurrence', 'faultLocation', 'batchFault')
+  return fields
+})
+const completedRequired = computed(() => requiredFields.value.filter(key => {
+  const value = form[key]?.trim()
+  if (!value) return false
+  if (key === 'subcategory') return subcategoryOptions.value.includes(value)
+  if (key === 'callerPhone') return /^(1[3-9]\d{9}|0\d{2,3}-?\d{7,8})$/.test(value)
+  if (key === 'faultTime') return !Number.isNaN(new Date(value).getTime())
+  return true
+}).length)
+const requiredPercent = computed(() => Math.round(completedRequired.value / requiredFields.value.length * 100))
 
 onMounted(async () => {
   clockTimer = window.setInterval(() => { now.value = new Date().toLocaleString('sv-SE') }, 1000)
@@ -115,10 +142,7 @@ function onCategoryChange() {
 }
 function validate(): boolean {
   for (const key of Object.keys(errors)) delete errors[key as keyof TicketCreateDesignForm]
-  const required: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'category', 'subcategory', 'businessOpportunity', 'expectedResult', 'priority', 'description']
-  if (numberRequired.value) required.push('satelliteNumber')
-  if (form.category === '业务保障') required.push('faultTime', 'recurrence', 'faultLocation', 'batchFault')
-  for (const key of required) if (!form[key]?.trim()) errors[key] = '请填写此项'
+  for (const key of requiredFields.value) if (!form[key]?.trim()) errors[key] = '请填写此项'
   if (form.subcategory && !subcategoryOptions.value.includes(form.subcategory)) errors.subcategory = '请选择当前分类对应的二级分类'
   const phone = /^(1[3-9]\d{9}|0\d{2,3}-?\d{7,8})$/
   if (form.callerPhone && !phone.test(form.callerPhone)) errors.callerPhone = '请输入有效的手机号或固定电话'
@@ -207,4 +231,50 @@ async function submitTicket() {
   .system-grid, .customer-grid, .content-grid, .fault-grid, .one-grid { grid-template-columns: minmax(0, 1fr); }
   .priority-field { grid-column: 1 / -1; }
 }
+</style>
+<style scoped>
+.page{padding-bottom:104px}
+.form-actions{position:fixed;right:0;bottom:0;z-index:20;box-sizing:border-box;display:flex;align-items:center;justify-content:space-between;gap:20px;margin:0;padding:12px clamp(18px,2.4vw,36px);border:0;border-top:1px solid var(--color-border-light);border-radius:0;background:#fff;box-shadow:0 -5px 22px rgba(27,41,64,.055)}
+.required-progress{display:flex;align-items:center;gap:11px;min-width:0}.progress-ring{--progress:0%;position:relative;display:grid;place-items:center;flex:none;width:38px;height:38px;border-radius:50%;background:conic-gradient(var(--color-primary) var(--progress),#e6ebef 0)}.progress-ring:before{content:'';position:absolute;inset:4px;border-radius:50%;background:#fff}.progress-ring span{position:relative;z-index:1;font-size:9px;font-weight:700;color:var(--color-text-secondary)}.progress-copy{display:flex;flex-direction:column;gap:2px;color:var(--color-text-tertiary);font-size:11px;white-space:nowrap}.progress-copy strong{color:var(--color-text-primary);font-size:13px}.action-buttons{display:flex;align-items:center;gap:9px}.form-actions button{flex:none;min-width:94px;height:38px;border-radius:var(--radius-md)}
+@media(max-width:700px){.page{padding-bottom:124px}.form-actions{left:0!important;gap:8px;padding:10px 12px}.required-progress{gap:6px}.progress-ring{width:34px;height:34px}.progress-copy{font-size:10px}.progress-copy strong{font-size:11px}.action-buttons{gap:5px}.form-actions button{min-width:0;padding:0 8px;font-size:12px}}
+</style>
+<style scoped>
+/* 表单控件统一尺寸与内边距；原生 select 箭头由同一图形绘制，避免贴边。 */
+.grid{column-gap:20px;row-gap:17px}
+.field{gap:7px}
+.field>label,.radio-field legend{color:var(--color-text-secondary);font-size:12.5px;font-weight:650;line-height:1.35}
+.field input:not([type=radio]),.field select,.field textarea{height:40px;padding:9px 13px;border:1px solid #dce2e9;border-radius:var(--radius-sm);background-color:#fff;font-size:13px;line-height:1.4;transition:border-color .16s,box-shadow .16s,background-color .16s}
+.field select{appearance:none;-webkit-appearance:none;padding-right:40px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23778394' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-size:16px 16px;background-position:right 14px center;cursor:pointer}
+.field select:disabled{cursor:not-allowed;color:var(--color-text-tertiary);background-color:var(--color-bg-subtle);opacity:1}
+.field input:not([type=radio]):not(.readonly):hover,.field select:not(:disabled):hover,.field textarea:hover{border-color:#b7c2ce}
+.field input.readonly{border-color:#edf0f2;background:var(--color-bg-subtle);color:var(--color-text-secondary);cursor:default}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--color-primary);box-shadow:0 0 0 3px var(--color-primary-ghost)}
+.field .invalid,.field .invalid:focus{border-color:var(--color-danger)!important;box-shadow:0 0 0 3px var(--color-danger-light)}
+.help{line-height:1.45}.error{line-height:1.45}
+.radio-field legend{margin-bottom:9px}
+.radio-options{height:40px;gap:8px}
+.radio-options label{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-width:66px;height:40px;padding:0 13px;border:1px solid #dce2e9;border-radius:var(--radius-sm);background:#fff;transition:border-color .16s,background-color .16s}
+.radio-options label:hover,.priority-options label:hover{border-color:#aebacf}
+.radio-options label:has(input:checked){border-color:var(--color-primary);background:var(--color-primary-ghost);color:var(--color-primary)}
+.radio-options input,.priority-options input{width:15px;height:15px;margin:0;accent-color:var(--color-primary)}
+.priority-options{gap:9px}
+.priority-options label{min-width:67px;height:40px;padding:0 12px;border-color:#dce2e9;border-radius:var(--radius-sm);transition:border-color .16s,background-color .16s}
+.field .textarea-wrap textarea{height:148px;min-height:120px;padding:12px 14px 29px;line-height:1.65}
+.textarea-wrap span{right:15px;bottom:12px}
+.form-actions button{padding:0 18px;border-radius:var(--radius-sm);transition:border-color .16s,background-color .16s,box-shadow .16s}
+.form-actions button:focus-visible,.radio-options label:focus-within,.priority-options label:focus-within{outline:2px solid var(--color-primary);outline-offset:2px}
+.form-actions button:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:700px){.form-actions button{padding:0 8px}}
+</style>
+<style scoped>
+.create-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;align-items:start;gap:20px}
+.form-main{min-width:0}.form-sidebar{min-width:0;position:sticky;top:18px}
+.intake-grid{grid-template-columns:minmax(0,320px)}
+.record-card{overflow:hidden;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-card);box-shadow:var(--shadow-xs)}
+.record-card h2{display:flex;align-items:center;gap:9px;margin:0;padding:16px 18px;border-bottom:1px solid var(--color-border-light);font-size:14px;font-weight:700;color:var(--color-text-primary)}
+.record-icon{display:grid;place-items:center;width:25px;height:25px;border-radius:6px;background:var(--color-primary-light);color:var(--color-primary)}
+.record-icon :deep(svg){width:15px;height:15px}.readonly-badge{margin-left:auto;padding:3px 8px;border:1px solid var(--color-border);border-radius:999px;color:var(--color-text-tertiary);font-size:11px;font-weight:500}
+.record-card dl{margin:0;padding:4px 18px 12px}.record-card dl>div{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px dashed var(--color-border-light)}.record-card dl>div:last-child{border-bottom:0}.record-card dt{flex:none;color:var(--color-text-tertiary);font-size:12px}.record-card dd{margin:0;min-width:0;color:var(--color-text-primary);font-size:12px;font-weight:600;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+@container (max-width:980px){.create-layout{grid-template-columns:minmax(0,1fr)}.form-sidebar{position:static;grid-row:1}.record-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 22px}.record-card dl>div:nth-last-child(-n+2){border-bottom:0}}
+@container (max-width:580px){.record-card dl{grid-template-columns:1fr}.record-card dl>div:nth-last-child(2){border-bottom:1px dashed var(--color-border-light)}.intake-grid{grid-template-columns:1fr}}
 </style>

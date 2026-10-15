@@ -261,6 +261,8 @@ export interface Article {
 }
 
 export interface TicketDetail extends Ticket {
+  creator_username?: string | null
+  creator_group_name?: string | null
   articles: Article[]
   links: TicketLink[]
   state_logs?: TicketStateLog[]

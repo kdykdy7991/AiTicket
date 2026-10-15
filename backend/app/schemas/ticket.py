@@ -176,6 +176,8 @@ class TicketDetail(TicketBrief):
     symptom: str | None = None
     creator_id: int | None = None
     creator_name: str | None = None
+    creator_username: str | None = None
+    creator_group_name: str | None = None
     first_owner_id: int | None = None
     first_owner_name: str | None = None
     is_escalated: bool = False
