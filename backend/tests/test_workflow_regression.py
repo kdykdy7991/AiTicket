@@ -132,7 +132,7 @@ async def test_standard_closed_loop(env):
     # 4) 回访满意并归档（带 callback_details）
     r3 = await env["patch"](t["id"], {
         "state": archive["target_state"],
-        "is_callbacked": True, "callback_required": True,
+        "is_callbacked": True,
         "satisfaction": "satisfied",
         "callback_details": "回访确认设备运行正常",
         "archive_notes": "闭环",
@@ -152,13 +152,13 @@ async def test_standard_closed_loop(env):
 async def test_exception_branch_chain(env, monkeypatch):
     """异常分支链：暂缓 → 恢复 → 打回 → 退回 → 重新提交 → 撤销。"""
     import app.services.state_machine as state_machine
-    monkeypatch.setattr(state_machine, "HOLD_ENABLED", True)  # 历史链路兼容性
     t = await env["create_ticket"]()
     await env["patch"](t["id"], {"state": "open", "owner_id": env["handler_id"]})
 
     # 暂缓 / 恢复（处理人执行）
     with as_user(env["handler_id"], "agent"):
-        await env["patch"](t["id"], {"state": "on_hold", "reason": "等待备件"})
+        await env["patch"](t["id"], {"state": "on_hold", "reason": "等待备件",
+                                 "hold_until": "2027-03-01T00:00:00"})
         await env["patch"](t["id"], {"state": "open", "reason": "备件已到"})
         # 打回：处理人 → 待受理
         await env["patch"](t["id"], {"state": "pending", "reason": "信息不全，打回重新分派"})
@@ -221,7 +221,7 @@ async def test_dissatisfied_closure_loop(env):
     archive = {a["action"]: a for a in d["allowed_actions"]}["archive"]
     r3 = await env["patch"](t["id"], {
         "state": archive["target_state"],
-        "is_callbacked": True, "callback_required": True,
+        "is_callbacked": True,
         "satisfaction": "satisfied",
         "callback_details": "二次处理后确认解决，客户满意",
     })

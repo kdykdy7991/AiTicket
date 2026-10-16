@@ -32,6 +32,30 @@ class CategoryLineage(NamedTuple):
     path: tuple[TicketCategory, ...]
 
 
+def create_selectable_categories(
+    categories: list[TicketCategory], chain_category_ids: set[int]
+) -> dict[int, bool]:
+    """客服建单判断终点；与分类列表、建单校验共用同一规则。"""
+    by_id = {c.id: c for c in categories if c.is_active}
+    parents_with_children = {c.parent_id for c in by_id.values() if c.parent_id is not None}
+    result: dict[int, bool] = {}
+    for category in by_id.values():
+        ancestor = by_id.get(category.parent_id)
+        seen: set[int] = set()
+        blocked = False
+        while ancestor is not None and ancestor.id not in seen:
+            seen.add(ancestor.id)
+            if ancestor.id in chain_category_ids:
+                blocked = True
+                break
+            ancestor = by_id.get(ancestor.parent_id)
+        result[category.id] = (
+            (category.id in chain_category_ids or category.id not in parents_with_children)
+            and not blocked
+        )
+    return result
+
+
 class ResponsibilitySlots(NamedTuple):
     """工单全生命周期的责任槽位（由分类静态推导，不依赖运行时历史）。
 

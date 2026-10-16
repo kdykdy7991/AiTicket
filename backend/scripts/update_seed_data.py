@@ -2,14 +2,29 @@
 
 Only adds users that do not already exist (by id) and their mappings.
 Existing dispatchers, categories, skill groups and tickets are left untouched.
+
+Also applies the published node-form seeds (triage / processing / phone_feedback),
+so first-time and incremental deployments converge on the same configuration.
 """
 
 import asyncio
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# `python scripts/update_seed_data.py` puts scripts/ on sys.path, not the backend
+# root, so make `app` / `scripts` importable before importing the form seeds.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from scripts.seed_closure_form import seed_closure_form
+from scripts.seed_phone_feedback_form import seed_phone_feedback_form
+from scripts.seed_processing_form import seed_processing_form
+from scripts.seed_sales_opportunity_form import seed_sales_opportunity_form
+from scripts.seed_triage_form import seed_triage_form
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://skdy:skdy123@localhost:5433/skdy_ticket")
 
@@ -130,6 +145,18 @@ HANDLER_SKILL_GROUPS = [
 
 
 async def main() -> None:
+    # 节点动态表单先落库：它自包含（只依赖已存在的分类），不应被下面的历史
+    # 用户/分类补数据失败连带跳过。三个 seed 各自幂等，可重复调用。
+    for name, seed in (
+        ("triage", seed_triage_form),
+        ("processing", seed_processing_form),
+        ("phone_feedback", seed_phone_feedback_form),
+        ("closure", seed_closure_form),
+        ("sales_opportunity", seed_sales_opportunity_form),
+    ):
+        print(f"Applying node form seed: {name} ...")
+        await seed(async_session)
+
     now = datetime.now(timezone.utc)
     async with async_session() as db:
         print("Upserting skill_groups...")
@@ -209,6 +236,8 @@ async def main() -> None:
 
         await db.commit()
         print("Done.")
+
+    await engine.dispose()
 
 
 if __name__ == "__main__":

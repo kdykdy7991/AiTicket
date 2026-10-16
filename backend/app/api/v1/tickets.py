@@ -2,12 +2,17 @@
 
 import csv
 import io
+import json
 import re
+import shutil
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
-from typing import NamedTuple
+from pathlib import Path
+from typing import NamedTuple, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -16,9 +21,12 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, require_role
 from app.core.exceptions import NotFoundError, StateTransitionError
 from app.models.group import Group
+from app.models.group import SkillGroup, UserSkillGroup
 from app.models.category import TicketCategory
+from app.models.dispatch import DispatchChain
 from app.models.sla import SLAPolicy
-from app.models.ticket import Ticket, TicketStateLog
+from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
+from app.models.node_form import TicketNodeSubmission
 from app.models.user import User
 from app.schemas.ticket import (
     TicketBatchUpdate,
@@ -35,6 +43,7 @@ from app.services.category_utils import (
     ResponsibilitySlots,
     build_lineage_index,
     build_responsibility_index,
+    create_selectable_categories,
 )
 from app.services.state_machine import (
     TERMINAL_STATES,
@@ -45,8 +54,14 @@ from app.services.state_machine import (
     compute_allowed_actions,
     compute_article_actions,
     refine_capability,
+    check_transition_permission,
     is_dispatcher,
+    transition_permission_error,
+    transition_precondition_error,
 )
+from app.services.callback_policy import resolve_callback_required
+from app.services.node_context import NodeContext, NodeContextConflict, resolve_node_context
+from app.services.node_form import resolve_form, present_form, validate_submission
 
 router = APIRouter(tags=["tickets"])
 
@@ -171,11 +186,14 @@ def _ticket_to_detail(
     responsibility: dict[int, ResponsibilitySlots] | None = None,
     allowed_actions: list[dict] | None = None,
     can_reply: bool = False,
+    can_note: bool = False,
     can_addition: bool = False,
     can_remind: bool = False,
     can_refine: bool = False,
     refine_options: list[dict] | None = None,
     refine_denied_reason: str | None = None,
+    node_context: dict | None = None,
+    current_form: dict | None = None,
 ) -> TicketDetail:
     brief = _ticket_to_brief(t, terminal_ops, lineage, responsibility)
     return TicketDetail(
@@ -185,11 +203,14 @@ def _ticket_to_detail(
         allowed_actions=allowed_actions or [],
         is_terminal=t.state in TERMINAL_STATES,
         can_reply=can_reply,
+        can_note=can_note,
         can_addition=can_addition,
         can_remind=can_remind,
         can_refine=can_refine,
         refine_options=refine_options or [],
         refine_denied_reason=refine_denied_reason,
+        node_context=node_context,
+        current_form=current_form,
         description=t.description,
         customer_company=t.customer_company,
         industry=t.industry,
@@ -215,6 +236,7 @@ def _ticket_to_detail(
         duplicate_reason=t.duplicate_reason,
         linked_ticket_id=t.linked_ticket_id,
         solved_at=t.solved_at,
+        hold_until=t.hold_until,
         closed_at=t.closed_at,
         closed_duration_minutes=t.closed_duration_minutes,
         resolved=t.resolved,
@@ -230,7 +252,10 @@ def _ticket_to_detail(
         callback_details=t.callback_details,
         archive_notes=t.archive_notes,
         satisfaction=t.satisfaction,
+        customer_satisfaction_score=t.customer_satisfaction_score,
         unsatisfied_reason=t.unsatisfied_reason,
+        closure_result=t.closure_result,
+        customer_recognized=t.customer_recognized,
         dispatch_chain_steps=t.dispatch_chain_steps,
         dispatch_step_index=t.dispatch_step_index,
     )
@@ -776,6 +801,7 @@ async def update_draft(
     ticket.region_id = body.region_id
     ticket.region_name = body.region_name
     ticket.category_id = body.category_id
+    ticket.callback_required = await resolve_callback_required(db, body.category_id)
     ticket.group_id = body.group_id or user.group_id
     ticket.skill_group_id = body.skill_group_id
     ticket.handler_skill_group_id = body.handler_skill_group_id
@@ -800,6 +826,66 @@ async def update_draft(
     ticket = result.scalar_one()
     return TicketCreateResponse(data=_ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility))
 
+
+
+def closure_condition_context(ticket: Ticket) -> dict:
+    """闭环表单的只读条件上下文：回访要求由更早的流程确定，Closure 不改写它。
+
+    表单据此决定「是否已完成回访」等字段是否出现；客服提交的值无法伪造它，
+    因为它不来自请求体。
+    """
+    return {"callback_required": ticket.callback_required}
+
+
+async def _compose_node_form(
+    db: AsyncSession,
+    ticket: Ticket,
+    context: NodeContext,
+    user: User,
+    allowed_actions: list[dict],
+    article_actions: dict,
+    refine: dict,
+    node_context: dict,
+) -> dict | None:
+    """当前节点表单，以及由此产生的动作/能力位调整（详情与变更后响应共用）。
+
+    closure 只对「此刻确实能归档的人」下发表单：满意度为不满意时归档前置不成立，
+    此时仍走既有回访记录入口，闭环表单不得用来绕过不满意限制。
+    """
+    node_type = context.node_type
+    if node_type == "triage":
+        article_actions["can_reply"] = False
+    if node_type == "closure":
+        # 已产生不满意事实时只走「退回重开」，不下发闭环表单：否则可以原地改写评价，
+        # 绕过「不满意必须重新处理」的既有约束。
+        if ticket.satisfaction == "dissatisfied":
+            return None
+        # 权限仍按归档动作判定（客服团队 / admin），但不再要求归档前置已满足：
+        # 「要求回访但未回访」的工单需要先通过本表单记录回访事实。
+        if await transition_permission_error(db, ticket, "archived", user) is not None:
+            return None
+        form = await resolve_form(db, context)
+        # 回访要求是只读事实：随表单一起下发，供界面展示且驱动字段可见性。
+        return (await present_form(db, form, ticket, values=closure_condition_context(ticket))
+                if form else None)
+    if node_type not in ("triage", "processing", "phone_feedback", "sales_opportunity"):
+        return None
+    if not (refine["can_refine"] or article_actions["can_reply"]):
+        return None
+    form = await resolve_form(db, context)
+    if not form:
+        return None
+    if node_type in ("processing", "phone_feedback", "sales_opportunity") and article_actions["can_reply"]:
+        # 表单负责推进状态，普通回复降级为不推进状态的 note。
+        article_actions["can_note"] = True
+        article_actions["can_reply"] = False
+        node_context["allowed_actions"] = [
+            a for a in node_context["allowed_actions"] if a["action"] != "reply"
+        ]
+        node_context["allowed_actions"].append(
+            {"action": "note", "target_state": ticket.state, "label": "添加回复"}
+        )
+    return await present_form(db, form, ticket)
 
 
 @router.get("/tickets/{ticket_id}", response_model=TicketDetail)
@@ -827,9 +913,20 @@ async def get_ticket(
         raise NotFoundError("草稿", ticket_id)
     terminal_ops = await _get_terminal_operators(db, [ticket_id])
     # 后端唯一事实来源：动作/能力元数据全部由 state_machine 的真实规则生成
-    allowed_actions = await compute_allowed_actions(db, ticket, user)
-    article_actions = compute_article_actions(ticket, user)
-    refine = await refine_capability(db, ticket, user)
+    try:
+        allowed_actions = await compute_allowed_actions(db, ticket, user)
+        article_actions = compute_article_actions(ticket, user)
+        refine = await refine_capability(db, ticket, user)
+        context = await resolve_node_context(
+            db, ticket, user, state_actions=allowed_actions,
+            article_actions=article_actions, refine=refine,
+        )
+    except NodeContextConflict as exc:
+        raise HTTPException(409, detail={"code": "node_context_conflict", "message": str(exc)}) from exc
+    node_context = asdict(context)
+    current_form = await _compose_node_form(
+        db, ticket, context, user, allowed_actions, article_actions, refine, node_context,
+    )
     return _ticket_to_detail(
         ticket, terminal_ops,
         lineage=cat_idx.lineage,
@@ -839,6 +936,8 @@ async def get_ticket(
         can_refine=refine["can_refine"],
         refine_options=refine["refine_options"],
         refine_denied_reason=refine["refine_denied_reason"],
+        node_context=node_context,
+        current_form=current_form,
     )
 
 
@@ -866,9 +965,20 @@ async def _detail_after_mutation(
     )
     ticket = result.scalar_one()
     terminal_ops = await _get_terminal_operators(db, [ticket.id])
-    allowed_actions = await compute_allowed_actions(db, ticket, user)
-    article_actions = compute_article_actions(ticket, user)
-    refine = await refine_capability(db, ticket, user)
+    try:
+        allowed_actions = await compute_allowed_actions(db, ticket, user)
+        article_actions = compute_article_actions(ticket, user)
+        refine = await refine_capability(db, ticket, user)
+        context = await resolve_node_context(
+            db, ticket, user, state_actions=allowed_actions,
+            article_actions=article_actions, refine=refine,
+        )
+    except NodeContextConflict as exc:
+        raise HTTPException(409, detail={"code": "node_context_conflict", "message": str(exc)}) from exc
+    node_context = asdict(context)
+    current_form = await _compose_node_form(
+        db, ticket, context, user, allowed_actions, article_actions, refine, node_context,
+    )
     return TicketCreateResponse(
         data=_ticket_to_detail(
             ticket, terminal_ops,
@@ -879,6 +989,8 @@ async def _detail_after_mutation(
             can_refine=refine["can_refine"],
             refine_options=refine["refine_options"],
             refine_denied_reason=refine["refine_denied_reason"],
+            node_context=node_context,
+            current_form=current_form,
         )
     )
 
@@ -897,7 +1009,311 @@ async def refine_ticket_category(
     if not ticket:
         raise NotFoundError("工单", ticket_id)
 
+    context = await resolve_node_context(db, ticket, user)
+    if await resolve_form(db, context):
+        raise HTTPException(409, detail="当前分诊节点须连同分诊表单一起提交")
+
     await apply_refine(db, ticket, new_category_id=body.category_id, operator=user)
+    await db.commit()
+    return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
+
+
+class TriageSubmissionIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_category_id: int
+    form_definition_id: int
+    form_version: int
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/tickets/{ticket_id}/current-form")
+async def get_current_form(
+    ticket_id: int,
+    target_category_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    ticket = await db.get(Ticket, ticket_id)
+    if ticket is None:
+        raise NotFoundError("工单", ticket_id)
+    context = await resolve_node_context(db, ticket, user)
+    can_read = (
+        (context.node_type == "triage" and any(a["action"] == "refine" for a in context.allowed_actions))
+        or (context.node_type in ("processing", "phone_feedback", "sales_opportunity") and compute_article_actions(ticket, user)["can_reply"])
+    )
+    if not can_read:
+        raise HTTPException(403, detail="当前无节点表单权限")
+    if context.node_type in ("processing", "phone_feedback", "sales_opportunity") and target_category_id is not None:
+        raise HTTPException(400, detail="当前节点表单无需目标分类")
+    if target_category_id is not None:
+        options = (await refine_capability(db, ticket, user))["refine_options"]
+        if target_category_id not in {option["id"] for option in options}:
+            raise HTTPException(400, detail="只能选择当前分类的启用直下级")
+    form = await resolve_form(db, context)
+    if form is None:
+        raise HTTPException(404, detail="当前节点未配置已发布表单")
+    return await present_form(db, form, ticket, target_category_id)
+
+
+@router.get("/tickets/{ticket_id}/node-submissions")
+async def get_node_submissions(
+    ticket_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Read submission history using the captured field definitions, not latest form config."""
+    ticket = await db.get(Ticket, ticket_id)
+    if ticket is None or (ticket.is_draft and ticket.creator_id != user.id):
+        raise NotFoundError("工单", ticket_id)
+    records = (await db.execute(select(TicketNodeSubmission).where(
+        TicketNodeSubmission.ticket_id == ticket_id
+    ).order_by(TicketNodeSubmission.id))).scalars().all()
+    article_ids = [record.article_id for record in records if record.article_id is not None]
+    articles = {}
+    if article_ids:
+        for article in (await db.execute(select(Article).options(selectinload(Article.attachments)).where(
+            Article.id.in_(article_ids)
+        ))).scalars().all():
+            articles[article.id] = article
+    from app.api.v1.articles import _attachment_url
+    return [{
+        "id": record.id, "node_type": record.node_type,
+        "form_definition_id": record.form_definition_id, "form_version": record.form_version,
+        "department_id": record.department_id, "operator_id": record.operator_id,
+        "submitted_at": record.submitted_at, "action_type": record.action_type,
+        "state_log_id": record.state_log_id, "data": record.data,
+        "article_id": record.article_id,
+        "article_body": articles[record.article_id].body if record.article_id in articles else None,
+        "attachments": [{"id": att.id, "filename": att.original_filename,
+                         "url": _attachment_url(att.storage_path)}
+                        for att in articles[record.article_id].attachments] if record.article_id in articles else [],
+        "field_snapshot": record.field_snapshot,
+    } for record in records]
+
+
+@router.post("/tickets/{ticket_id}/node-submit", response_model=TicketCreateResponse)
+async def submit_node_form(
+    ticket_id: int,
+    payload: str = Form(...),
+    attachments: list[UploadFile] = File(default=[]),
+    db: AsyncSession = Depends(get_db),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
+    user: User = Depends(get_current_user),
+):
+    """Complete a processing, feedback, or sales node through domain transitions."""
+    try:
+        body = json.loads(payload)
+        if not isinstance(body, dict) or not isinstance(body.get("values"), dict):
+            raise ValueError
+        form_id = int(body["form_definition_id"])
+        form_version = int(body["form_version"])
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(422, detail="节点表单请求格式错误") from None
+    ticket = (await db.execute(select(Ticket).where(Ticket.id == ticket_id).with_for_update())).scalar_one_or_none()
+    if ticket is None:
+        raise NotFoundError("工单", ticket_id)
+    if (body.get("expected_category_id") != ticket.category_id
+            or body.get("expected_department_id") != ticket.skill_group_id
+            or body.get("expected_dispatch_step_index") != ticket.dispatch_step_index
+            or body.get("expected_state") != ticket.state):
+        raise HTTPException(409, detail="工单上下文已变化，请刷新后重新提交")
+    context = await resolve_node_context(db, ticket, user)
+    if context.node_type not in ("processing", "phone_feedback", "sales_opportunity"):
+        raise HTTPException(409, detail="当前节点已变化或不是可提交节点")
+    form = await resolve_form(db, context)
+    if form is None:
+        raise HTTPException(409, detail="当前处理节点未配置表单")
+    # Same ownership rule as the existing reply endpoint; no extra role grants.
+    if ticket.owner_id != user.id or not compute_article_actions(ticket, user)["can_reply"]:
+        raise HTTPException(403, detail="仅当前处理人可完成本节点处理")
+    if (form_id, form_version) != (form.definition.id, form.definition.version):
+        raise HTTPException(409, detail="表单版本已变化，请刷新后重新提交")
+    if len(attachments) > 10:
+        raise HTTPException(422, detail="最多上传 10 个相关材料附件")
+    data, ticket_updates, article_values, snapshot = await validate_submission(
+        db, form, ticket, None, body["values"],
+    )
+    if not article_values.get("body", "").strip():
+        raise HTTPException(422, detail="节点反馈正文必填")
+    # The reply endpoint uses this log as the completed node's timeline key.
+    handling_log = (await db.execute(select(TicketStateLog).where(
+        TicketStateLog.ticket_id == ticket_id,
+        TicketStateLog.to_state.in_(("open", "on_hold")),
+    ).order_by(TicketStateLog.id.desc()).limit(1))).scalar_one_or_none()
+    saved_attachments: list[ArticleAttachment] = []
+    try:
+        article = Article(ticket_id=ticket_id, type="reply", sender_id=user.id,
+                          body=article_values["body"],
+                          state_key=str(handling_log.id) if handling_log else None)
+        db.add(article)
+        await db.flush()
+        if attachments:
+            from app.api.v1.articles import _save_attachments
+            saved_attachments = await _save_attachments(article.id, ticket_id, attachments, allow_pdf=True)
+            db.add_all(saved_attachments)
+            await db.flush()
+        for key, value in ticket_updates.items():
+            setattr(ticket, key, value)
+        log = await apply_transition(db, ticket, to_state="resolved", operator=user,
+                                     allow_intermediate_transfer=True,
+                                     allow_sales_completion=context.node_type == "sales_opportunity")
+        if context.node_type == "sales_opportunity":
+            log = await apply_transition(db, ticket, to_state="archived", operator=user,
+                                         allow_sales_completion=True)
+        submission = TicketNodeSubmission(
+            ticket_id=ticket.id, node_type=context.node_type, form_definition_id=form.definition.id,
+            form_version=form.definition.version, department_id=context.department_id,
+            operator_id=user.id, action_type=log.action_type, data=data,
+            field_snapshot=snapshot, state_log_id=log.id, article_id=article.id,
+        )
+        db.add(submission)
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        # The DB rollback removes attachment rows. Remove newly written files too.
+        for directory in {Path(att.storage_path).parent for att in saved_attachments}:
+            from app.core.config import settings
+            shutil.rmtree(Path(settings.UPLOAD_DIR) / directory, ignore_errors=True)
+        raise
+    return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
+
+
+@router.post("/tickets/{ticket_id}/triage-submit", response_model=TicketCreateResponse)
+async def submit_triage(
+    ticket_id: int,
+    body: TriageSubmissionIn,
+    db: AsyncSession = Depends(get_db),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
+    user: User = Depends(get_current_user),
+):
+    """One locked transaction: validate form, save submission, refine and route."""
+    ticket = (await db.execute(
+        select(Ticket).where(Ticket.id == ticket_id).with_for_update()
+    )).scalar_one_or_none()
+    if ticket is None:
+        raise NotFoundError("工单", ticket_id)
+    context = await resolve_node_context(db, ticket, user)
+    if context.node_type != "triage" or not any(a["action"] == "refine" for a in context.allowed_actions):
+        raise HTTPException(403, detail="当前用户无权提交分诊")
+    capability = await refine_capability(db, ticket, user)
+    if body.target_category_id not in {option["id"] for option in capability["refine_options"]}:
+        raise HTTPException(400, detail="只能细化到当前分类的启用直下级")
+    form = await resolve_form(db, context)
+    if form is None:
+        raise HTTPException(409, detail="当前分诊节点未配置表单")
+    if form.definition.code == "constellation_triage_v1":
+        # The selected category is the only editable routing choice. Reject a
+        # broken target chain before saving the form or changing the category.
+        from app.services.dispatch_chain import get_dept, resolve_chain
+
+        target_chain = await resolve_chain(db, body.target_category_id)
+        target_steps = target_chain["steps"] if target_chain else []
+        target_department = target_steps[0].get("department_code") if target_steps else None
+        if not target_chain or target_chain["matched_category_id"] != body.target_category_id \
+                or not target_department or target_department == context.department_code \
+                or await get_dept(db, target_department) is None:
+            raise HTTPException(422, detail="目标分类未配置有效的流转部门")
+    if (body.form_definition_id, body.form_version) != (form.definition.id, form.definition.version):
+        raise HTTPException(409, detail="表单版本已变化，请刷新后重新提交")
+    data, ticket_updates, _article_values, snapshot = await validate_submission(
+        db, form, ticket, body.target_category_id, body.values,
+    )
+    submission = TicketNodeSubmission(
+        ticket_id=ticket.id, node_type="triage", form_definition_id=form.definition.id,
+        form_version=form.definition.version, department_id=context.department_id,
+        operator_id=user.id, action_type="refine", data=data, field_snapshot=snapshot,
+    )
+    db.add(submission)
+    for key, value in ticket_updates.items():
+        setattr(ticket, key, value)
+    log = await apply_refine(db, ticket, new_category_id=body.target_category_id, operator=user)
+    submission.state_log_id = log.id
+    await db.commit()
+    return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
+
+
+class ClosureSubmissionIn(BaseModel):
+    form_definition_id: int
+    form_version: int
+    expected_category_id: int | None = None
+    expected_department_id: int | None = None
+    expected_dispatch_step_index: int | None = None
+    expected_state: str
+    values: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/tickets/{ticket_id}/closure-submit", response_model=TicketCreateResponse)
+async def submit_closure(
+    ticket_id: int,
+    body: ClosureSubmissionIn,
+    db: AsyncSession = Depends(get_db),
+    cat_idx: CategoryIndexes = Depends(get_category_indexes),
+    user: User = Depends(get_current_user),
+):
+    """客服闭环回访：一把锁内校验表单、写 Ticket 真值、再走既有 archive 流转。
+
+    锁 Ticket → 校验客户端期望上下文 → 重算 NodeContext → resolve_form →
+    validate_submission → 写 Ticket 正式字段 → 写 Submission →
+    apply_transition(archived) → TicketStateLog → commit。
+
+    满意度不满的归档限制仍由 apply_transition 内的既有前置校验判定并整体回滚，
+    表单本身不新增状态转换，也不直接写 status / closed_at。
+    """
+    ticket = (await db.execute(
+        select(Ticket).where(Ticket.id == ticket_id).with_for_update()
+    )).scalar_one_or_none()
+    if ticket is None:
+        raise NotFoundError("工单", ticket_id)
+    if (
+        body.expected_category_id != ticket.category_id
+        or body.expected_department_id != ticket.skill_group_id
+        or body.expected_dispatch_step_index != ticket.dispatch_step_index
+        or body.expected_state != ticket.state
+    ):
+        raise HTTPException(409, detail="工单上下文已变化，请刷新后重新提交")
+    context = await resolve_node_context(db, ticket, user)
+    if context.node_type != "closure":
+        raise HTTPException(409, detail="当前节点已变化或不是可闭环节点")
+    form = await resolve_form(db, context)
+    if form is None:
+        raise HTTPException(409, detail="当前闭环节点未配置表单")
+    # 归档权限仍由状态机唯一入口判定（含客服团队 / admin 口径）。
+    await check_transition_permission(db, ticket, "archived", user)
+    if (body.form_definition_id, body.form_version) != (form.definition.id, form.definition.version):
+        raise HTTPException(409, detail="表单版本已变化，请刷新后重新提交")
+    data, ticket_updates, _article_values, snapshot = await validate_submission(
+        db, form, ticket, None, body.values,
+        context=closure_condition_context(ticket),
+    )
+    previous_satisfaction = ticket.satisfaction
+    for key, value in ticket_updates.items():
+        setattr(ticket, key, value)
+    # callback_required（是否要求回访）不在此改写：它在更早的流程已确定，
+    # Closure 只记录回访事实（is_callbacked）。把它跟着 is_callbacked 同步会把
+    # 「需要回访 = true / 已回访 = false」这个合法状态抹掉，并让 pending_callback
+    # 统计失真。不满意事实同样由 apply_transition 的既有归档前置拦截。
+    if ticket.satisfaction == "dissatisfied" and not (ticket.unsatisfied_reason or "").strip():
+        raise HTTPException(422, detail="客户不满意：必须填写不满意原因")
+    if ticket.customer_recognized is False and not (ticket.unsatisfied_reason or "").strip():
+        raise HTTPException(422, detail="客户不认可处理结果：必须填写不满原因")
+    # 与单条 PATCH 同源：不满意评价不可原地改写为非不满意，必须退回重开后重新回访。
+    if previous_satisfaction == "dissatisfied" and ticket.satisfaction != "dissatisfied":
+        raise HTTPException(
+            422, detail="客户不满意：需退回重新处理并完成新一次回访后才能变更评价")
+    submission = TicketNodeSubmission(
+        ticket_id=ticket.id, node_type="closure", form_definition_id=form.definition.id,
+        form_version=form.definition.version, department_id=context.department_id,
+        operator_id=user.id, action_type="archive", data=data, field_snapshot=snapshot,
+    )
+    db.add(submission)
+    # 归档前置用「应用本次表单后」的工单判定：已完成回访则一步闭环，
+    # 未完成 / 客户不满意则只固化回访事实、不流转状态，等下一次提交再关单。
+    if transition_precondition_error(ticket, "archived") is None:
+        log = await apply_transition(db, ticket, to_state="archived", operator=user)
+        submission.state_log_id = log.id if log else None
+    else:
+        submission.action_type = "callback_record"
     await db.commit()
     return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)
 
@@ -926,17 +1342,28 @@ async def create_ticket(
         if body.intake_form:
             lineage = cat_idx.lineage.get(body.category_id) if body.category_id else None
             root_id = lineage.l1.id if lineage and lineage.l1 else None
+            if not body.is_opportunity:
+                active_categories = list((await db.execute(
+                    select(TicketCategory).where(TicketCategory.is_active == True)  # noqa: E712
+                )).scalars().all())
+                chain_ids = set((await db.execute(
+                    select(DispatchChain.category_id).where(DispatchChain.enabled == True)  # noqa: E712
+                )).scalars().all())
+                selectable = create_selectable_categories(active_categories, chain_ids)
+                if not selectable.get(body.category_id, False):
+                    raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
             required = {
                 "客户名称": body.customer_name, "单位全称": body.customer_company,
-                "行业": body.industry, "一级/二级分类": lineage.l2 if lineage else None,
-                "客户期望结果": body.expected_result, "客户问题详情": body.description,
+                "行业": body.industry, "客户问题详情": body.description,
             }
+            if body.is_opportunity and not body.contact_phone:
+                required["联系号码"] = body.contact_phone
             missing = [label for label, value in required.items() if not value]
             if body.is_opportunity is None:
                 missing.append("是否为商机工单")
-            if root_id in (2201, 2301) and not body.satellite_number:
+            if not body.is_opportunity and root_id in (2201, 2301) and not body.satellite_number:
                 missing.append("卫星物联网码号")
-            if root_id == 2301:
+            if not body.is_opportunity and root_id == 2301:
                 for label, value in (
                     ("故障发生时间", body.fault_occurred_at),
                     ("故障复现规律", body.fault_recurrence),
@@ -947,17 +1374,15 @@ async def create_ticket(
                         missing.append(label)
             if missing:
                 raise HTTPException(422, detail=f"请填写：{'、'.join(missing)}")
-            if root_id not in (1001, 2101, 2201, 2301):
+            if not body.is_opportunity and root_id not in (1001, 2101, 2201, 2301):
                 raise HTTPException(422, detail="请选择有效的一级分类")
             if body.priority not in ("p1_urgent", "p2_high", "p3_normal", "p4_enterprise"):
                 raise HTTPException(422, detail="优先级无效")
             if len(body.description) > 1000:
                 raise HTTPException(422, detail="客户问题详情不能超过1000字")
-            if body.industry not in ("物联网", "海洋渔业", "水利", "能源", "未提供"):
+            if body.industry not in ("海洋渔业", "工程机械", "智能网联", "交通物流", "能源行业", "应急通信", "智慧林草", "低空出行", "智慧水利", "智慧农业", "Robotaxi", "未提供"):
                 raise HTTPException(422, detail="行业无效")
-            if body.expected_result not in ("解释说明", "远程排查", "上门检修", "换终端", "退费", "销户", "体验优化"):
-                raise HTTPException(422, detail="客户期望结果无效")
-            if root_id == 2301 and body.fault_recurrence not in ("必现", "偶发", "仅特定时段"):
+            if not body.is_opportunity and root_id == 2301 and body.fault_recurrence not in ("必现", "偶发", "仅特定时段"):
                 raise HTTPException(422, detail="故障复现规律无效")
             if not re.fullmatch(r"(?:1[3-9]\d{9}|0\d{2,3}-?\d{7,8})", body.customer_phone):
                 raise HTTPException(422, detail="来电号码格式不正确")
@@ -967,13 +1392,35 @@ async def create_ticket(
                 raise HTTPException(422, detail="邮箱格式不正确")
             body.complaint_level = (
                 {"一般投诉": "一般", "重要投诉": "重要", "重大投诉": "重大"}.get(lineage.l2.name)
-                if root_id == 2101 and lineage and lineage.l2 else None
+                if not body.is_opportunity and root_id == 2101 and lineage and lineage.l2 else None
             )
-            if root_id != 2301:
+            if body.is_opportunity or root_id != 2301:
                 body.fault_occurred_at = None
                 body.fault_recurrence = None
                 body.fault_location = None
                 body.is_batch_fault = None
+            if body.is_opportunity:
+                body.category_id = None
+                body.satellite_number = None
+                body.expected_result = None
+
+    if body.is_opportunity and not body.is_draft:
+        sales_group = (await db.execute(select(SkillGroup).where(SkillGroup.name == "销售"))).scalar_one_or_none()
+        if sales_group is None or body.sales_owner_id is None:
+            raise HTTPException(422, detail="请选择销售部门人员")
+        salesperson = (await db.execute(select(User).join(
+            UserSkillGroup, UserSkillGroup.user_id == User.id,
+        ).where(
+            User.id == body.sales_owner_id, User.is_active.is_(True),
+            UserSkillGroup.skill_group_id == sales_group.id,
+            or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= datetime.now(timezone.utc)),
+            or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to > datetime.now(timezone.utc)),
+        ))).scalar_one_or_none()
+        if salesperson is None:
+            raise HTTPException(422, detail="所选人员不是当前有效的销售部门成员")
+        body.skill_group_id = sales_group.id
+        body.handler_skill_group_id = sales_group.id
+        body.dispatcher_id = None
 
 
     # Auto-match responsibility：分派链（表A dispatch_chains）优先，
@@ -981,6 +1428,9 @@ async def create_ticket(
     # body.* wins; 规则/链只填调用方留空的字段。
     auto_match_warning: str | None = None
     chain_steps: list[dict] | None = None
+    # 是否需要回访由分类规则决定，与「是否已完成回访」无关（callback_policy）。
+    callback_required = await resolve_callback_required(db, body.category_id)
+
     if body.category_id is not None:
         from app.services.dispatch_chain import resolve_responsibility
         resp = await resolve_responsibility(db, body.category_id)
@@ -1037,6 +1487,7 @@ async def create_ticket(
             complaint_level=body.complaint_level,
             dispatch_chain_steps=chain_steps,
             dispatch_step_index=0 if chain_steps else None,
+            callback_required=callback_required,
             is_draft=True,
         )
     else:
@@ -1078,7 +1529,7 @@ async def create_ticket(
             }
 
         # Dispatcher required for formal tickets
-        if not body.dispatcher_id:
+        if not body.dispatcher_id and not body.is_opportunity:
             detail = "所选分类尚未配置对接人，请联系管理员" if body.intake_form else "建单时必须指定部门对接人"
             raise HTTPException(422, detail=detail)
 
@@ -1110,6 +1561,7 @@ async def create_ticket(
             solution_deadline=solution_deadline,
             dispatch_chain_steps=chain_steps,
             dispatch_step_index=0 if chain_steps else None,
+            callback_required=callback_required,
             is_draft=False,
         )
 
@@ -1119,6 +1571,9 @@ async def create_ticket(
     # 初始状态日志：仅正式工单记录（None → pending），草稿不写日志
     if not body.is_draft:
         await apply_initial_state(db, ticket, to_state="pending", operator=user, body=body)
+        if body.is_opportunity:
+            await apply_transition(db, ticket, to_state="open", operator=user,
+                                   owner_id=body.sales_owner_id, allow_sales_intake=True)
 
     await db.refresh(ticket)
 
@@ -1159,6 +1614,20 @@ async def update_ticket(
     ticket = result.scalar_one_or_none()
     if not ticket:
         raise NotFoundError("工单", ticket_id)
+    # callback_required 是系统维护字段：由分类规则在建单/分诊时确定（callback_policy），
+    # 客户端不能人工修改——否则「是否要求回访」会和「是否已完成回访」重新混淆。
+    if body.callback_required is not None:
+        raise HTTPException(422, detail="是否需要回访由系统按问题分类确定，不能人工修改")
+
+    if body.state == "resolved" or body.root_cause is not None:
+        context = await resolve_node_context(db, ticket, user)
+        if context.node_type == "processing" and await resolve_form(db, context):
+            raise HTTPException(409, detail="当前处理节点须通过结构化处理表单提交")
+    # 闭环节点已绑定表单后，archive 只能经 closure-submit：旧 PATCH 不能绕过必填项。
+    if body.state == "archived":
+        context = await resolve_node_context(db, ticket, user)
+        if context.node_type == "closure" and await resolve_form(db, context):
+            raise HTTPException(409, detail="当前闭环节点须通过结构化回访归档表单提交")
 
     # 回访/归档闭环字段先于状态流转应用：apply_transition 的归档前置校验
     # （satisfaction=dissatisfied 不得归档）必须基于同一请求中"应用后"的
@@ -1246,6 +1715,7 @@ async def update_ticket(
         if not await is_dispatcher(db, dispatcher_id, skill_group_id):
             raise HTTPException(422, detail="所选人员不是该部门的对接人")
         ticket.category_id = category_id
+        ticket.callback_required = await resolve_callback_required(db, category_id)
         ticket.dispatch_chain_steps = steps
         ticket.dispatch_step_index = 0 if steps else None
         ticket.return_checkpoints = []
@@ -1264,6 +1734,13 @@ async def update_ticket(
 
     # State transition — 唯一执行入口：校验/权限/reason/前置校验/副作用/Flow Log 收口
     # （业务约束改写、resolved→on_hold 兜底、归档闭环校验见 state_machine.apply_transition）
+    if body.state is not None and body.state == ticket.state \
+            and ticket.state == "on_hold":
+        # 同状态 PATCH 通常是 no-op，但 on_hold→on_hold 会被误读为
+        # 「已修改预计恢复时间」。调整时间必须先恢复处理再重新暂缓。
+        raise HTTPException(
+            422, detail="已在暂缓中；如需调整预计恢复时间，请先恢复处理再重新暂缓")
+
     if body.state is not None and body.state != ticket.state:
         await apply_transition(
             db, ticket,
@@ -1333,6 +1810,16 @@ async def batch_update_tickets(
         select(Ticket).where(Ticket.id.in_(body.ticket_ids))
     )
     tickets = result.scalars().all()
+    if body.updates.state == "resolved":
+        for ticket in tickets:
+            context = await resolve_node_context(db, ticket, user)
+            if context.node_type == "processing" and await resolve_form(db, context):
+                raise HTTPException(409, detail="批量操作不能绕过当前处理节点表单")
+    if body.updates.state == "archived":
+        for ticket in tickets:
+            context = await resolve_node_context(db, ticket, user)
+            if context.node_type == "closure" and await resolve_form(db, context):
+                raise HTTPException(409, detail="批量操作不能绕过当前闭环归档表单")
     updated = 0
     for ticket in tickets:
         # 先应用非 state 字段（owner/dsp/group/skill_group/priority），这样流转快照
@@ -1349,6 +1836,11 @@ async def batch_update_tickets(
             ticket.owner_id = body.updates.owner_id
         if body.updates.dispatcher_id is not None:
             ticket.dispatcher_id = body.updates.dispatcher_id
+        if (body.updates.state is not None
+                and body.updates.state == ticket.state
+                and ticket.state == "on_hold"):
+            raise HTTPException(
+                422, detail="已在暂缓中；如需调整预计恢复时间，请先恢复处理再重新暂缓")
         if body.updates.state is not None and body.updates.state != ticket.state:
             try:
                 await apply_transition(

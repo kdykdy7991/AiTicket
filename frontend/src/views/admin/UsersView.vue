@@ -183,9 +183,6 @@ function roleTagType(role: string) {
 function groupName(id: number | null) {
   return groups.value.find(g => g.id === id)?.name || '—'
 }
-function skillGroupNames(ids: number[]) {
-  return ids.map(id => skillGroups.value.find(g => g.id === id)?.name).filter(Boolean) as string[]
-}
 function skillGroupName(id: number) {
   return skillGroups.value.find(g => g.id === id)?.name || ''
 }
@@ -217,7 +214,6 @@ async function loadUsers() {
       skill_group_id: filterSkillGroup.value || undefined,
       keyword: keyword.value || undefined,
       include_inactive: includeInactive.value,
-      _t: Date.now(),  // 防止 GET 请求被缓存
     })
     users.value = list
     console.log(`[UsersView] loadUsers API+渲染: ${(performance.now() - start).toFixed(1)}ms, 用户数: ${list.length}`)

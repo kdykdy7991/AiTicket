@@ -313,6 +313,7 @@ async def test_resolved_to_on_hold_rewritten_to_open(env):
     await env["resolve"](t["id"])
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "on_hold", "reason": "客户要求暂缓",
+        "hold_until": "2027-03-01T00:00:00",
     })
     assert r.status_code == 200, r.text
     assert r.json()["state"] == "open"
@@ -371,30 +372,25 @@ async def test_resubmit_returned_to_pending(env):
 async def test_hold_open_to_on_hold(env):
     t = await env["create_ticket"]()
     await env["dispatch"](t["id"], env["handler_id"])
-    # 暂缓功能已停用，隐藏按钮之外还必须阻断直接 API 调用。
-    r0 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "on_hold"})
-    assert r0.status_code == 422, r0.text
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "on_hold", "reason": "等待备件", "hold_until": "2027-03-01T00:00:00",
     })
-    assert r.status_code == 422, r.text
+    assert r.status_code == 200, r.text
+    assert r.json()["state"] == "on_hold"
     tk = await db_ticket(env, t["id"])
-    assert tk.state == "open"
-    assert tk.hold_until is None
+    assert tk.state == "on_hold"
+    assert tk.hold_until is not None
     logs = await db_logs(env, t["id"])
-    assert logs[-1].action_type == "dispatch"
+    assert logs[-1].action_type == "hold"
+    assert logs[-1].reason == "等待备件"
 
 
-async def test_resume_on_hold_to_open(env, monkeypatch):
-    import app.services.state_machine as state_machine
+async def test_resume_on_hold_to_open(env):
     t = await env["create_ticket"]()
     await env["dispatch"](t["id"], env["handler_id"])
-    # 模拟停用前已经暂缓的工单；之后恢复默认关闭状态。
-    monkeypatch.setattr(state_machine, "HOLD_ENABLED", True)
     await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "state": "on_hold", "reason": "等待备件",
+        "state": "on_hold", "reason": "等待备件", "hold_until": "2027-03-01T00:00:00",
     })
-    monkeypatch.setattr(state_machine, "HOLD_ENABLED", False)
     # 恢复处理也需要 reason（requires_reason on_hold→open=True 现状）
     r0 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "open"})
     assert r0.status_code == 400, r0.text
@@ -428,7 +424,7 @@ async def test_archive_resolved_sets_closed_fields(env):
     await env["dispatch"](t["id"], env["handler_id"])
     await env["resolve"](t["id"])
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "state": "archived", "is_callbacked": True, "callback_required": False,
+        "state": "archived", "is_callbacked": True,
     })
     assert r.status_code == 200, r.text
     d = r.json()
@@ -656,7 +652,6 @@ def test_action_map_covers_all_reachable_transitions():
 async def test_action_type_full_chain(env, monkeypatch):
     """一条工单走完常规链路，每步 Flow Log 的 action_type 正确。"""
     import app.services.state_machine as state_machine
-    monkeypatch.setattr(state_machine, "HOLD_ENABLED", True)  # 历史暂缓日志兼容性
     t = await env["create_ticket"]()
 
     async def last_action():
@@ -667,7 +662,8 @@ async def test_action_type_full_chain(env, monkeypatch):
     await env["dispatch"](t["id"], env["handler_id"])
     assert await last_action() == "dispatch"            # pending → open
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "state": "on_hold", "reason": "等待备件"})
+        "state": "on_hold", "reason": "等待备件",
+        "hold_until": "2027-03-01T00:00:00"})
     assert r.status_code == 200 and await last_action() == "hold"        # open → on_hold
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "open", "reason": "备件已到"})
@@ -706,7 +702,7 @@ async def test_action_type_instant_and_archive(env):
     await env["dispatch"](t["id"], env["handler_id"])
     await env["resolve"](t["id"])
     r2 = await c.patch(f"/api/v1/tickets/{t['id']}", json={
-        "state": "archived", "is_callbacked": True, "callback_required": False})
+        "state": "archived", "is_callbacked": True})
     assert r2.status_code == 200, r2.text
     logs = await db_logs(env, t["id"])
     assert logs[-1].action_type == "archive"
@@ -769,8 +765,9 @@ async def test_allowed_actions_open_owner_and_capabilities(env):
     with as_user(env["handler_id"], "agent"):
         d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
     acts = _action_map(d)
-    # 当前处理人：可处理/打回；暂缓停用，撤销只给创建者。
-    assert set(acts) == {"resolve", "return"}
+    # 当前处理人：可处理 / 打回 / 暂缓；撤销只给创建者。
+    assert set(acts) == {"resolve", "return", "hold"}
+    assert acts["hold"]["requires_reason"] is True
     assert acts["resolve"]["requires_reason"] is False
     assert acts["return"]["requires_reason"] is True
     # 文章能力位（owner 身份）
@@ -883,7 +880,6 @@ async def test_callback_details_roundtrip(env):
     detail_text = "客户反馈：更换的模块仍偶发重启，已记录复现步骤与日志"
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "is_callbacked": True,
-        "callback_required": True,
         "callback_details": detail_text,
     })
     assert r.status_code == 200, r.text
@@ -902,7 +898,7 @@ async def test_dissatisfied_cannot_archive(env):
 
     # 回访结果：不满意（带不满意原因）
     r1 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "is_callbacked": True, "callback_required": True,
+        "is_callbacked": True,
         "satisfaction": "dissatisfied",
         "unsatisfied_reason": "上门处理后重启问题仍复现",
         "callback_details": "重启问题仍未解决，客户要求再次上门",
@@ -949,7 +945,7 @@ async def test_satisfied_can_archive_with_details(env):
     await env["resolve"](t["id"])
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "archived",
-        "is_callbacked": True, "callback_required": True,
+        "is_callbacked": True,
         "satisfaction": "satisfied",
         "callback_details": "回访确认已解决，客户认可",
         "archive_notes": "闭环归档",
@@ -962,45 +958,45 @@ async def test_satisfied_can_archive_with_details(env):
     assert d["archive_notes"] == "闭环归档"
 
 
-async def test_callback_config_cannot_erase_callback_facts(env):
-    """callback_required / is_callbacked 是流程配置，不是删除回访事实的开关。
+async def test_callback_required_is_system_maintained(env):
+    """callback_required 由系统按问题分类确定，客户端不能人工修改。
 
-    收尾回归 (a)：dissatisfied → callback_required=false → 仍不能 archived。
-    已产生的客户回访事实（is_callbacked / satisfaction / callback_details）
-    保留；不满意必须经"退回重开处理"才能再次进入归档条件。
+    因此不存在「关闭回访要求」这个开关，也就不存在用它抹掉回访事实的路径；
+    不满意仍必须经「退回重开 → 重新处理 → 新一次回访」才能变更评价。
     """
     t = await env["create_ticket"]()
     await env["dispatch"](t["id"], env["handler_id"])
     await env["resolve"](t["id"])
     r1 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "is_callbacked": True, "callback_required": True,
-        "satisfaction": "dissatisfied",
+        "is_callbacked": True, "satisfaction": "dissatisfied",
         "unsatisfied_reason": "重启问题仍未解决",
         "callback_details": "重启问题未解决，客户不满意",
     })
     assert r1.status_code == 200, r1.text
+    system_value = r1.json()["callback_required"]
+    assert system_value is False, "测试分类未配置要求回访"
 
-    # 关闭 callback_required：回访事实全部保留
+    # 人工修改一律 422
     r2 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "callback_required": False,
+        "callback_required": True,
     })
-    assert r2.status_code == 200, r2.text
-    d = r2.json()
-    assert d["callback_required"] is False
-    assert d["is_callbacked"] is True, "callback_required 不得抹掉已回访标记"
-    assert d["satisfaction"] == "dissatisfied", "callback_required 不得清空不满意"
-    assert d["callback_details"] == "重启问题未解决，客户不满意"
+    assert r2.status_code == 422, r2.text
+    assert "分类" in r2.text
 
-    # 仍不能归档：单独调用、同请求组合、显式 is_callbacked=false 全部拦住
-    r3 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "archived"})
-    assert r3.status_code == 422, r3.status_code
-    r4 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "state": "archived", "callback_required": False, "is_callbacked": False,
+    # 同请求里夹带也不行
+    r3 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "archived", "callback_required": True, "is_callbacked": False,
     })
-    assert r4.status_code == 422, r4.status_code
+    assert r3.status_code == 422, r3.status_code
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+    assert d["satisfaction"] == "dissatisfied", "不得清空不满意"
+    assert d["callback_details"] == "重启问题未解决，客户不满意"
+    assert d["callback_required"] is False
+
+    # 回访标记关闭也不得清空不满意
     r5 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={"is_callbacked": False})
     assert r5.status_code == 200, r5.text
-    assert r5.json()["satisfaction"] == "dissatisfied", "回访标记关闭也不得清空不满意"
+    assert r5.json()["satisfaction"] == "dissatisfied"
 
     # 不满意不可原地改写为满意（须经退回重开后的新一次回访）
     r6 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
@@ -1014,29 +1010,21 @@ async def test_callback_config_cannot_erase_callback_facts(env):
     assert tk.callback_details == "重启问题未解决，客户不满意"
 
 
-async def test_no_callback_config_behavior_unchanged(env):
-    """收尾回归 (c)：未发生回访时 callback_required=false 原有行为不回归。"""
+async def test_not_required_category_archives_without_callback(env):
+    """不要求回访的分类：归档前不需要回访（规则来自分类配置，不是人工开关）。"""
     t = await env["create_ticket"]()
     await env["dispatch"](t["id"], env["handler_id"])
     await env["resolve"](t["id"])
-    r1 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "callback_required": False,
-    })
-    assert r1.status_code == 200, r1.text
-    d = r1.json()
+    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
     assert d["callback_required"] is False
-    assert d["is_callbacked"] is False
-    assert d["satisfaction"] is None
-
-    # 无回访事实 → 归档不受影响
-    r2 = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
-        "state": "archived", "callback_required": False,
+    r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+        "state": "archived",
     })
-    assert r2.status_code == 200, r2.text
-    d2 = r2.json()
+    assert r.status_code == 200, r.text
+    d2 = r.json()
     assert d2["state"] == "archived"
-    assert d2["satisfaction"] is None
     assert d2["is_callbacked"] is False
+    assert d2["satisfaction"] is None
 
 
 async def test_dispatch_rejects_owner_outside_department(env):

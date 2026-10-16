@@ -1,6 +1,7 @@
 """Articles router — list and create communication records."""
 
 import uuid
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
@@ -99,6 +100,8 @@ async def _save_attachments(
     article_id: int,
     ticket_id: int,
     attachments: list[UploadFile],
+    *,
+    allow_pdf: bool = False,
 ) -> list[ArticleAttachment]:
     """Persist uploaded image files and return attachment records."""
     upload_root = Path(settings.UPLOAD_DIR)
@@ -106,37 +109,41 @@ async def _save_attachments(
     article_dir.mkdir(parents=True, exist_ok=True)
 
     records: list[ArticleAttachment] = []
-    for upload in attachments:
-        if not upload.content_type or not upload.content_type.startswith("image/"):
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"仅支持图片文件， got {upload.content_type}",
-            )
+    try:
+        for upload in attachments:
+            if not upload.content_type or not (upload.content_type.startswith("image/") or (allow_pdf and upload.content_type == "application/pdf")):
+                raise HTTPException(
+                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"仅支持{'图片或 PDF' if allow_pdf else '图片'}，got {upload.content_type}",
+                )
 
-        content = await upload.read()
-        if len(content) > settings.UPLOAD_MAX_SIZE:
-            raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=f"单张图片不能超过 {settings.UPLOAD_MAX_SIZE // 1024 // 1024} MB",
-            )
+            content = await upload.read()
+            if len(content) > settings.UPLOAD_MAX_SIZE:
+                raise HTTPException(
+                    status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    detail=f"{'单个附件' if allow_pdf else '单张图片'}不能超过 {settings.UPLOAD_MAX_SIZE // 1024 // 1024} MB",
+                )
 
-        original = upload.filename or "untitled"
-        ext = Path(original).suffix.lower() or ".bin"
-        stored_name = f"{uuid.uuid4().hex}{ext}"
-        dest = article_dir / stored_name
-        dest.write_bytes(content)
+            original = upload.filename or "untitled"
+            ext = Path(original).suffix.lower() or ".bin"
+            stored_name = f"{uuid.uuid4().hex}{ext}"
+            dest = article_dir / stored_name
+            dest.write_bytes(content)
 
-        storage_path = str(dest.relative_to(upload_root))
-        records.append(
-            ArticleAttachment(
-                article_id=article_id,
-                filename=stored_name,
-                original_filename=original,
-                content_type=upload.content_type,
-                size=len(content),
-                storage_path=storage_path,
+            storage_path = str(dest.relative_to(upload_root))
+            records.append(
+                ArticleAttachment(
+                    article_id=article_id,
+                    filename=stored_name,
+                    original_filename=original,
+                    content_type=upload.content_type,
+                    size=len(content),
+                    storage_path=storage_path,
+                )
             )
-        )
+    except Exception:
+        shutil.rmtree(article_dir, ignore_errors=True)
+        raise
     return records
 
 
@@ -170,11 +177,34 @@ async def create_article(
             detail="内部备注功能已下线"
         )
 
+    if type not in {"reply", "note", "addition", "reminder"}:
+        raise HTTPException(422, detail="不支持的沟通记录类型")
+
+    if type in {"reply", "note"}:
+        from app.services.node_context import resolve_node_context
+        from app.services.node_form import resolve_form
+        context = await resolve_node_context(db, ticket, user)
+        node_form = await resolve_form(db, context) if context.node_type in ("processing", "phone_feedback", "sales_opportunity") else None
+        if type == "reply" and node_form:
+            raise HTTPException(409, detail="当前节点须通过结构化表单完成；普通回复请使用 note")
+        if type == "note":
+            if not node_form:
+                raise HTTPException(422, detail="当前节点不接受普通处理回复")
+            if ticket.owner_id != user.id or ticket.state not in REPLY_ALLOWED_STATES:
+                raise HTTPException(403, detail="仅当前处理人可添加处理回复")
+            if not body.strip():
+                raise HTTPException(422, detail="回复内容不能为空")
+
     # 处理说明：只有当前处理人可提交，且工单须处于处理中/暂缓
     # 中间链节点提交后转派下一部门；链末节点提交后进入「已处理」。
     reply_log = None
     handling_log = None
     if type == "reply":
+        from app.services.node_context import derive_node_type, node_action_error
+        node_type, _, _ = await derive_node_type(db, ticket)
+        node_error = node_action_error(node_type, "reply")
+        if node_error is not None:
+            raise HTTPException(422, detail=node_error)
         if ticket.owner_id is None or user.id != ticket.owner_id:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,

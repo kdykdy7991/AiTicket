@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     :model-value="modelValue"
-    @update:model-value="(v) => emit('update:modelValue', v)"
+    @update:model-value="(v: boolean) => emit('update:modelValue', v)"
     title="疑似重复工单"
     width="640px"
     :show-close="false"

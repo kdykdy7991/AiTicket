@@ -35,6 +35,7 @@ class TicketCreate(BaseModel):
     skill_group_id: int | None = None
     handler_skill_group_id: int | None = None  # 专业处理部门（Phase 4 新增，可由路由规则自动填）
     dispatcher_id: int | None = None  # 部门对接人（正式提交必填）
+    sales_owner_id: int | None = None  # 商机建单时选择的销售处理人；不持久化为对接人
     is_duplicate: bool = False
     duplicate_reason: str | None = None
     is_draft: bool = False
@@ -157,7 +158,24 @@ class AllowedAction(BaseModel):
     label: str = ""        # 中文按钮文案
 
 
+class NodeContextOut(BaseModel):
+    ticket_id: int
+    node_type: Literal["intake", "triage", "processing", "phone_feedback", "closure", "sales_opportunity"] | None
+    category_id: int | None
+    department_id: int | None
+    department_code: str | None
+    dispatch_step_index: int | None
+    dispatch_stage: str | None
+    operator_id: int
+    owner_id: int | None
+    dispatcher_id: int | None
+    allowed_actions: list[AllowedAction]
+
+
 class TicketDetail(TicketBrief):
+    node_context: NodeContextOut | None = None
+    current_form: dict | None = None
+    can_note: bool = False
     description: str
     customer_company: str | None = None
     industry: str | None = None
@@ -197,8 +215,11 @@ class TicketDetail(TicketBrief):
     callback_details: str | None = None
     archive_notes: str | None = None
     satisfaction: str | None = None  # 回访满意度：'satisfied' / 'average' / 'dissatisfied' / 'unrated'
-    unsatisfied_reason: str | None = None  # 不满意原因（dissatisfied 时非空）
+    customer_satisfaction_score: int | None = None  # V0.15 独立的 1～10 分
+    unsatisfied_reason: str | None = None  # 不认可或历史四档不满意时填写
     is_callbacked: bool = False
+    closure_result: str | None = None       # 关单结果（closure 表单写入的受控枚举）
+    customer_recognized: bool | None = None # 客户是否认可；null = 未记录
     root_cause: str | None = None  # 根本原因
     solution: str | None = None    # 解决办法
     complaint_level: str | None = None  # 投诉级别

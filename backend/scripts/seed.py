@@ -7,7 +7,13 @@ Safe to run multiple times (uses ON CONFLICT DO NOTHING).
 import asyncio
 import json
 import os
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# `python scripts/seed.py` puts scripts/ on sys.path, not the backend root, so
+# `app` and `scripts` are not importable until the backend root is added.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -286,8 +292,10 @@ async def seed() -> None:
         print("Seeding categories...")
         await db.execute(
             text("""
-                INSERT INTO ticket_categories (id, parent_id, name, level, sort_order, is_active, created_at, updated_at)
-                VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active, :created_at, :updated_at)
+                INSERT INTO ticket_categories (id, parent_id, name, level, sort_order, is_active, requires_callback,
+                 created_at, updated_at)
+                VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active,
+                        :requires_callback, :created_at, :updated_at)
                 ON CONFLICT (id) DO NOTHING
             """),
             [
@@ -332,6 +340,18 @@ V2_CAT = {
     "核心网系统":      2311,
     "测运控系统":      2312,
     "卫星系统":        2313,
+}
+
+# 要求回访的分类规则（business rule, 不是工单事实）。
+# 语义见 app/services/callback_policy.py：标在某个分类上 = 该分类及其全部后代都要求回访。
+#   - 业务保障(2301)         一级整体要求回访 → 覆盖其所有后代
+#   - 业务运营/套餐变更(2203) 只覆盖该分支
+#   - 业务运营/业财对账(2204) 只覆盖该分支
+# 业务运营(2201) 本身不标，因此其余业务运营子分类默认无需回访。
+CALLBACK_REQUIRED_CATEGORY_IDS = {
+    V2_CAT["业务保障"],
+    2203,   # 业务运营 / 套餐变更
+    2204,   # 业务运营 / 业财对账
 }
 
 # 新增的协调 / 专业部门（v2 组织架构）
@@ -586,10 +606,21 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
                 {
                     "id": cid, "parent_id": parent, "name": name,
                     "level": level, "sort_order": sort, "is_active": True,
+                    "requires_callback": cid in CALLBACK_REQUIRED_CATEGORY_IDS,
                     "created_at": now, "updated_at": now,
                 }
                 for (cid, parent, name, level, sort) in V2_CATEGORIES
             ],
+        )
+        # 分类规则可能后补：把标记为要求回访的分类幂等置真，其余置假。
+        # 只动规则标记，不触碰存量工单已记录的 tickets.callback_required。
+        await db.execute(
+            text("""
+                UPDATE ticket_categories
+                SET requires_callback = (id = ANY(:ids)), updated_at = :now
+                WHERE requires_callback IS DISTINCT FROM (id = ANY(:ids))
+            """),
+            {"ids": sorted(CALLBACK_REQUIRED_CATEGORY_IDS), "now": now},
         )
         # 旧「非即时」仅是容器；三个咨询子类已直接挂到「客户咨询」。
         await db.execute(text("DELETE FROM ticket_categories WHERE id = 1201"))
@@ -889,8 +920,40 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
         await local_engine.dispose()
 
 
+async def seed_node_forms() -> None:
+    """Publish the v1 node forms for triage / processing / phone_feedback.
+
+    Own engine inside a single event loop: sharing this module's session factory
+    across separate ``asyncio.run()`` calls binds its engine to the first loop and
+    raises "attached to a different loop" on every later one.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from scripts.seed_closure_form import seed_closure_form
+    from scripts.seed_closure_v4_form import seed_closure_v4_form
+    from scripts.seed_phone_feedback_form import seed_phone_feedback_form
+    from scripts.seed_processing_form import seed_processing_form
+    from scripts.seed_package_change_review_form import seed_package_change_review_form
+    from scripts.seed_package_change_execute_form import seed_package_change_execute_form
+    from scripts.seed_sales_opportunity_form import seed_sales_opportunity_form
+    from scripts.seed_triage_form import seed_triage_form
+    from scripts.seed_constellation_triage_form import seed_constellation_triage_form
+
+    local_engine = create_async_engine(DATABASE_URL, future=True)
+    factory = async_sessionmaker(local_engine, class_=AsyncSession, expire_on_commit=False)
+    try:
+        for seed in (seed_triage_form, seed_constellation_triage_form,
+                     seed_processing_form, seed_package_change_review_form,
+                     seed_package_change_execute_form,
+                     seed_phone_feedback_form, seed_closure_form, seed_closure_v4_form,
+                     seed_sales_opportunity_form):
+            await seed(factory)
+    finally:
+        await local_engine.dispose()
+
+
 if __name__ == "__main__":
-    import sys
     asyncio.run(seed())
     if "--phase9" in sys.argv:
         asyncio.run(seed_phase9_base_data())
+    asyncio.run(seed_node_forms())

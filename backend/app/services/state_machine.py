@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import ForbiddenError, StateTransitionError
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.ticket import Ticket, TicketStateLog
+from app.services.callback_policy import resolve_callback_required
 from app.models.user import User
 
 # 状态的中文展示名（错误信息 / 导出 / allowed_actions label 共用）
@@ -76,9 +77,6 @@ STATES_REQUIRE_REASON_FROM: dict[str, set[str]] = {
 
 # 终态（不可再流转）
 TERMINAL_STATES = {"archived", "cancelled"}
-
-# 暂缓入口暂时停用；已有 on_hold 工单仍可恢复处理。
-HOLD_ENABLED = False
 
 # ── Flow Log 动作类型 ─────────────────────────────────────────────
 # 由 (from_state, to_state) 推导"这次流转是什么业务动作"。
@@ -155,8 +153,15 @@ def transition_precondition_error(ticket: Ticket, to_state: str) -> str | None:
     执行入口（apply_transition）与动作生成（compute_allowed_actions）共用，
     保证"按钮可见性"与"执行结果"永远一致。返回 None 表示无前置约束。
     """
-    if to_state == "archived" and ticket.satisfaction == "dissatisfied":
-        return "客户满意度为「不满意」，需退回重新处理并完成回访后才能归档"
+    if to_state == "archived":
+        if ticket.satisfaction == "dissatisfied":
+            return "客户满意度为「不满意」，需退回重新处理并完成回访后才能归档"
+        if ticket.customer_recognized is False:
+            return "客户不认可处理结果，需退回重新处理并完成回访后才能归档"
+        # 要求回访但尚未完成回访：先记录回访事实，再归档。
+        # 两条规则互相独立——callback_required 是分类规则，is_callbacked 是回访事实。
+        if ticket.callback_required and not ticket.is_callbacked:
+            return "该工单要求回访，完成回访后才能归档"
     return None
 
 
@@ -174,12 +179,12 @@ async def compute_allowed_actions(
     终态返回 []。前端据此渲染按钮，点击后直接调用后端，不再自行判断。
     """
     actions: list[dict] = []
+    from app.services.node_context import derive_node_type, node_action_error
+    node_type, _, _ = await derive_node_type(db, ticket)
     seen: set[tuple[str, str]] = set()
     for to_state in TRANSITIONS.get(ticket.state, []):
         effective = enforce_business_constraints(ticket, to_state, log_rewrite=False)
         action = action_for(ticket.state, effective)
-        if action == "hold" and not HOLD_ENABLED:
-            continue
         if (
             action == "resolve"
             and ticket.dispatch_chain_steps
@@ -195,7 +200,7 @@ async def compute_allowed_actions(
             continue  # 中间节点/售后致电反馈须提交记录，不能直接整单办结
         if action is None or (action, effective) in seen:
             continue
-        if await transition_permission_error(db, ticket, effective, user) is not None:
+        if await transition_permission_error(db, ticket, effective, user, enforce_node=False) is not None:
             continue
         if transition_precondition_error(ticket, effective) is not None:
             continue   # 业务前置未满足（如 dissatisfied 不可归档）→ 不出按钮
@@ -207,7 +212,7 @@ async def compute_allowed_actions(
             "requires_owner": (ticket.state, effective) == ("pending", "open"),
             "label": ACTION_LABELS.get(action, action),
         })
-    return actions
+    return [action for action in actions if node_action_error(node_type, action["action"]) is None]
 
 
 def compute_article_actions(ticket: Ticket, user: User) -> dict[str, bool]:
@@ -280,6 +285,26 @@ def enforce_business_constraints(ticket: Ticket, target_state: str, log_rewrite:
             )
         return "open"
     return target_state
+
+
+def resolve_hold_until(hold_until: str | datetime | None) -> datetime:
+    """校验并解析「预计恢复时间」。
+
+    暂缓本身不涉及任何 SLA 语义：这个时间只表示预计什么时候恢复继续处理，
+    不是 deadline。必填、格式必须合法、必须晚于当前时间。
+    """
+    if hold_until is None or (isinstance(hold_until, str) and not hold_until.strip()):
+        raise HTTPException(422, detail="暂缓必须填写预计恢复时间")
+    try:
+        parsed = datetime.fromisoformat(str(hold_until).strip())
+    except (TypeError, ValueError):
+        raise HTTPException(
+            422, detail="预计恢复时间格式不正确，应为 ISO 时间，如 2026-10-20T10:00") from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed <= datetime.now(timezone.utc):
+        raise HTTPException(422, detail="预计恢复时间必须晚于当前时间")
+    return parsed
 
 
 def snapshot_people(ticket: Ticket, body=None) -> dict:
@@ -440,6 +465,8 @@ async def apply_return(db: AsyncSession, ticket: Ticket, *, operator: User, reas
             raise HTTPException(422, detail="历史工单缺少可确认的上一节点，无法安全退回")
     if old_state == "resolved":
         ticket.satisfaction = None
+        ticket.customer_recognized = None
+        ticket.customer_satisfaction_score = None
     db.expire(ticket, ["category", "skill_group", "handler_skill_group", "owner", "dispatcher", "returned_to_user", "first_owner", "group"])
     ticket.has_returned = True
     now = datetime.now(timezone.utc)
@@ -474,7 +501,9 @@ async def is_dispatcher(db: AsyncSession, user_id: int, skill_group_id: int | No
 
 
 async def transition_permission_error(
-    db: AsyncSession, ticket: Ticket, to_state: str, user: User
+    db: AsyncSession, ticket: Ticket, to_state: str, user: User,
+    *, allow_phone_feedback_reply: bool = False, enforce_node: bool = True,
+    allow_sales_intake: bool = False, allow_sales_completion: bool = False,
 ) -> str | None:
     """身份/角色层面是否允许该状态变更：允许返回 None，否则返回错误文案。
 
@@ -482,8 +511,16 @@ async def transition_permission_error(
     allowed_actions 的生成也调用它，路由/前端不再另写 if/else。
     分派场景"必须指定处理人"属于输入要求，由 check_transition_permission 判定。
     """
-    if ticket.state == "pending" and to_state == "open" and ticket.category_id == 2301:
-        return "业务保障工单须先由售后进行下一级问题判断"
+    if enforce_node:
+        from app.services.node_context import derive_node_type, node_action_error
+        node_type, _, _ = await derive_node_type(db, ticket)
+        node_error = node_action_error(node_type, action_for(ticket.state, to_state) or "")
+        if node_error is not None and not (
+            (node_type == "phone_feedback" and to_state == "resolved" and allow_phone_feedback_reply)
+            or (node_type == "sales_opportunity" and to_state == "resolved" and allow_sales_completion)
+            or (node_type == "sales_opportunity" and to_state == "open" and allow_sales_intake)
+        ):
+            return node_error
     if user.role == "admin":
         return None  # admin 全权限
 
@@ -491,6 +528,8 @@ async def transition_permission_error(
 
     # 分派：部门对接人
     if (from_state, to_state) == ("pending", "open"):
+        if allow_sales_intake and ticket.is_opportunity and ticket.creator_id == user.id:
+            return None
         if not await is_dispatcher(db, user.id, ticket.skill_group_id):
             return "只有该部门的对接人可分派工单"
         return None
@@ -520,6 +559,8 @@ async def transition_permission_error(
 
     # 客服团队操作：归档
     if (from_state, to_state) in [("resolved", "archived")]:
+        if allow_sales_completion and ticket.is_opportunity and ticket.owner_id == user.id:
+            return None
         if user.role != "agent":
             return "只有客服团队可执行归档操作"
         return None
@@ -540,7 +581,9 @@ async def transition_permission_error(
 
 
 async def check_transition_permission(
-    db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None
+    db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None,
+    *, allow_phone_feedback_reply: bool = False,
+    allow_sales_intake: bool = False, allow_sales_completion: bool = False,
 ) -> None:
     """校验当前用户是否有权执行该状态变更（非法则抛 ForbiddenError / 422）。
 
@@ -559,7 +602,12 @@ async def check_transition_permission(
     分派还需处理人属于工单当前责任部门（skill_group_id）——对齐
     routing.validate_rule_payload 的同名约束，避免跨部门错配（admin 同样受约束）。
     """
-    error = await transition_permission_error(db, ticket, to_state, user)
+    error = await transition_permission_error(
+        db, ticket, to_state, user,
+        allow_phone_feedback_reply=allow_phone_feedback_reply,
+        allow_sales_intake=allow_sales_intake,
+        allow_sales_completion=allow_sales_completion,
+    )
     if error is not None:
         raise ForbiddenError(error)
     if (ticket.state, to_state) == ("pending", "open"):
@@ -672,6 +720,15 @@ async def refine_capability(
     if ticket.category_id is None:
         out["refine_denied_reason"] = "工单未选择分类，无法分诊"
         return out
+    children = await category_children(db, ticket.category_id)
+    if not children:
+        out["refine_denied_reason"] = "该分类已是判断末级，无需分诊"
+        return out
+    from app.services.node_context import derive_node_type
+    node_type, _, _ = await derive_node_type(db, ticket)
+    if node_type != "triage":
+        out["refine_denied_reason"] = "当前职责节点不是问题分诊"
+        return out
     if user.role != "admin":
         dept = await judging_department(db, ticket.category_id)
         if dept is None:
@@ -680,10 +737,6 @@ async def refine_capability(
         if not await is_dept_member(db, user.id, dept):
             out["refine_denied_reason"] = f"仅「{dept}」的判断人可分诊"
             return out
-    children = await category_children(db, ticket.category_id)
-    if not children:
-        out["refine_denied_reason"] = "该分类已是判断末级，无需分诊"
-        return out
     out["can_refine"] = True
     # 每个可细化项带上"细化为它之后会落位到哪个部门"，供前端二次确认展示
     # （落位规则与 apply_refine 一致：新链首步==当前判断部门则跳过，否则落位新链首）
@@ -783,6 +836,8 @@ async def apply_refine(
 
     await push_node(db, ticket)
     ticket.category_id = target.id
+    # 分诊细化会改变分类：是否需要回访随新分类重算，仍由分类规则唯一决定。
+    ticket.callback_required = await resolve_callback_required(db, target.id)
     ticket.dispatch_chain_steps = steps or ticket.dispatch_chain_steps
     ticket.dispatch_step_index = step_index if steps else ticket.dispatch_step_index
 
@@ -908,6 +963,8 @@ async def apply_transition(
     hold_until: str | None = None,
     action_type: str | None = None,
     allow_intermediate_transfer: bool = False,
+    allow_sales_intake: bool = False,
+    allow_sales_completion: bool = False,
 ) -> TicketStateLog | None:
     """单条工单状态流转的唯一执行入口。
 
@@ -922,14 +979,32 @@ async def apply_transition(
       7. 应用调用方给出的人员字段（显式值优先于副作用）
       8. has_returned 同步 + 写 Flow Log（含上一状态停留时长与人员快照、action_type）
 
+    暂缓（open→on_hold）：reason 必填、hold_until 必填且必须晚于当前时间；
+    恢复（on_hold→open）：reason 必填，路由字段全部保持，仅清空 hold_until /
+    hold_reminded_at。两者都不涉及任何 SLA 计时语义。
+
     返回写入的 TicketStateLog；to_state 与当前状态相同（no-op）时返回 None。
     不负责 commit——由调用方按各自的请求边界提交。
     """
     # 中间节点只能通过处理说明完成本步并进入下一部门；
     # 直接 PATCH 状态不能绕过办理记录。
     steps = ticket.dispatch_chain_steps or []
-    if ticket.state == "open" and to_state == "on_hold" and not HOLD_ENABLED:
-        raise HTTPException(422, detail="暂缓处理功能已停用")
+    from app.services.node_context import derive_node_type, node_action_error
+    node_type, _, _ = await derive_node_type(db, ticket)
+    action_error = node_action_error(node_type, action_for(ticket.state, to_state, action_type) or "")
+    if action_error is not None and action_type != "transfer" and not (
+        (node_type == "phone_feedback" and to_state == "resolved" and allow_intermediate_transfer)
+        or (node_type == "sales_opportunity" and to_state == "resolved" and allow_sales_completion)
+        or (node_type == "sales_opportunity" and to_state == "open" and allow_sales_intake)
+    ):
+        if action_for(ticket.state, to_state, action_type) == "dispatch":
+            raise ForbiddenError(action_error)
+        raise HTTPException(422, detail=action_error)
+    if ticket.state == "on_hold" and to_state == "on_hold":
+        # 不接受「直接在暂缓中改预计恢复时间」：同状态会被当成 no-op 静默成功，
+        # 客户端会误以为改成功了。调整时间必须先恢复处理再重新暂缓。
+        raise HTTPException(
+            422, detail="已在暂缓中；如需调整预计恢复时间，请先恢复处理再重新暂缓")
     is_phone_feedback = (
         ticket.dispatch_step_index is not None
         and 0 <= ticket.dispatch_step_index < len(steps)
@@ -963,10 +1038,15 @@ async def apply_transition(
     validate_transition(ticket.state, to_state)
 
     # 3. 权限
-    await check_transition_permission(db, ticket, to_state, operator, owner_id)
+    await check_transition_permission(
+        db, ticket, to_state, operator, owner_id,
+        allow_phone_feedback_reply=allow_intermediate_transfer,
+        allow_sales_intake=allow_sales_intake,
+        allow_sales_completion=allow_sales_completion,
+    )
 
     # 4. 原因必填
-    if requires_reason(ticket.state, to_state) and not reason:
+    if requires_reason(ticket.state, to_state) and not (reason or "").strip():
         raise HTTPException(
             400,
             detail=(
@@ -974,6 +1054,9 @@ async def apply_transition(
                 f"变更为「{STATE_LABELS.get(to_state, to_state)}」需要填写原因"
             ),
         )
+
+    # 暂缓：预计恢复时间必填且合法（与 SLA 无关，仅用于到期提醒）
+    hold_until_at = resolve_hold_until(hold_until) if to_state == "on_hold" else None
 
     # 5. 业务前置校验（客户闭环规则，与 allowed_actions 同一份判定）
     precondition = transition_precondition_error(ticket, to_state)
@@ -1005,6 +1088,13 @@ async def apply_transition(
             # （callback_details 保留为历史记录；不清空则不满意会永久隐藏
             #  归档动作，重开后再也无法完成闭环）
             ticket.satisfaction = None
+            ticket.customer_recognized = None
+            ticket.customer_satisfaction_score = None
+        elif old_state == "on_hold":
+            # 恢复处理 = 回到原节点继续，不重新路由（上面未触碰任何路由字段）。
+            # 预计恢复时间与提醒标记一并清空，下一轮暂缓重新计时、可再次提醒一次。
+            ticket.hold_until = None
+            ticket.hold_reminded_at = None
     elif to_state == "pending":
         # open→pending 退回 或 returned→pending 重新提交：待受理无处理人
         if old_state in ("open", "returned"):
@@ -1036,9 +1126,9 @@ async def apply_transition(
     if dispatcher_id is not None:
         ticket.dispatcher_id = dispatcher_id
 
-    # 暂缓：存 hold_until
-    if to_state == "on_hold" and hold_until:
-        ticket.hold_until = datetime.fromisoformat(hold_until).replace(tzinfo=timezone.utc)
+    # 暂缓：落库预计恢复时间（已在上面校验）
+    if hold_until_at is not None:
+        ticket.hold_until = hold_until_at
 
     # 一旦发生退回或退回重开，就永久保留历史标记；转派等后续动作不清除。
     action = action_for(old_state, to_state, action_type)

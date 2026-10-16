@@ -80,8 +80,12 @@ class Ticket(Base):
     sla_first_response_breached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     sla_solution_breached: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # 暂缓
-    hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 暂缓到的时间（选填）
+    # 暂缓（on_hold）。与 SLA 完全无关：这里只记录「预计什么时候恢复继续处理」，
+    # 不是 deadline，也不参与任何计时/超时判定。
+    hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 预计恢复时间
+    # 预计恢复时间提醒的去重标记：命中并发送过一次提醒后落值，resume 时清空，
+    # 因此每一轮暂缓最多提醒一次（仿 urged_at 的一次性标记先例）。
+    hold_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # 结案
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -102,7 +106,10 @@ class Ticket(Base):
     returned_to_user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
 
     # 回访 / 归档
-    callback_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 是否「要求回访」：由分类规则在建单/分诊时确定并落库（callback_policy），
+    # 与 is_callbacked（实际是否完成回访）是两个独立事实，禁止互相同步。
+    # 存量行保持原值；新建工单一律显式赋值，这里只兜底为「不要求」。
+    callback_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     callback_details: Mapped[str | None] = mapped_column(Text)
     archive_notes: Mapped[str | None] = mapped_column(Text)
     is_callbacked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -120,11 +127,23 @@ class Ticket(Base):
     # 回访满意度：仅当 is_callbacked=true 时填写
     # 值：'satisfied' / 'average' / 'dissatisfied' / 'unrated'，未回访时为 null
     satisfaction: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # V0.15 数值评分；独立于历史四档 satisfaction，不参与其统计或归档阈值。
+    customer_satisfaction_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # 不满意原因（设计 §8.2 #9：回访双分支"收集不满意原因"）：
-    # satisfaction=dissatisfied 时必填；退回重开后保留（处理人要看到改什么），
+    # v4 不认可或历史 satisfaction=dissatisfied 时必填；退回重开后保留，
     # 新一轮回访若为非不满意则随之清空。
     unsatisfied_reason: Mapped[str | None] = mapped_column(Text)
+
+    # 关单结果（closure 节点，v1）：受控枚举，面向关单口径统计。
+    # 值域由已发布表单下发，不在代码里枚举业务语义：
+    # recovered / explained / customer_abandoned / terminal_hardware_damage /
+    # environment_obstruction / other。历史工单为 null。
+    closure_result: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+    # 客户是否认可（closure 节点，v1）：是否认可本次处理结果。
+    # null = 尚未记录（历史工单）；与 satisfaction 分档是两个独立事实。
+    customer_recognized: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())

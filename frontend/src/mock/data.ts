@@ -1,7 +1,7 @@
 import type {
   User, Role, Group, Organization, Ticket, TicketState,
   TicketPriority, Article, Overview, DashboardStats, TicketLink,
-  TicketCategory, Region, TicketStateLog, TicketRegion, CustomerType,
+  TicketCategory, Region, TicketStateLog, TicketRegion, DuplicateTicket,
 } from '@/types'
 
 export const roles: Role[] = [
@@ -108,17 +108,19 @@ function hoursLater(h: number): string {
 
 // —— P7：工单基础扩展（customer_type/phone/SN/region/category/symptom/duplicate/first_owner/skill_group/sla_breached/resolved/resolution）——
 // 工具：给 ticket 加 P7 字段的默认值
-function p7<K extends keyof Ticket>(
-  base: Omit<Ticket, K | 'customer_type' | 'customer_phone' | 'device_sn' | 'contact_name' | 'contact_phone' | 'region' | 'category_l1' | 'category_l2' | 'symptom' | 'is_duplicate' | 'duplicate_reason' | 'duplicate_of' | 'first_owner' | 'skill_group' | 'sla_breached' | 'resolved' | 'resolution' | 'archive_notes' | 'is_callbacked' | 'urged_at' | 'urged_by' | 'has_addition' | 'has_returned'> & Partial<Pick<Ticket, K>>,
-  ext: Partial<Pick<Ticket,
-    'customer_type' | 'customer_phone' | 'device_sn' | 'contact_name' | 'contact_phone'
-    | 'region' | 'category_l1' | 'category_l2' | 'symptom' | 'is_duplicate'
-    | 'duplicate_reason' | 'duplicate_of' | 'first_owner' | 'skill_group'
-    | 'sla_breached' | 'resolved' | 'resolution' | 'archive_notes' | 'is_callbacked'
-    | 'urged_at' | 'urged_by' | 'has_addition' | 'has_returned'
-  >>
+function p7(
+  base: Pick<Ticket, 'id' | 'number' | 'state' | 'priority' | 'group' | 'owner' | 'customer'
+    | 'organization' | 'channel' | 'escalation_at' | 'close_at' | 'article_count'
+    | 'created_at' | 'updated_at'>,
+  ext: Partial<Ticket>,
 ): Ticket {
   return {
+    owner_department: null,
+    region_name: null,
+    category_path: null,
+    judgement_departments: [],
+    transit_departments: [],
+    handling_department: null,
     customer_type: 'personal',
     customer_phone: '',
     device_sn: null,
@@ -142,9 +144,10 @@ function p7<K extends keyof Ticket>(
     urged_by: null,
     has_addition: false,
     has_returned: false,
+    is_draft: false,
     ...ext,
     ...base,
-  } as Ticket
+  }
 }
 
 export const tickets: Ticket[] = [
@@ -282,8 +285,8 @@ export const tickets: Ticket[] = [
 ]
 
 // 给 article 加 is_addition / append_reason 默认值（mock 数据中部分展示追加场景）
-function art(base: Omit<Article, 'is_addition' | 'append_reason'>, ext: Partial<Pick<Article, 'is_addition' | 'append_reason'>> = {}): Article {
-  return { is_addition: false, append_reason: null, ...ext, ...base }
+function art(base: Omit<Article, 'is_addition' | 'append_reason' | 'attachments'>, ext: Partial<Pick<Article, 'is_addition' | 'append_reason'>> = {}): Article {
+  return { is_addition: false, append_reason: null, attachments: [], ...ext, ...base }
 }
 
 export const articles: Record<number, Article[]> = {
@@ -448,22 +451,28 @@ export const ticketLinks: Record<number, TicketLink[]> = {
   1: [
     {
       id: 1, link_type: 'related',
-      source_ticket: { id: 1, number: '20260710-0001' },
-      target_ticket: { id: 8, number: '20260710-0008' },
+      source_ticket: { id: 1, number: '20260710-0001', title: '登录失败' },
+      target_ticket: { id: 8, number: '20260710-0008', title: 'API 异常' },
     },
   ],
   3: [
     {
       id: 2, link_type: 'related',
-      source_ticket: { id: 3, number: '20260710-0003' },
-      target_ticket: { id: 1, number: '20260710-0001' },
+      source_ticket: { id: 3, number: '20260710-0003', title: '密码重置' },
+      target_ticket: { id: 1, number: '20260710-0001', title: '登录失败' },
     },
   ],
 }
 
 // —— P7：重投工单检测结果（mock，用于创建时弹窗）——
-export const duplicateCandidates: Record<string, typeof tickets> = {
+export const duplicateCandidates: Record<string, DuplicateTicket[]> = {
   // key: phone|sn|cat_l1
-  '13800138001|SN-A001-X21|1': [tickets[0], tickets[4]], // 演示用：王五的设备 30 天内有 2 条同分类
-  '13800138001||3': [tickets[6]], // 孙七
+  '13800138001|SN-A001-X21|1': [tickets[0], tickets[4]].map(t => ({
+    id: t.id, number: t.number ?? '', state: t.state, created_at: t.created_at,
+    customer_phone: t.customer_phone, device_sn: t.device_sn,
+  })), // 演示用：王五的设备 30 天内有 2 条同分类
+  '13800138001||3': [tickets[6]].map(t => ({
+    id: t.id, number: t.number ?? '', state: t.state, created_at: t.created_at,
+    customer_phone: t.customer_phone, device_sn: t.device_sn,
+  })), // 孙七
 }

@@ -229,19 +229,19 @@ const DONE_ICON = () => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', 
 
 const metrics = computed(() => report.value?.metrics)
 const prevMetrics = computed(() => report.value?.prev_metrics ?? {})
-const byCategory = computed(() => report.value?.by_category ?? [])
+const byCategory = computed<Array<{ name: string; count: number; percentage: number; trend: Array<{ date: string; value: number }> }>>(
+  () => report.value?.by_category ?? [],
+)
 const bySubcategory = computed<Record<string, { name: string; count: number }[]>>(
   () => report.value?.by_subcategory ?? {}
 )
 const slaDaily = computed<{ date: string; value: number }[]>(() => report.value?.sla_daily ?? [])
 const satDaily = computed<{ date: string; value: number }[]>(() => report.value?.satisfaction_daily ?? [])
-const satisfaction = computed(() => metrics.value?.satisfaction_breakdown ?? { satisfied: 0, average: 0, dissatisfied: 0, unrated: 0 })
-
 const satisfactionRatePct = computed(() =>
-  ((metrics.value?.satisfaction_rate ?? 0) * 100).toFixed(1)
+  Number(((metrics.value?.satisfaction_rate ?? 0) * 100).toFixed(1))
 )
 const slaBreachRatePct = computed(() =>
-  ((metrics.value?.sla_breach_rate ?? 0) * 100).toFixed(1)
+  Number(((metrics.value?.sla_breach_rate ?? 0) * 100).toFixed(1))
 )
 
 /**
@@ -536,7 +536,7 @@ function renderSparks() {
   catSparkEls.value.forEach((el, idx) => {
     const c = byCategory.value[idx]
     if (!c || !el) return
-    const values = (c.trend ?? []).map((d: any) => d.value)
+    const values: number[] = (c.trend ?? []).map((d: { value: number }) => d.value)
     let chart = echarts.getInstanceByDom(el)
     if (!chart) {
       chart = echarts.init(el)

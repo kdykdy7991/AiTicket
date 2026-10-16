@@ -4,25 +4,24 @@
     <h1>创建工单</h1>
     <form id="ticket-create-form" novalidate @submit.prevent="submitTicket">
       <div class="create-layout"><div class="form-main">
-      <TicketFormSection title="工单信息" icon="MessageBox"><div class="grid intake-grid"><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div></div></TicketFormSection>
+      <TicketFormSection title="工单信息" icon="MessageBox"><div class="grid intake-grid"><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div><fieldset class="field radio-field"><legend class="required">是否为商机工单</legend><div class="radio-options"><label><input v-model="form.businessOpportunity" type="radio" value="yes" /> 是</label><label><input v-model="form.businessOpportunity" type="radio" value="no" /> 否</label></div><small v-if="errors.businessOpportunity" class="error">{{ errors.businessOpportunity }}</small></fieldset></div></TicketFormSection>
       <TicketFormSection title="客户信息" icon="User"><div class="grid customer-grid">
         <div class="field"><label for="customerName" class="required">客户名称</label><input id="customerName" v-model.trim="form.customerName" placeholder="请输入客户名称" :class="{ invalid: errors.customerName }" /><small v-if="errors.customerName" class="error">{{ errors.customerName }}</small></div>
         <div class="field"><label for="companyName" class="required">单位全称</label><input id="companyName" v-model.trim="form.companyName" placeholder="请输入单位全称" :class="{ invalid: errors.companyName }" /><small v-if="errors.companyName" class="error">{{ errors.companyName }}</small></div>
         <div class="field"><label for="industry" class="required">行业</label><select id="industry" v-model="form.industry" :class="{ invalid: errors.industry }"><option value="" disabled hidden>请选择行业</option><option v-for="v in industries" :key="v">{{ v }}</option></select><small v-if="errors.industry" class="error">{{ errors.industry }}</small></div>
         <div class="field"><label for="callerPhone" class="required">来电号码</label><input id="callerPhone" v-model.trim="form.callerPhone" inputmode="tel" placeholder="请输入来电号码" :class="{ invalid: errors.callerPhone }" /><small v-if="errors.callerPhone" class="error">{{ errors.callerPhone }}</small></div>
-        <div class="field"><label for="contactPhone">联系号码</label><input id="contactPhone" v-model.trim="form.contactPhone" inputmode="tel" placeholder="请输入联系号码" :class="{ invalid: errors.contactPhone }" /><small class="help">联系方式与来电号码不同时补充</small><small v-if="errors.contactPhone" class="error">{{ errors.contactPhone }}</small></div>
-        <div class="field"><label for="email">邮箱</label><input id="email" v-model.trim="form.email" type="email" placeholder="请输入邮箱" :class="{ invalid: errors.email }" /><small v-if="errors.email" class="error">{{ errors.email }}</small></div>
+        <div class="field"><label for="contactPhone" :class="{ required: isOpportunity }">联系号码</label><input id="contactPhone" v-model.trim="form.contactPhone" inputmode="tel" placeholder="请输入联系号码" :class="{ invalid: errors.contactPhone }" /><small v-if="!isOpportunity" class="help">联系方式与来电号码不同时补充</small><small v-if="errors.contactPhone" class="error">{{ errors.contactPhone }}</small></div>
+        <div v-if="!isOpportunity" class="field"><label for="email">邮箱</label><input id="email" v-model.trim="form.email" type="email" placeholder="请输入邮箱" :class="{ invalid: errors.email }" /><small v-if="errors.email" class="error">{{ errors.email }}</small></div>
       </div></TicketFormSection>
       <TicketFormSection title="工单内容" icon="Document"><div class="grid content-grid">
-        <div class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
-        <div class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
-        <div class="field"><label for="subcategory" class="required">二级分类</label><select id="subcategory" v-model="form.subcategory" :disabled="!form.category" :class="{ invalid: errors.subcategory }"><option value="" disabled hidden>{{ form.category ? '请选择二级分类' : '请先选择一级分类' }}</option><option v-for="v in subcategoryOptions" :key="v">{{ v }}</option></select><small v-if="errors.subcategory" class="error">{{ errors.subcategory }}</small></div>
-        <fieldset class="field radio-field"><legend class="required">是否为商机工单</legend><div class="radio-options"><label><input v-model="form.businessOpportunity" type="radio" value="yes" /> 是</label><label><input v-model="form.businessOpportunity" type="radio" value="no" /> 否</label></div><small v-if="errors.businessOpportunity" class="error">{{ errors.businessOpportunity }}</small></fieldset>
-        <div class="field"><label for="expectedResult" class="required">客户期望结果</label><select id="expectedResult" v-model="form.expectedResult" :class="{ invalid: errors.expectedResult }"><option v-for="v in expectedResults" :key="v">{{ v }}</option></select><small v-if="errors.expectedResult" class="error">{{ errors.expectedResult }}</small></div>
-        <fieldset class="field radio-field priority-field"><legend class="required">优先级</legend><div class="priority-options"><label v-for="v in priorities" :key="v" :class="{ chosen: form.priority === v }"><input v-model="form.priority" type="radio" :value="v" />{{ v }}</label></div><small v-if="errors.priority" class="error">{{ errors.priority }}</small></fieldset>
+        <div v-if="isOpportunity" class="field"><label for="salesUser" class="required">销售人员</label><select id="salesUser" v-model.number="form.salesUserId" :class="{ invalid: errors.salesUserId }"><option :value="null" disabled>请选择销售人员</option><option v-for="person in salesUsers" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="errors.salesUserId" class="error">{{ errors.salesUserId }}</small></div>
+        <div v-if="!isOpportunity" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
+        <div v-if="!isOpportunity" class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
+        <div v-if="!isOpportunity && !rootCategory?.create_selectable" class="field"><label for="subcategory" class="required">细分分类</label><select id="subcategory" v-model="form.subcategory" :disabled="!form.category" :class="{ invalid: errors.subcategory }"><option value="" disabled hidden>{{ form.category ? '请选择可提交的分类' : '请先选择一级分类' }}</option><option v-for="v in subcategoryOptions" :key="v.id" :value="v.label">{{ v.label }}</option></select><small v-if="errors.subcategory" class="error">{{ errors.subcategory }}</small></div>
+        <fieldset v-if="!isOpportunity" class="field radio-field priority-field"><legend class="required">优先级</legend><div class="priority-options"><label v-for="v in priorities" :key="v" :class="{ chosen: form.priority === v }"><input v-model="form.priority" type="radio" :value="v" />{{ v }}</label></div><small v-if="errors.priority" class="error">{{ errors.priority }}</small></fieldset>
         <div class="field full"><label for="description" class="required">客户问题详情</label><div class="textarea-wrap"><textarea id="description" v-model="form.description" maxlength="1000" rows="5" placeholder="请尽量记录客户原始描述" :class="{ invalid: errors.description }"></textarea><span>{{ form.description.length }}/1000</span></div><small v-if="errors.description" class="error">{{ errors.description }}</small></div>
       </div></TicketFormSection>
-      <TicketFormSection v-if="form.category === '业务保障'" title="故障信息" icon="Tools" hint="（一级分类为“业务保障”时需填写）"><div class="grid fault-grid">
+      <TicketFormSection v-if="!isOpportunity && form.category === '业务保障'" title="故障信息" icon="Tools" hint="（一级分类为“业务保障”时需填写）"><div class="grid fault-grid">
         <div class="field"><label for="faultTime" class="required">故障发生时间</label><input id="faultTime" v-model="form.faultTime" type="datetime-local" :class="{ invalid: errors.faultTime }" /><small v-if="errors.faultTime" class="error">{{ errors.faultTime }}</small></div>
         <div class="field"><label for="recurrence" class="required">故障复现规律</label><select id="recurrence" v-model="form.recurrence" :class="{ invalid: errors.recurrence }"><option v-for="v in recurrenceOptions" :key="v">{{ v }}</option></select><small v-if="errors.recurrence" class="error">{{ errors.recurrence }}</small></div>
         <div class="field"><label for="faultLocation" class="required">故障发生地理位置</label><input id="faultLocation" v-model.trim="form.faultLocation" placeholder="经纬度或文字地址" :class="{ invalid: errors.faultLocation }" /><small class="help">优先经纬度，也可填写文字地址</small><small v-if="errors.faultLocation" class="error">{{ errors.faultLocation }}</small></div>
@@ -56,8 +55,7 @@ import { Setting } from '@element-plus/icons-vue'
 
 const router = useRouter(), route = useRoute(), auth = useAuthStore(), uiStore = useUIStore()
 const channels = ['语音', '在线客服', '内部转办']
-const industries = ['物联网', '海洋渔业', '水利', '能源', '未提供']
-const expectedResults = ['解释说明', '远程排查', '上门检修', '换终端', '退费', '销户', '体验优化']
+const industries = ['海洋渔业', '工程机械', '智能网联', '交通物流', '能源行业', '应急通信', '智慧林草', '低空出行', '智慧水利', '智慧农业', 'Robotaxi', '未提供']
 const recurrenceOptions = ['必现', '偶发', '仅特定时段']
 const priorities = ['P1', 'P2', 'P3', 'P4']
 const categoryNames: CategoryName[] = ['咨询', '投诉', '业务运营', '业务保障']
@@ -68,6 +66,8 @@ const form = reactive<TicketCreateDesignForm>(initialTicketForm())
 const errors = reactive<Partial<Record<keyof TicketCreateDesignForm, string>>>({})
 const categories = ref<TicketCategory[]>([])
 const categoriesLoaded = ref(false)
+const salesGroupId = ref<number | null>(null)
+const salesUsers = ref<{ id: number; name: string }[]>([])
 const draftId = ref<number | null>(null)
 const busy = ref(false)
 const now = ref(new Date().toLocaleString('sv-SE').replace('T', ' '))
@@ -80,22 +80,41 @@ const systemInfo = computed(() => [
   { label: '受理时间', value: now.value },
 ])
 const rootCategory = computed(() => form.category ? categories.value.find(c => c.parent_id == null && c.name === rootNames[form.category as CategoryName]) : undefined)
-const subcategoryRows = computed(() => categories.value.filter(c => c.parent_id === rootCategory.value?.id))
-const subcategoryOptions = computed(() => subcategoryRows.value.map(c => c.name))
-const selectedCategoryId = computed(() => subcategoryRows.value.find(c => c.name === form.subcategory)?.id)
+const subcategoryOptions = computed(() => {
+  const root = rootCategory.value
+  if (!root || root.create_selectable) return []
+  const byId = new Map(categories.value.map(c => [c.id, c]))
+  return categories.value.filter(c => c.create_selectable).flatMap(c => {
+    const names: string[] = []
+    let node: TicketCategory | undefined = c
+    while (node && node.id !== root.id) {
+      names.unshift(node.name)
+      node = node.parent_id == null ? undefined : byId.get(node.parent_id)
+    }
+    return node?.id === root.id ? [{ id: c.id, label: names.join(' / ') }] : []
+  })
+})
+const selectedCategoryId = computed(() => rootCategory.value?.create_selectable
+  ? rootCategory.value.id
+  : subcategoryOptions.value.find(c => c.label === form.subcategory)?.id)
 const numberRequired = computed(() => form.category === '业务运营' || form.category === '业务保障')
+const isOpportunity = computed(() => form.businessOpportunity === 'yes')
 const requiredFields = computed<(keyof TicketCreateDesignForm)[]>(() => {
-  const fields: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'category', 'subcategory', 'businessOpportunity', 'expectedResult', 'priority', 'description']
+  const fields: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'businessOpportunity', 'description']
+  if (isOpportunity.value) return [...fields, 'contactPhone', 'salesUserId']
+  fields.push('category', 'priority')
+  if (!rootCategory.value?.create_selectable) fields.push('subcategory')
   if (numberRequired.value) fields.push('satelliteNumber')
   if (form.category === '业务保障') fields.push('faultTime', 'recurrence', 'faultLocation', 'batchFault')
   return fields
 })
 const completedRequired = computed(() => requiredFields.value.filter(key => {
-  const value = form[key]?.trim()
+  const raw = form[key]
+  const value = typeof raw === 'string' ? raw.trim() : raw
   if (!value) return false
-  if (key === 'subcategory') return subcategoryOptions.value.includes(value)
-  if (key === 'callerPhone') return /^(1[3-9]\d{9}|0\d{2,3}-?\d{7,8})$/.test(value)
-  if (key === 'faultTime') return !Number.isNaN(new Date(value).getTime())
+  if (key === 'subcategory') return subcategoryOptions.value.some(c => c.label === value)
+  if (key === 'callerPhone') return /^(1[3-9]\d{9}|0\d{2,3}-?\d{7,8})$/.test(String(value))
+  if (key === 'faultTime') return !Number.isNaN(new Date(String(value)).getTime())
   return true
 }).length)
 const requiredPercent = computed(() => Math.round(completedRequired.value / requiredFields.value.length * 100))
@@ -105,15 +124,20 @@ onMounted(async () => {
   try {
     categories.value = await metaApi.getCategories()
     categoriesLoaded.value = true
-    if (form.subcategory && !subcategoryOptions.value.includes(form.subcategory)) form.subcategory = ''
+    if (form.subcategory && !subcategoryOptions.value.some(c => c.label === form.subcategory)) form.subcategory = ''
   } catch { ElMessage.error('分类加载失败，请刷新页面后重试') }
+  try {
+    const salesGroup = (await metaApi.getSkillGroups()).find(group => group.name === '销售')
+    salesGroupId.value = salesGroup?.id ?? null
+    salesUsers.value = salesGroup ? await metaApi.getHandlers(salesGroup.id) : []
+  } catch { ElMessage.error('销售人员加载失败，请刷新页面后重试') }
   const id = Number(route.query.draft_id)
   if (Number.isInteger(id) && id > 0) {
     try {
       const ticket: any = await api.get(`/tickets/${id}`)
       if (!ticket.is_draft) throw new Error('非草稿')
       draftId.value = id
-      form.channel = ({ phone: '语音', web: '在线客服', internal: '内部转办' } as Record<string,string>)[ticket.channel] || '在线客服'
+      form.channel = ({ phone: '语音', web: '在线客服', internal: '内部转办' } as Record<string,string>)[ticket.channel] || '语音'
       form.customerName = ticket.customer_name || ''
       form.companyName = ticket.customer_company || ''
       form.industry = ticket.industry || ''
@@ -123,10 +147,10 @@ onMounted(async () => {
       form.satelliteNumber = ticket.satellite_number || ''
       const root = categories.value.find(c => c.id === ticket.category_l1_id)
       form.category = (Object.keys(rootNames) as CategoryName[]).find(k => rootNames[k] === root?.name) || ''
-      form.subcategory = categories.value.find(c => c.id === ticket.category_id)?.name || ''
+      form.subcategory = subcategoryOptions.value.find(c => c.id === ticket.category_id)?.label || ''
       form.businessOpportunity = ticket.is_opportunity == null ? '' : ticket.is_opportunity ? 'yes' : 'no'
-      form.expectedResult = ticket.expected_result || ''
-      form.priority = (Object.keys(priorityCodes).find(k => priorityCodes[k] === ticket.priority)) || 'P2'
+      form.salesUserId = ticket.is_opportunity ? ticket.dispatcher_id ?? null : null
+      form.priority = (Object.keys(priorityCodes).find(k => priorityCodes[k] === ticket.priority)) || 'P4'
       form.description = ticket.description || ''
       form.faultTime = ticket.fault_occurred_at ? new Date(ticket.fault_occurred_at).toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16) : ''
       form.recurrence = ticket.fault_recurrence || ''
@@ -142,13 +166,17 @@ function onCategoryChange() {
 }
 function validate(): boolean {
   for (const key of Object.keys(errors)) delete errors[key as keyof TicketCreateDesignForm]
-  for (const key of requiredFields.value) if (!form[key]?.trim()) errors[key] = '请填写此项'
-  if (form.subcategory && !subcategoryOptions.value.includes(form.subcategory)) errors.subcategory = '请选择当前分类对应的二级分类'
+  for (const key of requiredFields.value) {
+    const value = form[key]
+    if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) errors[key] = '请填写此项'
+  }
+  if (isOpportunity.value && (!salesGroupId.value || !salesUsers.value.some(person => person.id === form.salesUserId))) errors.salesUserId = '请选择有效的销售人员'
+  if (!isOpportunity.value && form.subcategory && !subcategoryOptions.value.some(c => c.label === form.subcategory)) errors.subcategory = '请选择当前分类下可提交的细分分类'
   const phone = /^(1[3-9]\d{9}|0\d{2,3}-?\d{7,8})$/
   if (form.callerPhone && !phone.test(form.callerPhone)) errors.callerPhone = '请输入有效的手机号或固定电话'
   if (form.contactPhone && !phone.test(form.contactPhone)) errors.contactPhone = '请输入有效的手机号或固定电话'
   if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) errors.email = '请输入有效的邮箱地址'
-  if (!categoriesLoaded.value || !selectedCategoryId.value) errors.subcategory ||= '分类尚未加载或未选择'
+  if (!isOpportunity.value && (!categoriesLoaded.value || !selectedCategoryId.value)) errors.subcategory ||= '分类尚未加载或当前分类不可提交'
   return !Object.keys(errors).length
 }
 function payload(isDraft: boolean) {
@@ -159,16 +187,19 @@ function payload(isDraft: boolean) {
     customer_phone: form.callerPhone.trim(),
     customer_phone_type: form.callerPhone.startsWith('1') ? 'mobile' : 'landline',
     contact_phone: form.contactPhone.trim() || null, customer_email: form.email.trim() || null,
-    channel: channelCodes[form.channel] || 'web', priority: priorityCodes[form.priority] || 'p2_high',
-    category_id: selectedCategoryId.value || null, description: form.description.trim(),
-    complaint_level: form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
-    satellite_number: form.satelliteNumber.trim() || null,
+    channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
+    category_id: isOpportunity.value ? null : selectedCategoryId.value || null, description: form.description.trim(),
+    skill_group_id: isOpportunity.value ? salesGroupId.value : null,
+    sales_owner_id: isOpportunity.value ? form.salesUserId : null,
+    dispatcher_id: isDraft && isOpportunity.value ? form.salesUserId : null,
+    complaint_level: !isOpportunity.value && form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
+    satellite_number: isOpportunity.value ? null : form.satelliteNumber.trim() || null,
     is_opportunity: form.businessOpportunity ? form.businessOpportunity === 'yes' : null,
-    expected_result: form.expectedResult || null,
-    fault_occurred_at: form.category === '业务保障' && form.faultTime ? new Date(form.faultTime).toISOString() : null,
-    fault_recurrence: form.category === '业务保障' ? form.recurrence || null : null,
-    fault_location: form.category === '业务保障' ? form.faultLocation.trim() || null : null,
-    is_batch_fault: form.category === '业务保障' && form.batchFault ? form.batchFault === 'yes' : null,
+    expected_result: null,
+    fault_occurred_at: !isOpportunity.value && form.category === '业务保障' && form.faultTime ? new Date(form.faultTime).toISOString() : null,
+    fault_recurrence: !isOpportunity.value && form.category === '业务保障' ? form.recurrence || null : null,
+    fault_location: !isOpportunity.value && form.category === '业务保障' ? form.faultLocation.trim() || null : null,
+    is_batch_fault: !isOpportunity.value && form.category === '业务保障' && form.batchFault ? form.batchFault === 'yes' : null,
   }
 }
 async function saveDraft() {
@@ -268,6 +299,9 @@ async function submitTicket() {
 </style>
 <style scoped>
 .create-layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;align-items:start;gap:20px}
+.priority-field{grid-column:1/-1}
+.priority-options{display:flex;justify-content:flex-start;flex-wrap:wrap}
+.priority-options label{width:auto;min-width:67px;justify-content:flex-start}
 .form-main{min-width:0}.form-sidebar{min-width:0;position:sticky;top:18px}
 .intake-grid{grid-template-columns:minmax(0,320px)}
 .record-card{overflow:hidden;border:1px solid var(--color-border);border-radius:var(--radius-lg);background:var(--color-bg-card);box-shadow:var(--shadow-xs)}

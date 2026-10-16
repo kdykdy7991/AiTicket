@@ -378,9 +378,9 @@ onMounted(async () => {
       if (draft.customer_phone) {
         form.customer_phone_type = /^1[3-9]\d{9}$/.test(draft.customer_phone) ? 'mobile' : 'landline'
       }
-      form.contact_name = (draft as any).contact_name || draft.customer_name || ''
+      form.contact_name = draft.contact_name || draft.customer_name || ''
       form.contact_phone = draft.contact_phone || form.contact_phone
-      form.customer_company = (draft as any).customer_company || ''
+      form.customer_company = draft.customer_company || ''
       form.device_sn = draft.device_sn || form.device_sn
       form.region_name = draft.region_name || form.region_name
       form.category_l1_id = (draft as any).category_l1_id || null
@@ -394,7 +394,7 @@ onMounted(async () => {
         const map: Record<string, number> = { 'p1_urgent': 1, 'p2_high': 2, 'p3_normal': 3, 'p4_enterprise': 4 }
         return map[s] || form.priority_id
       }
-      form.priority_id = stateStrToPriority(draft.priority) || form.priority_id
+      form.priority_id = stateStrToPriority(draft.priority_key || '') || form.priority_id
       if (form.skill_group_id) {
         dispatchers.value = await metaApi.getDispatchers(form.skill_group_id)
       }

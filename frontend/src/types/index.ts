@@ -203,7 +203,11 @@ export interface Ticket {
   callback_required?: boolean  // 是否需要回访（false=无需回访）；仅详情接口返回
   callback_details?: string | null  // 回访详情/不满意原因（V0.86 贯通）
   satisfaction?: string | null      // 满意度：satisfied/average/dissatisfied/unrated
-  unsatisfied_reason?: string | null  // 不满意原因（dissatisfied 必填，V0.87 收尾）
+  customer_satisfaction_score?: number | null  // V0.15 独立的 1～10 分评分
+  customer_recognized?: boolean | null
+  closure_result?: string | null
+  unsatisfied_reason?: string | null  // 不认可或历史四档不满意时填写
+  hold_until?: string | null  // 后端详情的 ISO 时间；未暂缓时为 null
   // 催办
   urged_at: string | null
   urged_by: User | null
@@ -228,8 +232,22 @@ export interface Ticket {
   dispatch_chain_steps?: { order: number; department_code: string; stage?: 'judgement' | 'phone_feedback' }[] | null
   dispatch_step_index?: number | null
   can_refine?: boolean
-  refine_options?: { id: number; name: string; level?: number }[]
+  refine_options?: { id: number; name: string; level?: number; next_department?: string | null }[]
   refine_denied_reason?: string | null
+  /** 后端从当前工单事实和该用户权限即时推导；前端不可提交 node_type。 */
+  node_context?: {
+    ticket_id: number
+    node_type: 'intake' | 'triage' | 'processing' | 'phone_feedback' | 'closure' | 'sales_opportunity' | null
+    category_id: number | null
+    department_id: number | null
+    department_code: string | null
+    dispatch_step_index: number | null
+    dispatch_stage: string | null
+    operator_id: number
+    owner_id: number | null
+    dispatcher_id: number | null
+    allowed_actions: AllowedAction[]
+  } | null
 }
 
 export interface ArticleAttachment {
@@ -248,7 +266,7 @@ export interface Article {
   origin_by: User
   sender_type: 'agent' | 'customer' | 'system'
   article_type: 'note' | 'email' | 'web' | 'phone'
-  type?: 'reply' | 'addition' | 'reminder' | 'return'
+  type?: 'note' | 'reply' | 'addition' | 'reminder' | 'return'
   subject?: string
   body: string
   content_type: 'text/plain' | 'text/html'
@@ -261,6 +279,44 @@ export interface Article {
 }
 
 export interface TicketDetail extends Ticket {
+  /** 原始建单字段在详情适配器中保留，供草稿回填。 */
+  customer_name?: string | null
+  customer_company?: string | null
+  skill_group_id?: number | null
+  priority_key?: string
+  node_submissions?: Array<{
+    id: number
+    node_type: string
+    form_version: number
+    data: Record<string, unknown>
+    article_id: number | null
+    article_body: string | null
+    attachments: Array<{ id: number; filename: string; url: string }>
+    field_snapshot: Array<{ key: string; label: string; storage_type: string; storage_key?: string; submitted_value?: unknown }>
+  }>
+  current_form?: {
+    code: string
+    name: string
+    form_definition_id: number
+    version: number
+    fields: Array<{
+      field_key: string
+      label: string
+      field_type: string
+      sort_order: number
+      required: boolean
+      visible: boolean
+      options: string[]
+      value: string | number | boolean | null
+      option_labels?: Record<string, string>
+      boolean_labels?: { true?: string; false?: string }
+      min?: number | null
+      max?: number | null
+      visibility_condition?: { field_equals?: { field: string; value: unknown } } | null
+      required_condition?: { field_equals?: { field: string; value: unknown } } | null
+    }>
+  } | null
+  can_note?: boolean
   creator_username?: string | null
   creator_group_name?: string | null
   articles: Article[]
@@ -429,7 +485,7 @@ export interface TicketUpdatePayload {
 }
 
 export interface ArticleCreatePayload {
-  type: 'reply' | 'addition' | 'reminder'
+  type: 'reply' | 'note' | 'addition' | 'reminder'
   body: string
   content_type?: 'text/plain' | 'text/html'
   article_type?: 'note' | 'email' | 'web'

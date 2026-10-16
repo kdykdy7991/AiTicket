@@ -3,12 +3,13 @@ export interface TicketCreateDesignForm {
   channel: string; customerName: string; companyName: string; industry: string
   callerPhone: string; contactPhone: string; email: string
   satelliteNumber: string; category: CategoryName | ''; subcategory: string
-  businessOpportunity: 'yes' | 'no' | ''; expectedResult: string; priority: string
+  businessOpportunity: 'yes' | 'no' | ''; priority: string
+  salesUserId: number | null
   description: string; faultTime: string; recurrence: string; faultLocation: string
   batchFault: 'yes' | 'no' | ''
 }
 export const initialTicketForm = (): TicketCreateDesignForm => ({
-  channel: '在线客服', customerName: '', companyName: '', industry: '', callerPhone: '', contactPhone: '', email: '',
-  satelliteNumber: '', category: '业务保障', subcategory: '', businessOpportunity: 'no',
-  expectedResult: '远程排查', priority: 'P2', description: '', faultTime: '', recurrence: '偶发', faultLocation: '', batchFault: 'no',
+  channel: '语音', customerName: '', companyName: '', industry: '', callerPhone: '', contactPhone: '', email: '',
+  satelliteNumber: '', category: '业务保障', subcategory: '', businessOpportunity: 'no', salesUserId: null,
+  priority: 'P4', description: '', faultTime: '', recurrence: '偶发', faultLocation: '', batchFault: 'no',
 })

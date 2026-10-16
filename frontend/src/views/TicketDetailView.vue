@@ -86,8 +86,75 @@
             </div>
           </div>
 
-          <!-- 已处理工单：归档 -->
-          <div v-if="canArchiveFromResolved" class="archive-card">
+          <!-- 已处理工单：回访闭环（结构化表单） -->
+          <div v-if="closureForm" class="archive-card">
+            <div class="archive-card-title">{{ closureForm.name }}</div>
+            <p class="refine-card-hint">回访与关单信息一次提交；关单由系统按既有归档流转执行。</p>
+            <div class="triage-field">
+              <label class="triage-field-label">回访要求</label>
+              <el-tag :type="callbackRequired ? 'warning' : 'info'">
+                {{ callbackRequired ? '需要回访' : '无需回访' }}
+              </el-tag>
+              <p class="refine-card-hint">回访要求由更早的流程确定，此处只展示，不做修改。</p>
+            </div>
+            <div v-for="field in closureForm.fields.filter(closureFieldVisible)" :key="field.field_key" class="triage-field">
+              <label class="triage-field-label">
+                {{ field.label }}
+                <span v-if="closureFieldRequired(field)" class="required-mark">*</span>
+              </label>
+              <el-radio-group v-if="field.field_type === 'boolean'" v-model="closureValues[field.field_key]">
+                <el-radio :label="true">{{ field.boolean_labels?.true || '是' }}</el-radio>
+                <el-radio :label="false">{{ field.boolean_labels?.false || '否' }}</el-radio>
+              </el-radio-group>
+              <el-input-number
+                v-else-if="field.field_type === 'integer'"
+                v-model="closureValues[field.field_key]"
+                :min="field.min ?? 1"
+                :max="field.max ?? 10"
+                :step="1"
+                step-strictly
+              />
+              <el-select
+                v-else-if="field.field_type === 'select'"
+                v-model="closureValues[field.field_key]"
+                :placeholder="`请选择${field.label}`"
+                clearable
+              >
+                <el-option
+                  v-for="option in field.options"
+                  :key="option"
+                  :label="field.option_labels?.[option] || option"
+                  :value="option"
+                />
+              </el-select>
+              <el-input
+                v-else
+                v-model="closureValues[field.field_key]"
+                type="textarea"
+                :rows="2"
+                :maxlength="2000"
+                show-word-limit
+                :placeholder="`请填写${field.label}`"
+              />
+            </div>
+            <p v-if="closureRecordsDissatisfied" class="dissatisfied-hint">
+              客户不满意不能直接关单。提交后仅记录回访结果，请通过顶部「退回」让处理人重新处理，
+              再次回访满意后才能归档。
+            </p>
+            <div class="archive-actions">
+              <el-button
+                type="success"
+                :loading="closureSubmitting"
+                :disabled="closureDisabled"
+                @click="submitClosureForm"
+              >
+                {{ closureRecordsDissatisfied ? '保存回访结果' : '关单归档' }}
+              </el-button>
+            </div>
+          </div>
+
+          <!-- 已处理工单：归档（未绑定闭环表单时的兼容面板） -->
+          <div v-else-if="canArchiveFromResolved" class="archive-card">
             <div class="archive-card-title">归档工单</div>
             <div class="archive-form">
               <el-input
@@ -98,21 +165,32 @@
                 maxlength="2000"
                 show-word-limit
               />
-              <el-radio-group v-model="callbackChoice">
-                <el-radio label="call_backed">已回访</el-radio>
-                <el-radio label="no_need">无需回访</el-radio>
+              <!-- 回访要求由系统按问题分类确定，只读展示；客服只记录「是否已完成回访」 -->
+              <div class="triage-field">
+                <label class="triage-field-label">回访要求</label>
+                <el-tag :type="callbackRequired ? 'warning' : 'info'">
+                  {{ callbackRequired ? '需要回访' : '无需回访' }}
+                </el-tag>
+              </div>
+              <el-radio-group v-if="callbackRequired" v-model="callbackDone">
+                <el-radio :label="true">已完成回访</el-radio>
+                <el-radio :label="false">未完成回访</el-radio>
               </el-radio-group>
-              <!-- 已回访时显示满意度：满意/一般/不满意，必填 -->
-              <el-radio-group v-if="callbackChoice === 'call_backed'" v-model="satisfaction" class="satisfaction-group">
+              <!-- 完成回访后才谈得上满意度：满意/一般/不满意 -->
+              <el-radio-group
+                v-if="callbackRequired && callbackDone"
+                v-model="satisfaction"
+                class="satisfaction-group"
+              >
                 <span class="satisfaction-label">满意度：</span>
                 <el-radio :label="'satisfied'">满意</el-radio>
                 <el-radio :label="'average'">一般</el-radio>
                 <el-radio :label="'dissatisfied'">不满意</el-radio>
                 <el-radio :label="'unrated'">未评价</el-radio>
               </el-radio-group>
-              <!-- 不满意原因（后端 unsatisfied_reason，dissatisfied 必填，V0.87 收尾） -->
+              <!-- 不满意原因（后端 unsatisfied_reason，dissatisfied 必填） -->
               <el-input
-                v-if="callbackChoice === 'call_backed' && satisfaction === 'dissatisfied'"
+                v-if="callbackRequired && callbackDone && satisfaction === 'dissatisfied'"
                 v-model="unsatisfiedReason"
                 type="textarea"
                 :rows="2"
@@ -121,7 +199,10 @@
                 show-word-limit
               />
               <!-- 闭环规则：不满意不能直接归档（后端 enforced + allowed_actions 不下发） -->
-              <p v-if="callbackChoice === 'call_backed' && satisfaction === 'dissatisfied'" class="dissatisfied-hint">
+              <p
+                v-if="callbackRequired && callbackDone && satisfaction === 'dissatisfied'"
+                class="dissatisfied-hint"
+              >
                 客户不满意不能直接归档。点击「保存回访结果」记录后，请通过顶部「退回」让处理人重新处理，
                 处理完成并再次回访后才能归档。
               </p>
@@ -132,14 +213,58 @@
                   :disabled="archiveDisabled"
                   @click="submitArchive"
                 >
-                  {{ satisfaction === 'dissatisfied' && callbackChoice === 'call_backed' ? '保存回访结果' : '归档' }}
+                  {{ recordsDissatisfied ? '保存回访结果' : '归档' }}
                 </el-button>
               </div>
             </div>
           </div>
 
+          <!-- 暂缓中：只展示事实 + 恢复入口，不提供「完成本节点处理」 -->
+          <div v-if="isOnHold" class="archive-card">
+            <div class="archive-card-title">暂缓处理中</div>
+            <div class="triage-field">
+              <label class="triage-field-label">暂缓原因</label>
+              <p class="archive-readonly">{{ holdReason || '—' }}</p>
+            </div>
+            <div class="triage-field">
+              <label class="triage-field-label">预计恢复时间</label>
+              <p class="archive-readonly">{{ holdUntilText }}</p>
+            </div>
+            <div class="triage-field">
+              <label class="triage-field-label">当前处理人 / 责任部门</label>
+              <p class="archive-readonly">
+                {{ (ticket as any)?.owner_name || '—' }} / {{ (ticket as any)?.skill_group_name || '—' }}
+              </p>
+            </div>
+            <p class="refine-card-hint">
+              预计恢复时间仅表示预计什么时候继续处理，不是截止时间；到期不会自动变更状态，需人工确认后恢复处理。
+            </p>
+            <div class="archive-actions">
+              <el-button type="primary" :loading="resuming" @click="resumeDialogVisible = true">恢复处理</el-button>
+            </div>
+          </div>
+
           <!-- 当前判断人的正常处理动作，选分类后按分派链流转。 -->
-          <div v-if="canRefine" class="refine-card">
+          <div v-if="canRefine && currentForm" class="refine-card">
+            <div class="refine-card-title">{{ currentForm.name }}</div>
+            <p class="refine-card-hint">选择下一层问题分类，填写核查信息后一起提交；责任部门由系统确定。</p>
+            <el-select v-model="triageTargetCategoryId" placeholder="选择下一层问题分类" @change="loadTriageForm">
+              <el-option v-for="option in refineOptions" :key="option.id" :label="option.name" :value="option.id" />
+            </el-select>
+            <div v-if="triageTargetCategoryId" class="triage-field">
+              <label>目标流转部门</label>
+              <p class="archive-readonly">{{ refineOptions.find(option => option.id === triageTargetCategoryId)?.next_department || '—' }}</p>
+            </div>
+            <div v-for="field in currentForm.fields.filter((item: any) => item.visible)" :key="field.field_key" class="triage-field">
+              <label>{{ field.label }}<span v-if="field.required"> *</span></label>
+              <el-select v-if="field.field_type === 'select'" v-model="triageValues[field.field_key]" clearable>
+                <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
+              </el-select>
+              <el-input v-else v-model="triageValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? 3 : undefined" />
+            </div>
+            <el-button type="primary" :loading="refining" :disabled="!triageTargetCategoryId" @click="submitTriageForm">提交分诊并重新派单</el-button>
+          </div>
+          <div v-else-if="canRefine" class="refine-card">
             <div class="refine-card-title">下一级问题判断</div>
             <p class="refine-card-hint">请选择最符合当前问题的分类，确认后将按对应分派链继续流转。</p>
             <div class="refine-options">
@@ -156,6 +281,40 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
               </button>
             </div>
+          </div>
+
+          <div v-if="processingForm" class="refine-card">
+            <div class="refine-card-title">{{ isSalesOpportunity ? '完成销售商机处理' : '完成本节点处理' }}</div>
+            <p class="refine-card-hint">下方“添加回复”仅记录处理过程；提交本表单才会完成当前部门的处理并按原有流程流转。</p>
+            <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
+              <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
+              <el-select v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable>
+                <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
+              </el-select>
+              <el-radio-group v-else-if="field.field_type === 'boolean'" v-model="processingValues[field.field_key]">
+                <el-radio :label="true">是</el-radio><el-radio :label="false">否</el-radio>
+              </el-radio-group>
+              <input v-else-if="field.field_type === 'attachment'" type="file" multiple accept="image/*,application/pdf" @change="onProcessingFiles" />
+              <el-input v-else v-model="processingValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? 3 : undefined" />
+            </div>
+            <div class="archive-actions">
+              <el-button type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
+              <el-button v-if="canHold" :loading="holding" @click="holdDialogVisible = true">暂缓处理</el-button>
+            </div>
+            <p class="refine-card-hint">「添加回复」只记录沟通过程；「完成本节点处理」按流程流转；「暂缓处理」暂停本节点，恢复后继续处理。</p>
+          </div>
+
+          <div v-if="phoneFeedbackForm" class="refine-card">
+            <div class="refine-card-title">提交售后致电反馈</div>
+            <p class="refine-card-hint">下方“添加回复”仅记录沟通过程；提交本表单才会完成反馈并按现有流程流转。</p>
+            <div v-for="field in phoneFeedbackForm.fields.filter((item: any) => item.visible)" :key="field.field_key" class="triage-field">
+              <label>{{ field.label }}<span v-if="field.required"> *</span></label>
+              <el-select v-if="field.field_type === 'select'" v-model="phoneFeedbackValues[field.field_key]" clearable>
+                <el-option v-for="option in field.options" :key="option" :label="field.option_labels?.[option] || option" :value="option" />
+              </el-select>
+              <el-input v-else v-model="phoneFeedbackValues[field.field_key]" type="textarea" :rows="3" />
+            </div>
+            <el-button type="primary" :loading="phoneFeedbackSubmitting" @click="submitPhoneFeedbackForm">提交反馈结果</el-button>
           </div>
 
           <!-- 指派处理人（仅部门对接人 + 待受理可见） -->
@@ -189,11 +348,24 @@
           </div>
 
           <ReplyEditor
-            v-if="!isTerminalState && (ticket.can_reply || ticket.can_addition || ticket.can_remind)"
+            v-if="!isTerminalState && (ticket.can_reply || ticket.can_note || ticket.can_addition || ticket.can_remind)"
             :ticket="ticket"
             :articles="ticket.articles"
             @submitted="onRefresh"
           />
+          <div v-if="nodeHistorySubmissions.length" class="refine-card">
+            <div class="refine-card-title">历史节点记录</div>
+            <div v-for="submission in nodeHistorySubmissions" :key="submission.id" class="processing-history">
+              <strong>{{ submission.node_type === 'phone_feedback' ? '致电反馈' : submission.node_type === 'sales_opportunity' ? '销售商机处理' : '处理表单' }} v{{ submission.form_version }} · 操作人 #{{ submission.operator_id }} · {{ submission.submitted_at }}</strong>
+              <div v-for="field in submission.field_snapshot.filter((item: any) => item.storage_type !== 'system')" :key="field.key" class="triage-field">
+                <label>{{ field.label }}</label>
+                <div>{{ historicalFieldValue(submission, field) }}</div>
+              </div>
+              <div v-for="attachment in submission.attachments" :key="attachment.id">
+                <a :href="attachment.url" target="_blank" rel="noopener noreferrer">{{ attachment.filename }}</a>
+              </div>
+            </div>
+          </div>
           <div v-else-if="isTerminalState" class="terminal-notice">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             工单已结束，无法继续提交处理说明。
@@ -239,7 +411,46 @@
 
     </template>
   </div>
-</template>
+      <!-- 暂缓处理：动作表单（暂缓原因 * / 预计恢复时间 *） -->
+      <el-dialog v-model="holdDialogVisible" title="暂缓处理" width="520px">
+        <el-form label-position="top">
+          <el-form-item label="暂缓原因" required>
+            <el-input v-model="holdReasonInput" type="textarea" :rows="3" maxlength="2000"
+                      show-word-limit placeholder="请填写暂缓原因" />
+          </el-form-item>
+          <el-form-item label="预计恢复时间" required>
+            <el-date-picker
+              v-model="holdUntilInput"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              :disabled-date="disabledHoldDate"
+              placeholder="请选择预计恢复时间"
+            />
+            <p class="refine-card-hint">仅表示预计什么时候恢复继续处理，不是截止时间。</p>
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="holdDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="holding" :disabled="holdSubmitDisabled"
+                     @click="submitHold">确认暂缓</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 恢复处理：reason 必填（现有状态机行为） -->
+      <el-dialog v-model="resumeDialogVisible" title="恢复处理" width="480px">
+        <el-form label-position="top">
+          <el-form-item label="恢复原因" required>
+            <el-input v-model="resumeReasonInput" type="textarea" :rows="3" maxlength="2000"
+                      show-word-limit placeholder="请填写恢复原因" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="resumeDialogVisible = false">取消</el-button>
+          <el-button type="primary" :loading="resuming" :disabled="!resumeReasonInput.trim()"
+                     @click="submitResume">确认恢复</el-button>
+        </template>
+      </el-dialog>
+    </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
@@ -259,6 +470,15 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
+const nodeHistorySubmissions = computed<any[]>(() => ((ticket.value as any)?.node_submissions || []).filter((entry: any) => ['processing', 'phone_feedback', 'sales_opportunity'].includes(entry.node_type)))
+function historicalFieldValue(submission: any, field: any): string {
+  const value = field.storage_type === 'article' ? submission.article_body
+    : field.storage_type === 'ticket_field' ? field.submitted_value
+    : submission.data?.[field.storage_key || field.key]
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (field.type === 'select' && typeof value === 'string') return field.validation?.option_labels?.[value] || value
+  return value == null || value === '' ? '—' : String(value)
+}
 const articlePlacement = computed(() => {
   const byLogId = new Map<number, any[]>()
   const logs = [...((ticket.value as any)?.state_logs || [])].sort((a: any, b: any) => a.id - b.id)
@@ -348,6 +568,311 @@ const refineOptions = computed<
   { id: number; name: string; level?: number; next_department?: string | null }[]
 >(() => (ticket.value as any)?.refine_options ?? [])
 const refining = ref(false)
+const currentForm = ref<any>(null)
+const triageTargetCategoryId = ref<number | null>(null)
+const triageValues = ref<Record<string, string>>({})
+const processingValues = ref<Record<string, any>>({})
+const processingFiles = ref<File[]>([])
+const processingSubmitting = ref(false)
+const isSalesOpportunity = computed(() => (ticket.value as any)?.node_context?.node_type === 'sales_opportunity')
+// 暂缓期间不提供「完成本节点处理」：主流程是先恢复处理再完成，避免绕过 resume。
+const processingForm = computed(() =>
+  ['processing', 'sales_opportunity'].includes((ticket.value as any)?.node_context?.node_type)
+    && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+const phoneFeedbackForm = computed(() =>
+  (ticket.value as any)?.node_context?.node_type === 'phone_feedback'
+    && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+const phoneFeedbackValues = ref<Record<string, string>>({})
+const phoneFeedbackSubmitting = ref(false)
+
+async function submitPhoneFeedbackForm() {
+  if (!ticket.value || !phoneFeedbackForm.value) return
+  for (const field of phoneFeedbackForm.value.fields) {
+    const value = phoneFeedbackValues.value[field.field_key]
+    if (field.visible && field.required && !value?.trim()) {
+      ElMessage.warning(`请填写${field.label}`)
+      return
+    }
+  }
+  const t = ticket.value as any
+  phoneFeedbackSubmitting.value = true
+  try {
+    await ticketApi.submitNode(t.id, {
+      form_definition_id: phoneFeedbackForm.value.form_definition_id,
+      form_version: phoneFeedbackForm.value.version,
+      expected_category_id: t.category_id,
+      expected_department_id: t.skill_group_id,
+      expected_dispatch_step_index: t.dispatch_step_index,
+      expected_state: t.state,
+      values: phoneFeedbackValues.value,
+    }, [])
+    ElMessage.success('致电反馈已提交')
+    phoneFeedbackValues.value = {}
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch {
+    // API interceptor displays validation errors.
+  } finally { phoneFeedbackSubmitting.value = false }
+}
+
+function processingFieldVisible(field: any): boolean {
+  const condition = field.visibility_condition?.field_equals
+  return !condition || processingValues.value[condition.field] === condition.value
+}
+
+function processingFieldRequired(field: any): boolean {
+  const condition = field.required_condition?.field_equals
+  return field.required || !!(condition && processingValues.value[condition.field] === condition.value)
+}
+
+function onProcessingFiles(event: Event) {
+  processingFiles.value = Array.from((event.target as HTMLInputElement).files || [])
+}
+
+async function submitProcessingForm() {
+  if (!ticket.value || !processingForm.value) return
+  for (const field of processingForm.value.fields) {
+    if (!processingFieldVisible(field) || !processingFieldRequired(field)) continue
+    const value = processingValues.value[field.field_key]
+    if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+      ElMessage.warning(`请填写${field.label}`)
+      return
+    }
+  }
+  const t = ticket.value as any
+  const values = Object.fromEntries(Object.entries(processingValues.value).filter(([key]) =>
+    processingForm.value.fields.some((field: any) => field.field_key === key && processingFieldVisible(field) && field.field_type !== 'attachment'),
+  ))
+  processingSubmitting.value = true
+  try {
+    await ticketApi.submitNode(t.id, {
+      form_definition_id: processingForm.value.form_definition_id,
+      form_version: processingForm.value.version,
+      expected_category_id: t.category_id,
+      expected_department_id: t.skill_group_id,
+      expected_dispatch_step_index: t.dispatch_step_index,
+      expected_state: t.state,
+      values,
+    }, processingFiles.value)
+    ElMessage.success(isSalesOpportunity.value ? '销售商机已处理并归档' : '本节点处理已完成')
+    processingValues.value = {}
+    phoneFeedbackValues.value = {}
+    processingFiles.value = []
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch {
+    // API interceptor displays the server validation error.
+  } finally { processingSubmitting.value = false }
+}
+
+// ── 暂缓处理（processing 下的领域动作，on_hold 是 Ticket 主状态） ──────────
+// 权限沿用现有状态机：当前 owner + admin；不按部门名称硬编码。
+const isOnHold = computed(() => (ticket.value as any)?.state === 'on_hold')
+const canHold = computed(() => !!findAction('hold'))
+
+const holdDialogVisible = ref(false)
+const holding = ref(false)
+const holdReasonInput = ref('')
+const holdUntilInput = ref('')
+const holdSubmitDisabled = computed(
+  () => !holdReasonInput.value.trim() || !holdUntilInput.value,
+)
+
+// 只允许选择当前时间之后
+function disabledHoldDate(date: Date): boolean {
+  return date.getTime() < Date.now() - 24 * 60 * 60 * 1000
+}
+
+const resumeDialogVisible = ref(false)
+const resuming = ref(false)
+const resumeReasonInput = ref('')
+
+// 暂缓原因复用最新一条 hold Flow Log，不为展示新增 Ticket 字段
+const holdReason = computed(() => {
+  const logs = ((ticket.value as any)?.state_logs || []) as any[]
+  const hold = [...logs].reverse().find((entry) => entry.action_type === 'hold')
+  return hold?.reason || ''
+})
+
+const holdUntilText = computed(() => {
+  const raw = (ticket.value as any)?.hold_until
+  if (!raw) return '—'
+  return String(raw).replace('T', ' ').slice(0, 16)
+})
+
+watch(holdDialogVisible, (visible) => {
+  if (visible) {
+    holdReasonInput.value = ''
+    holdUntilInput.value = ''
+  }
+})
+
+async function submitHold() {
+  const t = ticket.value as any
+  if (!t || holdSubmitDisabled.value) return
+  holding.value = true
+  try {
+    await ticketStore.updateTicket(t.id, {
+      state: 'on_hold',
+      reason: holdReasonInput.value.trim(),
+      hold_until: holdUntilInput.value,
+    } as any)
+    ElMessage.success('已暂缓，恢复后继续处理')
+    holdDialogVisible.value = false
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch (e: any) {
+    const detail = e?.response?.data?.error?.message || e?.response?.data?.detail
+    ElMessage.error(detail || '暂缓失败')
+  } finally { holding.value = false }
+}
+
+watch(resumeDialogVisible, (visible) => {
+  if (visible) resumeReasonInput.value = ''
+})
+
+async function submitResume() {
+  const t = ticket.value as any
+  if (!t || !resumeReasonInput.value.trim()) return
+  resuming.value = true
+  try {
+    await ticketStore.updateTicket(t.id, {
+      state: 'open',
+      reason: resumeReasonInput.value.trim(),
+    } as any)
+    ElMessage.success('已恢复处理')
+    resumeDialogVisible.value = false
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch (e: any) {
+    const detail = e?.response?.data?.error?.message || e?.response?.data?.detail
+    ElMessage.error(detail || '恢复失败')
+  } finally { resuming.value = false }
+}
+
+// ── 闭环回访表单（closure） ─────────────────────────────────────
+const closureForm = computed(() => (ticket.value as any)?.node_context?.node_type === 'closure' ? currentForm.value : null)
+const closureValues = ref<Record<string, any>>({})
+const closureSubmitting = ref(false)
+
+// 条件值来源：表单自身提交的字段 + 后端下发的只读工单事实（如 callback_required）。
+// 回访要求由更早流程确定，Closure 不可改，所以它不在表单里、也不由前端提交。
+function closureConditionValue(field: string): any {
+  if (field === 'callback_required') return (ticket.value as any)?.callback_required
+  return closureValues.value[field]
+}
+
+function closureFieldVisible(field: any): boolean {
+  const condition = field.visibility_condition?.field_equals
+  return !condition || closureConditionValue(condition.field) === condition.value
+}
+
+function closureFieldRequired(field: any): boolean {
+  const condition = field.required_condition?.field_equals
+  return !!field.required || !!(condition && closureConditionValue(condition.field) === condition.value)
+}
+
+const callbackRequired = computed(() => (ticket.value as any)?.callback_required === true)
+
+const closureRecordsDissatisfied = computed(
+  () => closureValues.value.customer_recognized === false ||
+    closureValues.value.satisfaction === 'dissatisfied',
+)
+
+const closureDisabled = computed(() => {
+  if (!closureForm.value) return true
+  return closureForm.value.fields.some((field: any) => {
+    if (!closureFieldVisible(field) || !closureFieldRequired(field)) return false
+    const value = closureValues.value[field.field_key]
+    if (value === undefined || value === null) return true
+    return typeof value === 'string' && !value.trim()
+  })
+})
+
+function prefillClosureForm() {
+  const form = closureForm.value
+  if (!form) { closureValues.value = {}; return }
+  const next: Record<string, any> = {}
+  for (const field of form.fields) {
+    if (field.value !== undefined && field.value !== null) next[field.field_key] = field.value
+  }
+  closureValues.value = next
+}
+
+async function submitClosureForm() {
+  if (!ticket.value || !closureForm.value) return
+  const t = ticket.value as any
+  const values = Object.fromEntries(
+    Object.entries(closureValues.value).filter(([key]) =>
+      closureForm.value!.fields.some(
+        (field: any) => field.field_key === key && closureFieldVisible(field),
+      ),
+    ),
+  )
+  closureSubmitting.value = true
+  try {
+    await ticketApi.submitClosure(t.id, {
+      form_definition_id: closureForm.value.form_definition_id,
+      form_version: closureForm.value.version,
+      expected_category_id: t.category_id,
+      expected_department_id: t.skill_group_id,
+      expected_dispatch_step_index: t.dispatch_step_index,
+      expected_state: t.state,
+      values,
+    })
+    ElMessage.success(closureRecordsDissatisfied.value ? '已记录回访结果' : '工单已归档')
+    closureValues.value = {}
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch {
+    // API 拦截器统一展示后端权威校验错误。
+  } finally { closureSubmitting.value = false }
+}
+
+watch(closureForm, () => { prefillClosureForm() }, { immediate: true })
+
+async function loadTriageForm(categoryId: number) {
+  if (!ticket.value) return
+  try {
+    currentForm.value = await ticketApi.currentForm((ticket.value as any).id, categoryId)
+    for (const field of currentForm.value.fields) {
+      if (field.value != null && triageValues.value[field.field_key] == null) {
+        triageValues.value[field.field_key] = field.value
+      }
+    }
+    for (const key of Object.keys(triageValues.value)) {
+      if (!currentForm.value.fields.some((field: any) => field.field_key === key && field.visible)) {
+        delete triageValues.value[key]
+      }
+    }
+  } catch { currentForm.value = null }
+}
+
+async function submitTriageForm() {
+  if (!ticket.value || !triageTargetCategoryId.value || !currentForm.value) return
+  for (const field of currentForm.value.fields) {
+    if (field.visible && field.required && !triageValues.value[field.field_key]?.trim()) {
+      ElMessage.warning(`请填写${field.label}`)
+      return
+    }
+  }
+  refining.value = true
+  try {
+    await ticketApi.submitTriage((ticket.value as any).id, {
+      target_category_id: triageTargetCategoryId.value,
+      form_definition_id: currentForm.value.form_definition_id,
+      form_version: currentForm.value.version,
+      values: triageValues.value,
+    })
+    ElMessage.success('分诊已提交，责任部门已重新落位')
+    triageValues.value = {}
+    triageTargetCategoryId.value = null
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch {
+    // API interceptor presents the server's authoritative validation error.
+  } finally { refining.value = false }
+}
 
 /**
  * 选择分类 = 完成一次问题判断。分类只能向下细分一级且不可回退，
@@ -388,7 +913,14 @@ async function onPickRefineCategory(categoryId: number) {
 
 async function loadTicket() {
   const id = Number(route.params.id)
-  if (id) await ticketStore.fetchTicketDetail(id)
+  if (id) {
+    await ticketStore.fetchTicketDetail(id)
+    currentForm.value = (ticket.value as any)?.current_form ?? null
+    processingValues.value = {}
+    for (const field of currentForm.value?.fields || []) {
+      if (field.value != null) processingValues.value[field.field_key] = field.value
+    }
+  }
 }
 
 onMounted(loadTicket)
@@ -465,33 +997,33 @@ const archiving = ref(false)
 
 // ── 已处理工单归档面板 ──────────────────────────────────────
 const archiveNotes = ref('')
-// 回访选择：'call_backed'=已回访（is_callbacked=true），'no_need'=无需回访（callback_required=false）
-const callbackChoice = ref<'call_backed' | 'no_need'>('no_need')
+// callback_required 由系统按分类确定，这里只读；客服只记录「是否已完成回访」
+const callbackDone = ref(false)
 const satisfaction = ref<'satisfied' | 'average' | 'dissatisfied' | 'unrated' | ''>('')
-// 不满意原因（后端 unsatisfied_reason，V0.87 收尾：dissatisfied 必填）
+// 不满意原因（后端 unsatisfied_reason，dissatisfied 必填）
 const unsatisfiedReason = ref('')
+const recordsDissatisfied = computed(
+  () => callbackRequired.value && callbackDone.value && satisfaction.value === 'dissatisfied',
+)
 
-// 归档按钮禁用条件：已回访必须选满意度；不满意必须填写不满意原因
+// 归档按钮禁用条件：要求回访时必须选是否完成；完成时必须选满意度；不满意必须写原因
 const archiveDisabled = computed(() => {
-  if (callbackChoice.value === 'call_backed' && !satisfaction.value) return true
-  if (
-    callbackChoice.value === 'call_backed'
-    && satisfaction.value === 'dissatisfied'
-    && !unsatisfiedReason.value.trim()
-  ) return true
+  if (callbackRequired.value && !callbackDone.value) return true
+  if (callbackRequired.value && callbackDone.value && !satisfaction.value) return true
+  if (recordsDissatisfied.value && !unsatisfiedReason.value.trim()) return true
   return false
 })
 
 watch(canArchiveFromResolved, (visible) => {
   if (!visible) {
     archiveNotes.value = ''
-    callbackChoice.value = 'no_need'
+    callbackDone.value = false
     satisfaction.value = ''
     unsatisfiedReason.value = ''
   } else {
     const t = ticket.value as any
     archiveNotes.value = t?.archive_notes || ''
-    callbackChoice.value = t?.is_callbacked ? 'call_backed' : 'no_need'
+    callbackDone.value = t?.is_callbacked === true
     satisfaction.value = t?.satisfaction || ''
     unsatisfiedReason.value = t?.unsatisfied_reason || ''
   }
@@ -499,26 +1031,24 @@ watch(canArchiveFromResolved, (visible) => {
 
 async function submitArchive() {
   const t = ticket.value as any
-  const callBacked = callbackChoice.value === 'call_backed'
-  const isDissatisfied = callBacked && satisfaction.value === 'dissatisfied'
+  const callBacked = callbackRequired.value && callbackDone.value
   archiving.value = true
   try {
-    if (isDissatisfied) {
+    if (recordsDissatisfied.value) {
       // 闭环规则：不满意不能直接归档 —— 只保存回访结果（含不满意原因），
       // 保存后后端 allowed_actions 将隐藏归档动作，需通过「退回」重开处理
       await ticketStore.updateTicket(t.id, {
         is_callbacked: true,
-        callback_required: true,
         satisfaction: satisfaction.value,
         unsatisfied_reason: unsatisfiedReason.value.trim(),
         archive_notes: archiveNotes.value.trim(),
       } as any)
       ElMessage.warning('已记录回访结果：客户不满意，请通过「退回」让处理人重新处理')
     } else {
+      // callback_required 不再由前端提交：它由系统按问题分类确定
       await ticketStore.updateTicket(t.id, {
         state: findAction('archive')?.target_state || 'archived',
         archive_notes: archiveNotes.value.trim(),
-        callback_required: callBacked,  // 已回访→true(需要回访已落实)；无需回访→false
         is_callbacked: callBacked,
         satisfaction: callBacked ? satisfaction.value : undefined,
       } as any)
@@ -889,6 +1419,9 @@ async function confirmCancel() {
   padding: 16px;
   box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.08);
 }
+.triage-field { margin: 14px 0; }
+.triage-field label { display: block; margin-bottom: 6px; }
+.triage-field label span { color: #f56c6c; }
 .refine-card-title {
   font-size: 14px;
   font-weight: 700;
@@ -1029,6 +1562,16 @@ async function confirmCancel() {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 12px;
+}
+
+/* 只读事实展示（暂缓原因 / 预计恢复时间 / 处理人） */
+.archive-readonly {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .archive-form {

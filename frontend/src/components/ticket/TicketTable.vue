@@ -115,10 +115,6 @@ defineProps<{
 
 const router = useRouter()
 
-function isClosed(stateType: string): boolean {
-  return stateType === 'closed' || stateType === 'merged'
-}
-
 /** 是否终态（已归档/已撤销，不再强调超时） */
 function isTerminal(row: Ticket): boolean {
   const key = (row as any).state_key

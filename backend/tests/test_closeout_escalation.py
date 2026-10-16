@@ -228,8 +228,9 @@ async def test_callback_fact_protection_keeps_reason(closeout_env):
     assert d["satisfaction"] == "dissatisfied"
     assert d["unsatisfied_reason"] == "设备仍离线"
 
+    # 回访要求是系统维护字段：人工修改被拒，且不影响已记录的回访事实
     r = await c.patch(f"/api/v1/tickets/{t['id']}", json={"callback_required": False})
-    assert r.status_code == 200, r.text
-    d = r.json()
+    assert r.status_code == 422, r.text
+    d = (await c.get(f"/api/v1/tickets/{t['id']}")).json()
     assert d["satisfaction"] == "dissatisfied"
     assert d["unsatisfied_reason"] == "设备仍离线"

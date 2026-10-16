@@ -103,6 +103,11 @@ if [ "$INIT_MODE" = true ]; then
     docker compose -f "${COMPOSE_FILE}" run --rm api alembic upgrade head
     docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/seed.py
 
+    # 节点动态表单完整性校验：缺配置不会报错，只会让节点静默退回旧 reply 路径，
+    # 因此必须在启动服务前阻断（set -e 会让失败直接中止部署）。
+    echo "[3b/4] 校验节点动态表单配置 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/check_node_forms.py
+
     # 4. 启动全部服务
     echo "[4/4] 启动全部服务 ..."
     docker compose -f "${COMPOSE_FILE}" up -d
@@ -132,9 +137,11 @@ else
     echo "[4/5] 同步种子数据 ..."
     docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/update_seed_data.py
 
-    # 历史归档工单数据修正（已归档+未回访 → 无需回访，幂等，可重复执行）
-    echo "[4b/5] 修正历史归档回访标记 ..."
-    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/sync_archived_callback.py
+    # 节点动态表单完整性校验：update_seed_data.py 已幂等应用三个 node-form seed，
+    # 这里确认 triage/processing/phone_feedback 确实可解析到已发布表单与绑定，
+    # 避免"表已建、seed 没生效"导致节点静默退回旧 reply/流转路径。
+    echo "[4c/5] 校验节点动态表单配置 ..."
+    docker compose -f "${COMPOSE_FILE}" run --rm api python scripts/check_node_forms.py
 
     # 5. 启动/更新服务
     echo "[5/6] 启动服务 ..."

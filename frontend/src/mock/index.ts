@@ -58,7 +58,7 @@ function matchFilters(t: Ticket, filters: TicketFilters): boolean {
   }
   if (filters.keyword) {
     const kw = filters.keyword.toLowerCase()
-    if (!t.number.toLowerCase().includes(kw)) return false
+    if (!(t.number ?? '').toLowerCase().includes(kw)) return false
   }
   return true
 }
@@ -99,11 +99,11 @@ export const mockTicketApi = {
       group,
       owner: null,
       customer: users[1],
-      organization: null,
       channel: payload.channel,
       escalation_at: new Date(Date.now() + 4 * 3600_000).toISOString(),
       close_at: null,
       article_count: 1,
+      owner_department: null,
       created_at: now,
       updated_at: now,
       // P7 字段
@@ -112,15 +112,22 @@ export const mockTicketApi = {
       device_sn: payload.device_sn ?? null,
       contact_name: payload.contact_name ?? null,
       contact_phone: payload.contact_phone ?? null,
-      customer_company: payload.customer_company ?? null,
       organization: payload.customer_company ? { id: 0, name: payload.customer_company, active: true } : null,
       region: payload.region_name ? { province: payload.region_name } : null,
       region_name: payload.region_name ?? null,
+      category_path: null,
+      judgement_departments: [],
+      transit_departments: [],
+      handling_department: null,
+      symptom: null,
       category_l1: payload.category_l1_id ? (ticketCategories.find(c => c.id === payload.category_l1_id) || null) : null,
       category_l2: payload.category_l2_id ? (ticketCategories.find(c => c.id === payload.category_l2_id) || null) : null,
       is_duplicate: payload.is_duplicate ?? false,
       duplicate_reason: payload.duplicate_reason ?? null,
-      duplicate_of: payload.duplicate_of_id ? (tickets.find(t => t.id === payload.duplicate_of_id) || null) : null,
+      duplicate_of: payload.duplicate_of_id ? (() => {
+        const linked = tickets.find(t => t.id === payload.duplicate_of_id)
+        return linked ? { id: linked.id, number: linked.number ?? '' } : null
+      })() : null,
       first_owner: null,
       skill_group: payload.skill_group_id ? (groups.find(g => g.id === payload.skill_group_id) || null) : null,
       sla_breached: false,
@@ -132,6 +139,7 @@ export const mockTicketApi = {
       urged_by: null,
       has_addition: false,
       has_returned: false,
+      is_draft: false,
     }
     tickets.unshift(newTicket)
     articles[id] = [{
@@ -140,6 +148,7 @@ export const mockTicketApi = {
       body: payload.article.body, content_type: payload.article.content_type,
       created_at: now,
       is_addition: false, append_reason: null,
+      attachments: [],
     }]
     return delay(newTicket)
   },
@@ -149,17 +158,17 @@ export const mockTicketApi = {
     if (!ticket) throw { response: { status: 404 } }
     if (payload.state) {
       const oldState = ticket.state
-      const newState = payload.state as any
-      ticket.state = newState
+      const newState = ticketStates.find(state => state.name === payload.state)
+      if (newState) ticket.state = newState
       // 历史标记一旦置位，后续正常流转不清除。
-      const isReturn = RETURN_TRANSITIONS.has(`${oldState}->${newState}`)
+      const isReturn = RETURN_TRANSITIONS.has(`${oldState.name}->${newState?.name}`)
       ticket.has_returned = ticket.has_returned || isReturn
       // 同步更新最新一条 state_log 的 from/to key
       const logs = stateLogs[id]
       if (logs && logs.length > 0) {
         const last = logs[logs.length - 1]
-        last.from_state_key = oldState
-        last.to_state_key = newState
+        last.from_state_key = oldState.name
+        last.to_state_key = newState?.name
       }
     }
     if (payload.state_id) {
@@ -278,10 +287,11 @@ export const mockArticleApi = {
       article_type: (payload.article_type || 'note') as Article['article_type'],
       body: payload.body,
       content_type: payload.content_type || 'text/plain',
-      state_key: type === 'reply' ? (ticket as any).state_key : undefined,
+      state_key: type === 'reply' ? ticket.state.name : undefined,
       created_at: new Date().toISOString(),
       is_addition: payload.type === 'addition',
       append_reason: payload.append_reason ?? null,
+      attachments: [],
     }
     if (!articles[ticketId]) articles[ticketId] = []
     articles[ticketId].push(article)

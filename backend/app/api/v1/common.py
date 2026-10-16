@@ -24,6 +24,7 @@ from app.schemas.common import (
 )
 from app.services.category_utils import (
     build_category_path, build_lineage_index, compute_level, would_create_cycle,
+    create_selectable_categories,
 )  # noqa: F401  (build_category_path used elsewhere if needed)
 from app.services.notification import send_dingtalk_text
 from app.services.routing import create_rule, resolve_rule, update_rule
@@ -495,19 +496,11 @@ async def list_categories(
             active_children[c.parent_id] = active_children.get(c.parent_id, 0) + 1
 
     channels: dict[int, str] = {}
-    selectable: dict[int, bool] = {}
+    selectable = create_selectable_categories(all_cats, chain_cat_ids)
     for c in all_cats:
         has_chain = _has_chain(c.id)
         is_leaf = active_children.get(c.id, 0) == 0
-        ancestor_chain = False
-        p = by_id.get(c.parent_id) if c.parent_id else None
-        while p is not None:
-            if _has_chain(p.id):
-                ancestor_chain = True
-                break
-            p = by_id.get(p.parent_id) if p.parent_id else None
         channels[c.id] = "chain" if has_chain else ("manual" if is_leaf else "none")
-        selectable[c.id] = (has_chain or is_leaf) and not ancestor_chain
 
     # Build tree.
     node_map: dict[int, dict] = {}
@@ -521,7 +514,7 @@ async def list_categories(
             "is_active": c.is_active,
             "path": paths[c.id],
             "channel": channels[c.id],
-            "create_selectable": selectable[c.id],
+            "create_selectable": selectable.get(c.id, False),
             "children": [],
         }
     tree = []

@@ -78,7 +78,7 @@ const props = defineProps<{
 }>()
 
 function articleLabel(type?: string): string {
-  return ({ reply: '处理说明', addition: '补充信息', reminder: '催办', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
+  return ({ reply: '处理说明', note: '普通回复', addition: '补充信息', reminder: '催办', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
 }
 
 function satisfactionText(value: string): string {

@@ -121,3 +121,66 @@ async def test_normal_category_unaffected(cats_env):
     d = j["data"]
     assert d["state"] == "pending"
     assert d["resolved"] is False
+
+
+async def test_intake_form_accepts_judgement_endpoint_and_rejects_its_child(cats_env):
+    c = cats_env["client"]
+    payload = {
+        "intake_form": True,
+        "customer_name": "王先生", "customer_company": "蓝海智联",
+        "industry": "海洋渔业", "customer_phone": _next_phone(),
+        "category_id": 2301, "satellite_number": "8986043100123456789",
+        "is_opportunity": False,
+        "description": "终端离线", "fault_occurred_at": "2026-10-15T09:30:00+08:00",
+        "fault_recurrence": "偶发", "fault_location": "海边",
+        "is_batch_fault": False,
+        "dispatcher_id": cats_env["dispatcher_id"],
+    }
+    created = await c.post("/api/v1/tickets", json=payload)
+    assert created.status_code == 201, created.text
+    assert created.json()["data"]["category_id"] == 2301
+
+    rejected = await c.post("/api/v1/tickets", json={**payload, "category_id": 2302})
+    assert rejected.status_code == 422
+    assert "继续细化" in rejected.json()["detail"]
+
+
+async def test_intake_form_new_industries_and_no_expected_result(cats_env):
+    for industry in ("工程机械", "智能网联", "交通物流", "能源行业", "应急通信", "智慧林草",
+                     "低空出行", "智慧水利", "智慧农业", "Robotaxi", "未提供"):
+        response = await cats_env["client"].post("/api/v1/tickets", json={
+            "intake_form": True, "customer_name": "客户", "customer_company": "公司",
+            "industry": industry, "customer_phone": _next_phone(), "category_id": 1202,
+            "is_opportunity": False, "description": "合作咨询",
+            "dispatcher_id": cats_env["dispatcher_id"],
+        })
+        assert response.status_code == 201, (industry, response.text)
+        assert response.json()["data"]["expected_result"] is None
+
+
+async def test_opportunity_only_requires_contact_and_core_customer_fields(cats_env):
+    from app.models.group import SkillGroup, UserSkillGroup
+    factory = async_sessionmaker(cats_env["engine"], class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        sales = SkillGroup(name="销售")
+        s.add(sales)
+        await s.flush()
+        s.add(UserSkillGroup(user_id=cats_env["dispatcher_id"], skill_group_id=sales.id))
+        await s.commit()
+    payload = {
+        "intake_form": True, "is_opportunity": True,
+        "channel": "phone", "priority": "p4_enterprise",
+        "customer_name": "客户", "customer_company": "公司", "industry": "智慧农业",
+        "customer_phone": _next_phone(), "contact_phone": "13800138000",
+        "description": "潜在合作需求", "sales_owner_id": cats_env["dispatcher_id"],
+    }
+    created = await cats_env["client"].post("/api/v1/tickets", json=payload)
+    assert created.status_code == 201, created.text
+    data = created.json()["data"]
+    assert data["is_opportunity"] is True and data["category_id"] is None
+    assert data["state"] == "open" and data["owner_id"] == cats_env["dispatcher_id"]
+    assert data["dispatcher_id"] is None
+    assert data["skill_group_id"] == sales.id
+    assert data["expected_result"] is None
+    missing = await cats_env["client"].post("/api/v1/tickets", json={**payload, "contact_phone": None})
+    assert missing.status_code == 422

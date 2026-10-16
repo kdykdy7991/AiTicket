@@ -1,19 +1,26 @@
-"""SLA 超时扫描引擎。
+"""周期扫描引擎：SLA 超时标记 + 暂缓「预计恢复时间已到」提醒。
 
 通过 FastAPI lifespan 启动的后台循环，每分钟扫描一次工单：
-- 检测解决超时（非终态且未解决，超过 solution_deadline）
-- 标记 sla_solution_breached
+- 检测解决超时（非终态且未解决，超过 solution_deadline），标记 sla_solution_breached
+- 暂缓工单的预计恢复时间已到且尚未提醒过 → 发一次钉钉提醒（纯提醒，
+  不改状态、不自动恢复、不涉及任何 SLA 计时/暂停/顺延/超时语义）。
+  该提醒受 DINGTALK_NOTIFICATION_ENABLED 总开关控制，默认关闭；关闭时
+  scan_hold_expiries() 在入口直接返回，不查库、不发送、不写任何字段，
+  暂缓主流程（保持 on_hold，由处理人 resume）完全不受影响。
 
 MVP 单进程实现：lifespan 起一个 asyncio task 循环。多 worker 部署时需改用 ARQ/定时任务避免重复执行。
 """
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload
 
+from app.core.config import settings
 from app.core.database import async_session
-from app.models.ticket import Ticket
+from app.models.ticket import Ticket, TicketStateLog
 
 logger = logging.getLogger("sla_scanner")
 
@@ -24,8 +31,6 @@ _scanner_task: asyncio.Task | None = None
 
 async def scan_sla_breaches() -> dict:
     """扫描并标记超时工单。返回 {solution_breached} 计数。"""
-    from datetime import datetime, timezone
-
     now = datetime.now(timezone.utc)
 
     async with async_session() as db:
@@ -56,6 +61,71 @@ async def scan_sla_breaches() -> dict:
     return {"solution_breached": sol_count}
 
 
+async def _latest_hold_reason(db, ticket_id: int) -> str | None:
+    """暂缓原因复用最新一条 hold Flow Log 的 reason，不为展示新增 Ticket 列。"""
+    log = (await db.execute(
+        select(TicketStateLog.reason)
+        .where(TicketStateLog.ticket_id == ticket_id,
+               TicketStateLog.action_type == "hold")
+        .order_by(TicketStateLog.id.desc()).limit(1)
+    )).scalar_one_or_none()
+    return log
+
+
+async def scan_hold_expiries(session_factory=None) -> dict:
+    """提醒「预计恢复时间已到」的暂缓工单，每轮暂缓最多一次。
+
+    命中条件：on_hold + hold_until 已到 + 尚未提醒过（hold_reminded_at IS NULL）。
+    只发提醒；工单继续保持 on_hold，不自动 resume / resolve / transfer / upgrade，
+    也不触碰任何 SLA 字段。
+
+    ``hold_reminded_at`` 的语义是「本轮暂缓的预计恢复提醒实际成功发送的时间」，
+    不是「scanner 处理过」：发送失败不落值，下一轮继续重试（失败记录已落在
+    DingtalkNotification）。恢复处理会清空它，因此每轮暂缓最多成功提醒一次。
+
+    外部通知总开关（DINGTALK_NOTIFICATION_ENABLED）关闭时在入口直接返回，
+    不进行任何数据库查询——默认关闭状态下几乎没有额外运行成本。
+
+    ``session_factory`` 可注入（测试用）；生产走模块级 async_session。
+    """
+    from app.services.notification import remind_hold_expiry
+
+    if not settings.DINGTALK_NOTIFICATION_ENABLED:
+        return {"hold_expiry_reminded": 0}
+
+    factory = session_factory or async_session
+    now = datetime.now(timezone.utc)
+    reminded = 0
+    async with factory() as db:
+        tickets = (await db.execute(
+            select(Ticket)
+            .where(
+                Ticket.state == "on_hold",
+                Ticket.hold_until.is_not(None),
+                Ticket.hold_until <= now,
+                Ticket.hold_reminded_at.is_(None),
+            )
+            .options(selectinload(Ticket.owner), selectinload(Ticket.skill_group))
+        )).scalars().all()
+        for ticket in tickets:
+            result = await remind_hold_expiry(
+                ticket, await _latest_hold_reason(db, ticket.id), db)
+            if result.success:
+                ticket.hold_reminded_at = now
+                reminded += 1
+            else:
+                # 不落 hold_reminded_at：下一轮重试，避免一次网络抖动永久吞掉提醒。
+                logger.warning(
+                    "暂缓预计恢复提醒发送失败，下轮重试：ticket_id=%s reason=%s",
+                    ticket.id, result.error_message,
+                )
+        await db.commit()
+
+    if reminded:
+        logger.info("暂缓预计恢复时间提醒：%d 条", reminded)
+    return {"hold_expiry_reminded": reminded}
+
+
 async def _scan_loop():
     """后台循环：每分钟扫描一次。"""
     logger.info("SLA 扫描引擎已启动，间隔 %ds", SCAN_INTERVAL_SECONDS)
@@ -64,6 +134,10 @@ async def _scan_loop():
             await scan_sla_breaches()
         except Exception as e:
             logger.exception("SLA 扫描异常: %s", e)
+        try:
+            await scan_hold_expiries()
+        except Exception as e:
+            logger.exception("暂缓提醒扫描异常: %s", e)
         await asyncio.sleep(SCAN_INTERVAL_SECONDS)
 
 

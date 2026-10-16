@@ -48,7 +48,6 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import RelativeTime from '@/components/common/RelativeTime.vue'
 
 const router = useRouter()
 const ticketStore = useTicketStore()
@@ -77,18 +76,6 @@ function formatTime(iso: string): string {
 
 function onEdit(id: number) {
   router.push({ name: 'TicketCreate', query: { draft_id: String(id) } })
-}
-
-async function onSubmit(id: number) {
-  try {
-    const ticket = await ticketStore.submitDraft(id)
-    ElMessage.success('工单提交成功')
-    await ticketStore.fetchDrafts()
-    drafts.value = ticketStore.drafts
-    router.push({ name: 'TicketDetail', params: { id: ticket.id } })
-  } catch (err: any) {
-    ElMessage.error(err.message || '提交失败')
-  }
 }
 
 async function onDelete(id: number) {

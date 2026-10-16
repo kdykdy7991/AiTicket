@@ -271,7 +271,10 @@ async def test_refine_requires_judging_dept_member(renv):
 async def test_refine_denied_in_terminal_state(renv):
     """已处理的工单不可回溯分诊。"""
     t = await renv["create_ticket"]()
-    await set_existing_open_ticket(renv, t["id"])
-    await renv["patch"](t["id"], {"state": "resolved", "solution": "已解决"})
+    from app.models.ticket import Ticket
+    async with async_sessionmaker_for(renv["engine"])() as db:
+        ticket = await db.get(Ticket, t["id"])
+        ticket.state = "resolved"  # 模拟历史上已处理、仍停在判断分类的旧单
+        await db.commit()
     resp = await renv["refine"](t["id"], 2302, expect=403)
     assert "仅待受理/处理中" in resp.json()["error"]["message"]

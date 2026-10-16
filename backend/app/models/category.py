@@ -17,6 +17,10 @@ class TicketCategory(Base):
     level: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 分类级业务规则：该分类是否要求回访。语义为「自身或任一祖先为 True」，
+    # 因此标在「业务保障」一级上即可覆盖其全部后代；标在「套餐变更」上只覆盖
+    # 该分支。业务代码不硬编码分类 ID，只读这一列。见 services/callback_policy.py。
+    requires_callback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
 

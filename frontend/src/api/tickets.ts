@@ -3,7 +3,7 @@ import type {
   TicketFilters, TicketCreatePayload, TicketUpdatePayload,
   ArticleCreatePayload, Ticket, TicketDetail, Article, PaginatedResponse,
   TicketStateLog, DuplicateCheckPayload, DuplicateCheckResult,
-  BatchUpdatePayload, ExportPayload,
+  BatchUpdatePayload,
 } from '@/types'
 
 interface ListResponse<T> {
@@ -264,14 +264,16 @@ export const ticketApi = {
 
   async get(id: number): Promise<TicketDetail> {
     const t: any = await api.get(`/tickets/${id}`)
-    const [articles, stateLogs] = await Promise.all([
+    const [articles, stateLogs, nodeSubmissions] = await Promise.all([
       api.get<unknown, { data: any[] }>(`/tickets/${id}/articles`),
       api.get<unknown, { data: any[] }>(`/tickets/${id}/state-logs`),
+      api.get<unknown, any[]>(`/tickets/${id}/node-submissions`),
     ])
     return {
       ...adaptTicket(t),
       articles: articles.data.map(adaptArticle),
       state_logs: adaptStateLogs(stateLogs.data),
+      node_submissions: nodeSubmissions,
       links: [],
     } as any
   },
@@ -290,6 +292,39 @@ export const ticketApi = {
   async refine(id: number, categoryId: number): Promise<any> {
     const res: any = await api.post(`/tickets/${id}/refine`, { category_id: categoryId })
     return res.data
+  },
+
+  async currentForm(id: number, targetCategoryId: number): Promise<any> {
+    return api.get(`/tickets/${id}/current-form`, { params: { target_category_id: targetCategoryId } })
+  },
+
+  async submitTriage(id: number, payload: {
+    target_category_id: number
+    form_definition_id: number
+    form_version: number
+    values: Record<string, string>
+  }): Promise<any> {
+    return api.post(`/tickets/${id}/triage-submit`, payload)
+  },
+
+  async submitNode(id: number, payload: Record<string, unknown>, attachments: File[]): Promise<any> {
+    const form = new FormData()
+    form.append('payload', JSON.stringify(payload))
+    for (const file of attachments) form.append('attachments', file)
+    return api.post(`/tickets/${id}/node-submit`, form)
+  },
+
+  // 闭环：结构化回访表单校验通过后由后端执行既有 archive 流转
+  async submitClosure(id: number, payload: {
+    form_definition_id: number
+    form_version: number
+    expected_category_id: number | null
+    expected_department_id: number | null
+    expected_dispatch_step_index: number | null
+    expected_state: string
+    values: Record<string, unknown>
+  }): Promise<any> {
+    return api.post(`/tickets/${id}/closure-submit`, payload)
   },
 
   async checkDuplicate(data: DuplicateCheckPayload): Promise<DuplicateCheckResult> {
