@@ -11,7 +11,7 @@ from app.models.group import SkillGroup, UserSkillGroup
 from app.models.node_form import TicketNodeSubmission
 from app.models.ticket import Article, Ticket, TicketStateLog
 from app.models.user import User
-from scripts.seed_sales_opportunity_form import PLACEHOLDER_NAME, PLACEHOLDER_USERNAME, seed_sales_opportunity_form
+from scripts.seed_sales_opportunity_form import SALES_PEOPLE, seed_sales_opportunity_form
 from test_workflow_regression import _next_phone, as_user
 
 
@@ -22,11 +22,11 @@ async def test_sales_member_lists_respect_effective_dates(client):
     await seed_sales_opportunity_form(factory)
     async with factory() as db:
         sales = (await db.execute(select(SkillGroup).where(SkillGroup.name == "销售"))).scalar_one()
-        placeholder = (await db.execute(select(User).where(
-            User.username == PLACEHOLDER_USERNAME,
+        salesperson = (await db.execute(select(User).where(
+            User.username == SALES_PEOPLE[0][0],
         ))).scalar_one()
-        membership = await db.get(UserSkillGroup, (placeholder.id, sales.id))
-        group_id, user_id = sales.id, placeholder.id
+        membership = await db.get(UserSkillGroup, (salesperson.id, sales.id))
+        group_id, user_id = sales.id, salesperson.id
         membership.effective_from = datetime.now(timezone.utc) + timedelta(days=1)
         await db.commit()
 
@@ -49,6 +49,38 @@ async def test_sales_member_lists_respect_effective_dates(client):
 
 
 @pytest.mark.asyncio
+async def test_sales_draft_keeps_handler_without_dispatcher(client):
+    http, _, engine = client
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    await seed_sales_opportunity_form(factory)
+    async with factory() as db:
+        first = (await db.execute(select(User).where(User.username == SALES_PEOPLE[0][0]))).scalar_one()
+        second = (await db.execute(select(User).where(User.username == SALES_PEOPLE[1][0]))).scalar_one()
+
+    payload = {"is_draft": True, "is_opportunity": True,
+               "customer_phone": _next_phone(), "sales_owner_id": first.id,
+               "dispatcher_id": first.id}
+    created = await http.post("/api/v1/tickets", json=payload)
+    assert created.status_code == 201, created.text
+    draft_id = created.json()["data"]["id"]
+    assert created.json()["data"]["owner_id"] == first.id
+    assert created.json()["data"]["dispatcher_id"] is None
+
+    updated = await http.patch(f"/api/v1/tickets/drafts/{draft_id}", json={
+        **payload, "sales_owner_id": second.id,
+    })
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["data"]["owner_id"] == second.id
+    assert updated.json()["data"]["dispatcher_id"] is None
+
+    submitted = await http.post(f"/api/v1/tickets/drafts/{draft_id}/submit")
+    assert submitted.status_code == 200, submitted.text
+    assert submitted.json()["data"]["owner_id"] == second.id
+    assert submitted.json()["data"]["dispatcher_id"] is None
+    assert submitted.json()["data"]["state"] == "open"
+
+
+@pytest.mark.asyncio
 async def test_sales_opportunity_create_submit_and_archive(client):
     http, _, engine = client
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -56,24 +88,26 @@ async def test_sales_opportunity_create_submit_and_archive(client):
     await seed_sales_opportunity_form(factory)
     async with factory() as db:
         sales = (await db.execute(select(SkillGroup).where(SkillGroup.name == "销售"))).scalar_one()
-        placeholder = (await db.execute(select(User).where(
-            User.username == PLACEHOLDER_USERNAME,
+        salesperson = (await db.execute(select(User).where(
+            User.username == SALES_PEOPLE[0][0],
         ))).scalar_one()
-        salesperson_id = placeholder.id
-        assert placeholder.name == PLACEHOLDER_NAME
-        assert placeholder.role == "handler" and placeholder.is_active
+        salesperson_id = salesperson.id
+        assert salesperson.name == SALES_PEOPLE[0][1]
+        assert salesperson.role == "handler" and salesperson.is_active
         memberships = (await db.execute(select(UserSkillGroup).where(
             UserSkillGroup.user_id == salesperson_id,
             UserSkillGroup.skill_group_id == sales.id,
         ))).scalars().all()
-        assert len(memberships) == 1 and memberships[0].is_dispatcher
+        assert len(memberships) == 1 and not memberships[0].is_dispatcher
         assert (await db.execute(select(User).where(
-            User.username == PLACEHOLDER_USERNAME,
-        ))).scalars().all() == [placeholder]
+            User.username == SALES_PEOPLE[0][0],
+        ))).scalars().all() == [salesperson]
 
     candidates = await http.get(f"/api/v1/skill-groups/{sales.id}/handlers")
     assert candidates.status_code == 200
-    assert any(person["id"] == salesperson_id for person in candidates.json()["data"])
+    assert {person["name"] for person in candidates.json()["data"]} == {name for _, name in SALES_PEOPLE}
+    dispatchers = await http.get(f"/api/v1/skill-groups/{sales.id}/dispatchers")
+    assert dispatchers.json()["data"] == []
 
     create_payload = {
         "intake_form": True, "is_opportunity": True,

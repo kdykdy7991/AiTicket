@@ -149,7 +149,7 @@ onMounted(async () => {
       form.category = (Object.keys(rootNames) as CategoryName[]).find(k => rootNames[k] === root?.name) || ''
       form.subcategory = subcategoryOptions.value.find(c => c.id === ticket.category_id)?.label || ''
       form.businessOpportunity = ticket.is_opportunity == null ? '' : ticket.is_opportunity ? 'yes' : 'no'
-      form.salesUserId = ticket.is_opportunity ? ticket.dispatcher_id ?? null : null
+      form.salesUserId = ticket.is_opportunity ? ticket.owner_id ?? null : null
       form.priority = (Object.keys(priorityCodes).find(k => priorityCodes[k] === ticket.priority)) || 'P4'
       form.description = ticket.description || ''
       form.faultTime = ticket.fault_occurred_at ? new Date(ticket.fault_occurred_at).toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16) : ''
@@ -191,7 +191,7 @@ function payload(isDraft: boolean) {
     category_id: isOpportunity.value ? null : selectedCategoryId.value || null, description: form.description.trim(),
     skill_group_id: isOpportunity.value ? salesGroupId.value : null,
     sales_owner_id: isOpportunity.value ? form.salesUserId : null,
-    dispatcher_id: isDraft && isOpportunity.value ? form.salesUserId : null,
+    dispatcher_id: null,
     complaint_level: !isOpportunity.value && form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
     satellite_number: isOpportunity.value ? null : form.satelliteNumber.trim() || null,
     is_opportunity: form.businessOpportunity ? form.businessOpportunity === 'yes' : null,

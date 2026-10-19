@@ -67,6 +67,25 @@ from app.services.node_form import resolve_form, present_form, validate_submissi
 router = APIRouter(tags=["tickets"])
 
 
+async def _sales_group_for_owner(db: AsyncSession, owner_id: int | None) -> SkillGroup:
+    """Validate the directly assigned sales handler for a formal opportunity."""
+    group = (await db.execute(select(SkillGroup).where(SkillGroup.name == "销售"))).scalar_one_or_none()
+    if group is None or owner_id is None:
+        raise HTTPException(422, detail="请选择销售部门人员")
+    now = datetime.now(timezone.utc)
+    person = (await db.execute(select(User).join(
+        UserSkillGroup, UserSkillGroup.user_id == User.id,
+    ).where(
+        User.id == owner_id, User.is_active.is_(True),
+        UserSkillGroup.skill_group_id == group.id,
+        or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
+        or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
+    ))).scalar_one_or_none()
+    if person is None:
+        raise HTTPException(422, detail="所选人员不是当前有效的销售部门成员")
+    return group
+
+
 class CategoryIndexes(NamedTuple):
     """分类派生的两个索引，一次请求内共用（分类/分派链各只查一次）。"""
 
@@ -718,7 +737,12 @@ async def submit_draft(
     if ticket.category_id is not None and not await is_valid_ticket_category(db, ticket.category_id):
         raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
 
-    if not ticket.dispatcher_id:
+    if ticket.is_opportunity:
+        sales_group = await _sales_group_for_owner(db, ticket.owner_id)
+        ticket.skill_group_id = sales_group.id
+        ticket.handler_skill_group_id = sales_group.id
+        ticket.dispatcher_id = None
+    elif not ticket.dispatcher_id:
         raise HTTPException(422, detail="提交前必须指定部门对接人")
 
     today = datetime.now().strftime("%Y%m%d")
@@ -740,6 +764,9 @@ async def submit_draft(
 
     # 初始状态落库（None → pending）：与建单共用执行入口
     await apply_initial_state(db, ticket, to_state="pending", operator=user)
+    if ticket.is_opportunity:
+        await apply_transition(db, ticket, to_state="open", operator=user,
+                               owner_id=ticket.owner_id, allow_sales_intake=True)
     await db.commit()
 
     result = await db.execute(
@@ -812,7 +839,8 @@ async def update_draft(
     ticket.group_id = body.group_id or user.group_id
     ticket.skill_group_id = body.skill_group_id
     ticket.handler_skill_group_id = body.handler_skill_group_id
-    ticket.dispatcher_id = body.dispatcher_id
+    ticket.dispatcher_id = None if body.is_opportunity else body.dispatcher_id
+    ticket.owner_id = body.sales_owner_id if body.is_opportunity else None
     ticket.is_duplicate = body.is_duplicate
     ticket.duplicate_reason = body.duplicate_reason
 
@@ -1408,19 +1436,7 @@ async def create_ticket(
                 body.expected_result = None
 
     if body.is_opportunity and not body.is_draft:
-        sales_group = (await db.execute(select(SkillGroup).where(SkillGroup.name == "销售"))).scalar_one_or_none()
-        if sales_group is None or body.sales_owner_id is None:
-            raise HTTPException(422, detail="请选择销售部门人员")
-        salesperson = (await db.execute(select(User).join(
-            UserSkillGroup, UserSkillGroup.user_id == User.id,
-        ).where(
-            User.id == body.sales_owner_id, User.is_active.is_(True),
-            UserSkillGroup.skill_group_id == sales_group.id,
-            or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= datetime.now(timezone.utc)),
-            or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to > datetime.now(timezone.utc)),
-        ))).scalar_one_or_none()
-        if salesperson is None:
-            raise HTTPException(422, detail="所选人员不是当前有效的销售部门成员")
+        sales_group = await _sales_group_for_owner(db, body.sales_owner_id)
         body.skill_group_id = sales_group.id
         body.handler_skill_group_id = sales_group.id
         body.dispatcher_id = None
@@ -1480,9 +1496,9 @@ async def create_ticket(
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
             handler_skill_group_id=body.handler_skill_group_id,
-            owner_id=None,
+            owner_id=body.sales_owner_id if body.is_opportunity else None,
             creator_id=user.id, first_owner_id=None,
-            dispatcher_id=body.dispatcher_id,
+            dispatcher_id=None if body.is_opportunity else body.dispatcher_id,
             is_duplicate=body.is_duplicate,
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,

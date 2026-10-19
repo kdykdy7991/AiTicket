@@ -1,4 +1,4 @@
-"""Create the sales department, placeholder handler, and published form."""
+"""Create the sales department, its named handlers, and published form."""
 
 import asyncio
 import sys
@@ -20,6 +20,7 @@ from app.models.user import User
 RATING_OPTIONS = ["1", "2", "3", "4", "5"]
 PLACEHOLDER_USERNAME = "sales_placeholder"
 PLACEHOLDER_NAME = "销售处理人（占位）"
+SALES_PEOPLE = (("zhangguanghan", "张广瀚"), ("chenkeyi", "陈可意"))
 
 
 async def seed_sales_opportunity_form(session_factory: async_sessionmaker | None = None) -> None:
@@ -32,20 +33,27 @@ async def seed_sales_opportunity_form(session_factory: async_sessionmaker | None
         placeholder = (await db.execute(select(User).where(
             User.username == PLACEHOLDER_USERNAME,
         ))).scalar_one_or_none()
-        if placeholder is None:
-            # Same initial password as the other seeded personnel; replace this
-            # account with a named salesperson once the actual owner is known.
-            placeholder = User(username=PLACEHOLDER_USERNAME, name=PLACEHOLDER_NAME,
-                               password_hash=hash_password("skdy123"), role="handler",
-                               is_active=True)
-            db.add(placeholder)
-            await db.flush()
-        membership = await db.get(UserSkillGroup, (placeholder.id, group.id))
-        if membership is None:
-            db.add(UserSkillGroup(user_id=placeholder.id, skill_group_id=group.id,
-                                  is_dispatcher=True))
-        else:
-            membership.is_dispatcher = True
+        if placeholder is not None:
+            placeholder.is_active = False
+            membership = await db.get(UserSkillGroup, (placeholder.id, group.id))
+            if membership is not None:
+                await db.delete(membership)
+        for username, name in SALES_PEOPLE:
+            person = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+            if person is None:
+                person = (await db.execute(select(User).where(User.name == name))).scalar_one_or_none()
+            if person is None:
+                person = User(username=username, name=name,
+                              password_hash=hash_password("skdy123"), role="handler",
+                              is_active=True)
+                db.add(person)
+                await db.flush()
+            membership = await db.get(UserSkillGroup, (person.id, group.id))
+            if membership is None:
+                db.add(UserSkillGroup(user_id=person.id, skill_group_id=group.id,
+                                      is_dispatcher=False))
+            else:
+                membership.is_dispatcher = False
         form = (await db.execute(select(FormDefinition).where(
             FormDefinition.code == "sales_opportunity_v1", FormDefinition.version == 1,
         ))).scalar_one_or_none()
