@@ -126,11 +126,12 @@ async def test_sales_opportunity_create_submit_and_archive(client):
         detail = (await http.get(f"/api/v1/tickets/{ticket_id}")).json()
         assert detail["node_context"]["node_type"] == "sales_opportunity"
         assert detail["current_form"]["code"] == "sales_opportunity_v1"
-        assert detail["can_note"] is True and detail["can_reply"] is False
+        assert detail["can_note"] is False and detail["can_reply"] is False
+        assert not any(action["action"] == "note" for action in detail["node_context"]["allowed_actions"])
         assert (await http.post(f"/api/v1/tickets/{ticket_id}/articles",
                                 data={"type": "reply", "body": "绕过商机表单"})).status_code == 409
         assert (await http.post(f"/api/v1/tickets/{ticket_id}/articles",
-                                data={"type": "note", "body": "联系客户中"})).status_code == 201
+                                data={"type": "note", "body": "联系客户中"})).status_code == 409
         form = detail["current_form"]
         base = {"form_definition_id": form["form_definition_id"], "form_version": form["version"],
                 "expected_category_id": None, "expected_department_id": sales.id,

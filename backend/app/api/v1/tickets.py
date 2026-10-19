@@ -911,15 +911,16 @@ async def _compose_node_form(
     if not form:
         return None
     if node_type in ("processing", "phone_feedback", "sales_opportunity") and article_actions["can_reply"]:
-        # 表单负责推进状态，普通回复降级为不推进状态的 note。
-        article_actions["can_note"] = True
+        # The sales form is the sole completion entry; other node forms allow process notes.
+        article_actions["can_note"] = node_type != "sales_opportunity"
         article_actions["can_reply"] = False
         node_context["allowed_actions"] = [
             a for a in node_context["allowed_actions"] if a["action"] != "reply"
         ]
-        node_context["allowed_actions"].append(
-            {"action": "note", "target_state": ticket.state, "label": "添加回复"}
-        )
+        if node_type != "sales_opportunity":
+            node_context["allowed_actions"].append(
+                {"action": "note", "target_state": ticket.state, "label": "添加回复"}
+            )
     return await present_form(db, form, ticket)
 
 

@@ -188,6 +188,8 @@ async def create_article(
         if type == "reply" and node_form:
             raise HTTPException(409, detail="当前节点须通过结构化表单完成；普通回复请使用 note")
         if type == "note":
+            if context.node_type == "sales_opportunity":
+                raise HTTPException(409, detail="销售商机须通过处理表单提交并归档")
             if not node_form:
                 raise HTTPException(422, detail="当前节点不接受普通处理回复")
             if ticket.owner_id != user.id or ticket.state not in REPLY_ALLOWED_STATES:

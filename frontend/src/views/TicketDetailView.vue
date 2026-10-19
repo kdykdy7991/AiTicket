@@ -285,7 +285,7 @@
 
           <div v-if="processingForm" class="refine-card">
             <div class="refine-card-title">{{ isSalesOpportunity ? '完成销售商机处理' : '完成本节点处理' }}</div>
-            <p class="refine-card-hint">下方“添加回复”仅记录处理过程；提交本表单才会完成当前部门的处理并按原有流程流转。</p>
+            <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成商机处理并归档。' : '下方“添加回复”仅记录处理过程；提交本表单才会完成当前部门的处理并按原有流程流转。' }}</p>
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
               <el-select v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable>
@@ -301,7 +301,7 @@
               <el-button type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
               <el-button v-if="canHold" :loading="holding" @click="holdDialogVisible = true">暂缓处理</el-button>
             </div>
-            <p class="refine-card-hint">「添加回复」只记录沟通过程；「完成本节点处理」按流程流转；「暂缓处理」暂停本节点，恢复后继续处理。</p>
+            <p v-if="!isSalesOpportunity" class="refine-card-hint">「添加回复」只记录沟通过程；「完成本节点处理」按流程流转；「暂缓处理」暂停本节点，恢复后继续处理。</p>
           </div>
 
           <div v-if="phoneFeedbackForm" class="refine-card">
@@ -348,7 +348,7 @@
           </div>
 
           <ReplyEditor
-            v-if="!isTerminalState && (ticket.can_reply || ticket.can_note || ticket.can_addition || ticket.can_remind)"
+            v-if="!isSalesOpportunity && !isTerminalState && (ticket.can_reply || ticket.can_note || ticket.can_addition || ticket.can_remind)"
             :ticket="ticket"
             :articles="ticket.articles"
             @submitted="onRefresh"
@@ -603,7 +603,7 @@ async function submitPhoneFeedbackForm() {
       expected_category_id: t.category_id,
       expected_department_id: t.skill_group_id,
       expected_dispatch_step_index: t.dispatch_step_index,
-      expected_state: t.state,
+      expected_state: t.state_key,
       values: phoneFeedbackValues.value,
     }, [])
     ElMessage.success('致电反馈已提交')
@@ -651,7 +651,7 @@ async function submitProcessingForm() {
       expected_category_id: t.category_id,
       expected_department_id: t.skill_group_id,
       expected_dispatch_step_index: t.dispatch_step_index,
-      expected_state: t.state,
+      expected_state: t.state_key,
       values,
     }, processingFiles.value)
     ElMessage.success(isSalesOpportunity.value ? '销售商机已处理并归档' : '本节点处理已完成')
@@ -817,7 +817,7 @@ async function submitClosureForm() {
       expected_category_id: t.category_id,
       expected_department_id: t.skill_group_id,
       expected_dispatch_step_index: t.dispatch_step_index,
-      expected_state: t.state,
+      expected_state: t.state_key,
       values,
     })
     ElMessage.success(closureRecordsDissatisfied.value ? '已记录回访结果' : '工单已归档')
