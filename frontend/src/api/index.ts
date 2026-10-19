@@ -36,12 +36,11 @@ api.interceptors.response.use(
       console.error('[404]', error.config?.method?.toUpperCase(), error.config?.baseURL + error.config?.url)
     }
     if (error.response?.status === 401) {
-      const casdoorLink = error.config?.url === '/auth/casdoor/link'
       // Token 过期、被顶下线或无效：清空本地存储并跳转登录
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       localStorage.removeItem('user')
-      if (window.location.pathname !== '/login' && !casdoorLink) {
+      if (window.location.pathname !== '/login') {
         // 有具体原因（如"已在其他设备登录"）时提示，避免静默踢出
         const detail = error.response?.data?.detail
         const now = Date.now()

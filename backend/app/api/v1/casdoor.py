@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_user
 from app.core.security import create_access_token, create_refresh_token
 from app.models.user import User
 from app.schemas.auth import LoginResponse, UserInfo
@@ -139,29 +138,49 @@ async def _verified_subject(body: ExchangeRequest) -> str:
     return subject
 
 
-@router.post("/link")
-async def link_casdoor(
-    body: ExchangeRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """Pilot binding: only the currently signed-in ticket admin can link self."""
-    if user.role != "admin":
-        raise HTTPException(403, detail="目前仅管理员可绑定 Casdoor")
-    subject = await _verified_subject(body)
-    issuer = settings.CASDOOR_ISSUER.rstrip("/")
-    existing = (await db.execute(select(User).where(
-        User.casdoor_issuer == issuer, User.casdoor_subject == subject,
-    ))).scalar_one_or_none()
-    if existing is not None and existing.id != user.id:
-        raise HTTPException(409, detail="该 Casdoor 账号已绑定其他工单用户")
-    local = (await db.execute(select(User).where(User.id == user.id))).scalar_one()
-    if local.casdoor_subject and (local.casdoor_subject != subject or local.casdoor_issuer != issuer):
-        raise HTTPException(409, detail="当前工单账号已绑定其他 Casdoor 账号")
-    local.casdoor_issuer = issuer
-    local.casdoor_subject = subject
-    await db.commit()
-    return {"bound": True, "username": local.username}
+async def verify_password_subject(username: str, password: str) -> str:
+    """Validate a password grant and return the subject from its signed ID token."""
+    if not _configured():
+        raise HTTPException(503, detail="Casdoor 登录尚未配置")
+    try:
+        async with httpx.AsyncClient(timeout=8.0, trust_env=False) as client:
+            discovery = await _discovery(client)
+            response = await client.post(discovery["token_endpoint"], data={
+                "grant_type": "password",
+                "client_id": settings.CASDOOR_CLIENT_ID,
+                "client_secret": settings.CASDOOR_CLIENT_SECRET,
+                "username": username,
+                "password": password,
+            })
+            if response.status_code in (400, 401, 403):
+                raise HTTPException(401, detail="用户名或密码错误")
+            response.raise_for_status()
+            token_data = response.json()
+            id_token = token_data["id_token"]
+            access_token = token_data["access_token"]
+            jwks_response = await client.get(discovery["jwks_uri"])
+            jwks_response.raise_for_status()
+            claims = jwt.decode(
+                id_token,
+                jwks_response.json(),
+                algorithms=["RS256", "RS512", "ES256", "ES384", "ES512"],
+                audience=settings.CASDOOR_CLIENT_ID,
+                issuer=settings.CASDOOR_ISSUER.rstrip("/"),
+                access_token=access_token,
+            )
+    except HTTPException:
+        raise
+    except (KeyError, ValueError, JWTError) as exc:
+        logger.warning("Casdoor password grant validation failed: %s", type(exc).__name__)
+        raise HTTPException(401, detail="用户名或密码错误") from exc
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(503, detail="Casdoor 暂时不可用") from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, detail="Casdoor 暂时不可用") from exc
+    subject = claims.get("sub")
+    if not isinstance(subject, str) or not subject:
+        raise HTTPException(401, detail="用户名或密码错误")
+    return subject
 
 
 @router.post("/exchange", response_model=LoginResponse)

@@ -57,10 +57,6 @@ export const authApi = {
     return { access_token: res.access_token, refresh_token: res.refresh_token, token_type: res.token_type, expires_in: res.expires_in, user: adaptUser(res.user) as any }
   },
 
-  async casdoorLink(body: CasdoorExchange): Promise<void> {
-    await api.post('/auth/casdoor/link', body)
-  },
-
   async casdoorChallenge(verifier: string): Promise<string> {
     const result = await api.post<unknown, { challenge: string }>('/auth/casdoor/challenge', { code_verifier: verifier })
     return result.challenge
@@ -72,7 +68,7 @@ export const authApi = {
       username: (payload as any).username || (payload as any).email,
       password: payload.password,
     }
-    const res = await api.post<unknown, BackendLoginResponse>('/auth/login', body)
+    const res = await api.post<unknown, BackendLoginResponse>('/auth/login', body, { silent: true })
     return {
       access_token: res.access_token,
       refresh_token: res.refresh_token,

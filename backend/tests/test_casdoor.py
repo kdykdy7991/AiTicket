@@ -22,7 +22,7 @@ PAYLOAD = {
 
 
 @pytest.mark.asyncio
-async def test_admin_must_link_before_casdoor_login(client, monkeypatch):
+async def test_casdoor_login_requires_preprovisioned_binding(client, monkeypatch):
     http, _, engine = client
     monkeypatch.setattr(settings, "CASDOOR_ISSUER", "http://casdoor.test")
     async def verified(_body):
@@ -32,16 +32,19 @@ async def test_admin_must_link_before_casdoor_login(client, monkeypatch):
     unbound = await http.post("/api/v1/auth/casdoor/exchange", json=PAYLOAD)
     assert unbound.status_code == 403
 
-    linked = await http.post("/api/v1/auth/casdoor/link", json=PAYLOAD)
-    assert linked.status_code == 200, linked.text
-    assert linked.json()["username"] == "test-admin"
+    assert (await http.post("/api/v1/auth/casdoor/link", json=PAYLOAD)).status_code == 404
+    Session = async_sessionmaker(engine, class_=AsyncSession)
+    async with Session() as db:
+        user = (await db.execute(select(User).where(User.username == "test-admin"))).scalar_one()
+        user.casdoor_issuer = "http://casdoor.test"
+        user.casdoor_subject = "stable-casdoor-subject"
+        await db.commit()
 
     logged_in = await http.post("/api/v1/auth/casdoor/exchange", json=PAYLOAD)
     assert logged_in.status_code == 200, logged_in.text
     assert logged_in.json()["user"]["role"] == "admin"
     assert logged_in.json()["access_token"]
 
-    Session = async_sessionmaker(engine, class_=AsyncSession)
     async with Session() as db:
         user = (await db.execute(select(User).where(User.username == "test-admin"))).scalar_one()
         assert user.casdoor_subject == "stable-casdoor-subject"
@@ -104,3 +107,35 @@ async def test_oidc_id_token_signature_audience_and_nonce_are_verified(monkeypat
     with pytest.raises(Exception) as exc:
         await casdoor._verified_subject(body)
     assert getattr(exc.value, "status_code", None) == 401
+
+
+@pytest.mark.asyncio
+async def test_password_login_requires_matching_bound_subject(client, monkeypatch):
+    http, _, engine = client
+    monkeypatch.setattr(settings, "CASDOOR_ISSUER", "http://casdoor.test")
+    monkeypatch.setattr(settings, "CASDOOR_CLIENT_ID", "ticket-client")
+    monkeypatch.setattr(settings, "CASDOOR_CLIENT_SECRET", "server-secret")
+    monkeypatch.setattr(settings, "CASDOOR_REDIRECT_ORIGINS", "http://localhost:5173")
+    Session = async_sessionmaker(engine, class_=AsyncSession)
+    async with Session() as db:
+        user = (await db.execute(select(User).where(User.username == "test-dispatcher"))).scalar_one()
+        user.casdoor_issuer = "http://casdoor.test"
+        user.casdoor_subject = "bound-subject"
+        await db.commit()
+
+    async def correct(_username, _password):
+        return "bound-subject"
+    from app.api.v1 import auth
+    monkeypatch.setattr(auth, "verify_password_subject", correct)
+    payload = {"username": "test-dispatcher", "password": "casdoor-password"}
+    good = await http.post("/api/v1/auth/login", json=payload)
+    assert good.status_code == 200, good.text
+    assert good.json()["user"]["username"] == "test-dispatcher"
+
+    async def wrong(_username, _password):
+        return "different-subject"
+    monkeypatch.setattr(auth, "verify_password_subject", wrong)
+    denied = await http.post("/api/v1/auth/login", json=payload)
+    assert denied.status_code == 401
+    missing = await http.post("/api/v1/auth/login", json={"username": "missing", "password": "anything"})
+    assert missing.status_code == 401

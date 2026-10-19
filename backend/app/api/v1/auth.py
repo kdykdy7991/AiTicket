@@ -16,6 +16,8 @@ from app.core.security import (
     verify_password,
 )
 from app.models.user import User
+from app.api.v1.casdoor import _configured, verify_password_subject
+from app.core.config import settings
 from app.schemas.auth import LoginRequest, LoginResponse, RefreshRequest, ChangePasswordRequest, UserInfo
 
 router = APIRouter(tags=["auth"])
@@ -29,11 +31,20 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     )
     user = result.scalar_one_or_none()
 
-    if user is None or not verify_password(body.password, user.password_hash):
+    if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
         )
+
+    if _configured() and user.role != "admin":
+        if not user.casdoor_subject or user.casdoor_issuer != settings.CASDOOR_ISSUER.rstrip("/"):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        subject = await verify_password_subject(body.username, body.password)
+        if subject != user.casdoor_subject:
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+    elif not verify_password(body.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     # 更新最后登录时间 + 会话版本 +1（原子操作）。
     # 版本 +1 使该账号之前的 token 全部失效，实现"一个账号同时只能一人在线"。
@@ -114,6 +125,8 @@ async def change_password(
     校验原密码后直接更新 password_hash。JWT 是无状态的，改密不影响已签发 token，
     用户可继续使用当前会话。
     """
+    if _configured() and user.role != "admin" and user.casdoor_subject:
+        raise HTTPException(status_code=400, detail="请在 Casdoor 中修改密码")
     if not verify_password(body.old_password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

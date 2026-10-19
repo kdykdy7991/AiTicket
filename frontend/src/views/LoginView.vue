@@ -35,6 +35,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
+import axios from 'axios'
 import type { FormInstance, FormRules } from 'element-plus'
 import { authApi } from '@/api/auth'
 import { startCasdoor } from '@/auth/casdoor'
@@ -47,11 +48,11 @@ const loading = ref(false)
 const casdoorEnabled = ref(false)
 
 onMounted(async () => {
-  try { casdoorEnabled.value = (await authApi.casdoorConfig()).enabled } catch { /* keep local login available */ }
+  try { casdoorEnabled.value = (await authApi.casdoorConfig()).enabled } catch { /* Casdoor unavailable */ }
 })
 
 async function onCasdoorLogin() {
-  try { await startCasdoor('login') }
+  try { await startCasdoor() }
   catch (error) { ElMessage.error(error instanceof Error ? error.message : '无法连接 Casdoor') }
 }
 
@@ -73,8 +74,9 @@ async function onLogin() {
     ElMessage.success('登录成功')
     const redirect = (route.query.redirect as string) || '/tickets'
     router.push(redirect)
-  } catch {
-    ElMessage.error('用户名或密码错误')
+  } catch (error) {
+    const detail = axios.isAxiosError(error) ? error.response?.data?.detail : null
+    ElMessage.error(typeof detail === 'string' ? detail : '登录失败，请重试')
   } finally {
     loading.value = false
   }
