@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from app.models.category import TicketCategory as Category
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.user import User
 
@@ -76,6 +75,7 @@ SKILL_GROUPS = [
     (6, '客服组'),
     (7, '星座营销中心'),
     (8, '星空智联行销部'),
+    (121, '其他组'),
 ]
 
 # 默认密码：admin 为 admin123，其余为 skdy123
@@ -145,6 +145,9 @@ USER_SKILL_GROUPS = [
     (32, 7, False),  # 张广瀚 -> 星座营销中心
     (33, 7, False),  # 吴小涵 -> 星座营销中心
     (34, 7, False),  # 乔兴达 -> 星座营销中心
+    (30, 121, False),  # 乔永亮 -> 其他组（待确认正式部门）
+    (35, 121, False),  # 杨冰 -> 其他组（待确认正式部门）
+    (36, 121, False),  # 楼豪丽 -> 其他组（待确认正式部门）
 ]
 
 CATEGORIES = [
@@ -322,15 +325,8 @@ async def seed() -> None:
         print("Seed completed.")
 
 
-# ── Phase 9: v2 分类与责任体系配套基础数据 ─────────────
-# 这部分数据是独立的、可重复执行的，用于在新分类树（Phase 2）下建立
-# "协调部门 / 专业部门 / 协调人 / 专业处理人" 的组织结构。
-#
-# 设计：
-# - 每个 v2 leaf 分类挂一条 CategoryRoutingRule
-# - 协调部门（dispatcher_skill_group_id）+ 协调人（dispatcher_id）必填
-# - 专业处理部门（handler_skill_group_id）+ 专业处理人（owner_id）可选
-#   （硬件故障/业务保障 等暂未到位的场景允许只有协调部分）
+# ── Phase 9: 分类与正式分派链基础数据 ─────────────
+# 服务投诉的重要/重大分支尚无正式链，保留其父级旧 Rule 作为 fallback。
 
 # v2 leaf 分类 ID（与 f2a3b4c5d6e7 同步）
 V2_CAT = {
@@ -354,16 +350,9 @@ CALLBACK_REQUIRED_CATEGORY_IDS = {
     2204,   # 业务运营 / 业财对账
 }
 
-# 新增的协调 / 专业部门（v2 组织架构）
-# 与现有 SKILL_GROUPS 通过 id 区分；为避免冲突，从 100 起。
+# 尚需旧 Rule 的服务投诉协调部门；测运控组转由正式链部门表维护。
 V2_SKILL_GROUPS = [
     (100, "服务投诉协调组"),         # 服务投诉主对接
-    (101, "业务运营组"),             # 业务运营主专业组
-    (102, "业务保障组"),             # 业务保障主专业组
-    (103, "核心网组"),               # 核心网系统
-    (104, "测运控组"),               # 测运控系统
-    (105, "卫星组"),                 # 卫星系统
-    (106, "即时办结咨询组"),         # 即时办结咨询默认协调
 ]
 
 # v2 用户。用户名 + 密码 hash（用 _SKDY_HASH）
@@ -371,51 +360,20 @@ V2_SKILL_GROUPS = [
 #   - 协调人：is_dispatcher=True
 #   - 专业处理人：is_dispatcher=False
 V2_USERS = [
-    # 协调人
     (200, "v2_dispatcher_complaint",  "服务投诉协调人",   "agent", 1, False, _SKDY_HASH),
-    (201, "v2_dispatcher_ops",         "业务运营协调人",   "agent", 1, False, _SKDY_HASH),
-    (202, "v2_dispatcher_assurance",   "业务保障协调人",   "agent", 1, False, _SKDY_HASH),
-    (203, "v2_dispatcher_instant",     "即时办结协调人",   "agent", 1, False, _SKDY_HASH),
-    # 专业处理人
-    (210, "v2_owner_ops",              "业务运营处理人",   "handler", 1, False, _SKDY_HASH),
-    (211, "v2_owner_assurance",        "业务保障处理人",   "handler", 1, False, _SKDY_HASH),
-    (212, "v2_owner_core",             "核心网处理人",     "handler", 1, False, _SKDY_HASH),
-    (213, "v2_owner_tt",               "测运控处理人",     "handler", 1, False, _SKDY_HASH),
-    (214, "v2_owner_satellite",        "卫星处理人",       "handler", 1, False, _SKDY_HASH),
 ]
 
 # (user_id, skill_group_id, is_dispatcher)
 V2_USER_SKILL_GROUPS = [
-    # 协调人
     (200, 100, True),  # 服务投诉协调人 -> 服务投诉协调组
-    (201, 101, True),  # 业务运营协调人 -> 业务运营组
-    (202, 102, True),  # 业务保障协调人 -> 业务保障组
-    (203, 106, True),  # 即时办结协调人 -> 即时办结咨询组
-    # 专业处理人
-    (210, 101, False),
-    (211, 102, False),
-    (212, 103, False),
-    (213, 104, False),
-    (214, 105, False),
 ]
 
 # (category_id, dispatcher_skill_group_id, dispatcher_id,
 #   handler_skill_group_id, owner_id, enabled, note)
-# resolve_rule() 会向上走父链，所以不需要给每个 leaf 都挂规则；
-# 这里给业务类别（level 2/3）挂规则即可覆盖其所有子孙。
+# 重要/重大投诉无正式链，仍沿父链回退到服务投诉 Rule。
 V2_ROUTING_RULES = [
     (V2_CAT["服务投诉"],     100, 200, None, None, True,
      "服务投诉统一由服务投诉协调组对接；具体专业部门按投诉类别后续补"),
-    (V2_CAT["业务运营"],     101, 201, 101, 210, True,
-     "业务运营工单由业务运营组闭环"),
-    (V2_CAT["业务保障"],     102, 202, 102, 211, True,
-     "业务保障工单由业务保障组对接并处理"),
-    (V2_CAT["核心网系统"],   102, 202, 103, 212, True,
-     "核心网组专业处理；协调人=业务保障组"),
-    (V2_CAT["测运控系统"],   102, 202, 104, 213, True,
-     "测运控组专业处理；协调人=业务保障组"),
-    (V2_CAT["卫星系统"],     102, 202, 105, 214, True,
-     "卫星组专业处理；协调人=业务保障组"),
 ]
 
 # 与 alembic f2a3b4c5d6e7 + m7p9q0r1s2t3 保持一致的 v2 分类树定义（用于 CLI 重灌）。
@@ -447,18 +405,14 @@ V2_CATEGORIES = [
 ]
 
 
-# Phase 9 补丁：组织名称迁移 + 补 3 条 leaf routing rule。
+# Phase 9 补丁：组织名称迁移。
 #
 # 背景：v2 分类树（leaf: 1202/1203/1204）上线时，老的 skill_group
 # 仍叫「品牌公关传播」「产品中心」「市场生态部」；业务侧对外的 v2 名称
-# 调整为「品牌传播与大客户」「产品」「市场生态部」。Phase 9 早期 seed
-# 只插了 v2 协调/处理组，没处理这个名称迁移，也没补 1202/1203/1204
-# 三条 routing rule，导致前端按 name 找不到匹配、走不到 routing 自动填。
+# 调整为「品牌传播与大客户」「产品」「市场生态部」。名称需要与正式
+# dispatch_chain 的 department_code 一致。
 #
-# 处理策略（保留现有 id，仅改 name，按业务属性查 id）：
-#   1) rename：UPDATEs 加 WHERE name=:old 兜底，重复执行幂等
-#   2) 补 routing rule：用 SkillGroup.name / User.name 查实际 id，
-#      避免写死 dispatcher_id=10/12/11 这类数字
+# 保留现有 id，仅在旧名称匹配时 rename，重复执行幂等。
 #
 # BUSINES TODO（不动 app 代码）：
 #   - 业务侧需最终确认「品牌传播与大客户」「产品」是否为对外最终名
@@ -470,18 +424,6 @@ V2_LEAF_RENAMES = [
     # 2 市场生态部 不变
 ]
 
-# 补的 3 条 leaf 路由（V2_ROUTING_RULES 没覆盖这三个）：
-# (category_name, sg_new_name, dispatcher_name, handler_sg_name=None, owner_name=None)
-# 字段统一用业务属性（name），由 seed 在 DB 里 SELECT 出 id 再 INSERT。
-V2_MISSING_LEAF_RULES = [
-    ("品牌合作",       "品牌传播与大客户", "钟梦茜", None, None,
-     "咨询/非即时-品牌合作 → 品牌传播与大客户/钟梦茜"),
-    ("产品使用/参数咨询", "产品",           "张朝娟", None, None,
-     "咨询/非即时-产品使用 → 产品/张朝娟"),
-    ("渠道/代理合作",   "市场生态部",       "谢志鹏", None, None,
-     "咨询/非即时-渠道代理合作 → 市场生态部/谢志鹏"),
-]
-
 # ── dispatch_chains：分派设计 V0.21（docs/ticket_dispatch_design.md §4）──
 # (category_id, [部门代称...], note)
 #
@@ -489,8 +431,9 @@ V2_MISSING_LEAF_RULES = [
 # 星座大系统负责人判 L3。链的起点 = 分类落位后接续的部门；
 # 判断节点所在部门写进链里作为下一步（如 2301→售后）。
 #
-# 不配链的分类（走其他通道，勿补）：
-#   2103 重要投诉 / 2104 重大投诉     —— 走 complaint_escalation_policies
+# 不配链的分类（本轮保留原路径）：
+#   2103 重要投诉 / 2104 重大投诉 —— 父级旧 Rule 负责路由，
+#   complaint_escalation_policies 负责投诉级别策略。
 DISPATCH_CHAINS: list[tuple[int, list[str], str]] = [
     (1202, ["品牌传播与大客户"],   "咨询/品牌合作：单步直达"),
     (1203, ["产品"],               "咨询/产品使用/参数咨询：单步直达"),
@@ -524,8 +467,9 @@ def dispatch_chain_steps(category_id: int, departments: list[str]) -> list[dict]
 
 # ── 分派设计 V0.21 §4 表A/表B 补齐（链部门代称 → skill_groups）──
 # DISPATCH_CHAINS 里的部门代称若 skill_groups 不存在，派单引擎按名字查不到部门。
-# 已存在复用：品牌传播与大客户(1) 市场生态部(2) 产品(3) 售后(5) 测运控组(104)。
+# 已存在复用：品牌传播与大客户(1) 市场生态部(2) 产品(3) 售后(5)。
 DISPATCH_DEPT_GROUPS: list[tuple[int, str]] = [
+    (104, "测运控组"),             # 正式链使用；不能随旧 v2 处理人删除
     (110, "值班组"),               # §5.1 一般投诉承接，人员按班次维护
     (111, "业务支撑组"),           # 套餐变更第 2 步
     (112, "经营管理部"),           # 业财对账第 1 步
@@ -699,12 +643,10 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
                 },
             )
 
-        # ── Phase 9 补丁：组织 rename + 补 1202/1203/1204 三条 leaf 路由 ──
+        # ── Phase 9 补丁：组织 rename ──
         # 业务背景：v2 业务侧把「品牌公关传播」→「品牌传播与大客户」、
         # 「产品中心」→「产品」；但旧 id(1/3) 与 dispatcher 绑定
         # (钟梦茜→1、张朝娟→3) 都稳定，沿用 RENAME 路径而不是新建组。
-        # 1202/1203/1204 三个 leaf 没被 V2_ROUTING_RULES 覆盖，
-        # 父链上溯也找不到任何祖先 rule，本节按业务期望补全。
         print("[Phase 9] Renaming legacy skill_groups to v2 names...")
         for sg_id, old_name, new_name in V2_LEAF_RENAMES:
             await db.execute(
@@ -715,77 +657,6 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
                 """),
                 {"sg_id": sg_id, "old_name": old_name, "new_name": new_name, "now": now},
             )
-
-        print("[Phase 9] Seeding missing leaf routing rules (1202/1203/1204)...")
-        for rule in V2_MISSING_LEAF_RULES:
-            cat_name, d_sg_name, d_user_name, h_sg_name, o_user_name, note = rule
-            # 用业务属性查 id，避免写死数字
-            cat_id_row = await db.execute(
-                select(Category.id).where(Category.name == cat_name).limit(1)
-            )
-            cat_id = cat_id_row.scalar_one_or_none()
-            if cat_id is None:
-                print(f"  [skip] category not found: {cat_name}")
-                continue
-            d_sg_row = await db.execute(
-                select(SkillGroup.id).where(SkillGroup.name == d_sg_name).limit(1)
-            )
-            d_sg_id = d_sg_row.scalar_one_or_none()
-            if d_sg_id is None:
-                print(f"  [skip] skill_group not found: {d_sg_name}")
-                continue
-            # dispatcher 必须是对接人（is_dispatcher=true）
-            d_user_row = await db.execute(
-                select(User.id).where(
-                    User.name == d_user_name,
-                    User.is_active == True,  # noqa: E712
-                ).limit(1)
-            )
-            d_user_id = d_user_row.scalar_one_or_none()
-            if d_user_id is None:
-                print(f"  [skip] user not found: {d_user_name}")
-                continue
-            # 校验 dispatcher 归属
-            link_row = await db.execute(
-                select(UserSkillGroup).where(
-                    UserSkillGroup.user_id == d_user_id,
-                    UserSkillGroup.skill_group_id == d_sg_id,
-                    UserSkillGroup.is_dispatcher == True,  # noqa: E712
-                ).limit(1)
-            )
-            if not link_row.scalar_one_or_none():
-                print(f"  [skip] {d_user_name} is not a dispatcher of {d_sg_name}")
-                continue
-
-            h_sg_id = None
-            if h_sg_name:
-                h_sg_row = await db.execute(
-                    select(SkillGroup.id).where(SkillGroup.name == h_sg_name).limit(1)
-                )
-                h_sg_id = h_sg_row.scalar_one_or_none()
-            o_user_id = None
-            if o_user_name:
-                o_user_row = await db.execute(
-                    select(User.id).where(User.name == o_user_name).limit(1)
-                )
-                o_user_id = o_user_row.scalar_one_or_none()
-
-            await db.execute(
-                text("""
-                    INSERT INTO category_routing_rules
-                    (category_id, dispatcher_skill_group_id, dispatcher_id,
-                     handler_skill_group_id, owner_id, enabled, note,
-                     created_at, updated_at)
-                    VALUES (:cat_id, :d_sg, :d_uid, :h_sg, :o_uid, true, :note, :now, :now)
-                    ON CONFLICT (category_id) DO NOTHING
-                """),
-                {
-                    "cat_id": cat_id, "d_sg": d_sg_id, "d_uid": d_user_id,
-                    "h_sg": h_sg_id, "o_uid": o_user_id,
-                    "note": note, "now": now,
-                },
-            )
-            print(f"  [ok] {cat_name} ({cat_id}) → {d_sg_name}({d_sg_id}) / {d_user_name}({d_user_id})")
 
         # ── 分派设计 V0.21 §4 表B：链部门 + 人员补齐（幂等）──
         # 必须先于 dispatch_chains 校验逻辑可用：链的 department_code 按名字

@@ -56,6 +56,23 @@ def create_selectable_categories(
     return result
 
 
+async def is_valid_ticket_category(db: AsyncSession, category_id: int) -> bool:
+    """A current ticket may stop at an active leaf or a category with its own chain.
+
+    A parent without its own chain (such as business operations 2201) is only
+    a container. Intake may impose the narrower create_selectable rule too.
+    """
+    categories = list((await db.execute(
+        select(TicketCategory).where(TicketCategory.is_active.is_(True))
+    )).scalars().all())
+    chain_ids = set((await db.execute(
+        select(DispatchChain.category_id).where(DispatchChain.enabled.is_(True))
+    )).scalars().all())
+    active_ids = {category.id for category in categories}
+    parents = {category.parent_id for category in categories}
+    return category_id in active_ids and (category_id in chain_ids or category_id not in parents)
+
+
 class ResponsibilitySlots(NamedTuple):
     """工单全生命周期的责任槽位（由分类静态推导，不依赖运行时历史）。
 

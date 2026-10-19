@@ -1,5 +1,7 @@
 """Users, Groups, SkillGroups, Categories, Regions, SLA, Stats routers."""
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,6 +104,10 @@ async def create_user(
     existing = await db.execute(select(User).where(User.username == body.username))
     if existing.scalar_one_or_none():
         raise HTTPException(409, detail="用户名已存在")
+    if body.role == "agent" and body.group_id is None:
+        raise HTTPException(422, detail="客服坐席必须选择客服组")
+    if body.role == "handler" and not body.skill_groups:
+        raise HTTPException(422, detail="处理人必须选择所属对接部门")
 
     u = User(
         username=body.username, name=body.name, phone=body.phone,
@@ -131,6 +137,16 @@ async def update_user(
     u = result.scalar_one_or_none()
     if not u:
         raise NotFoundError("用户", user_id)
+
+    next_role = body.role if body.role is not None else u.role
+    if next_role == "agent" and (body.group_id if body.group_id is not None else u.group_id) is None:
+        raise HTTPException(422, detail="客服坐席必须选择客服组")
+    if next_role == "handler":
+        has_membership = bool(body.skill_groups) if body.skill_groups is not None else bool((await db.execute(
+            select(UserSkillGroup.user_id).where(UserSkillGroup.user_id == user_id).limit(1)
+        )).scalar_one_or_none())
+        if not has_membership:
+            raise HTTPException(422, detail="处理人必须选择所属对接部门")
 
     # 不能禁用/降级最后一个管理员
     if body.role is not None and body.role != "admin" and u.role == "admin":
@@ -306,11 +322,14 @@ async def list_skill_groups(db: AsyncSession = Depends(get_db), user: User = Dep
 async def list_dispatchers(group_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     """获取某对接部门的部门对接人列表（建单时选对接人用）。"""
     from app.models.group import UserSkillGroup
+    now = datetime.now(timezone.utc)
     result = await db.execute(
         select(User).join(UserSkillGroup, UserSkillGroup.user_id == User.id).where(
             UserSkillGroup.skill_group_id == group_id,
             UserSkillGroup.is_dispatcher == True,
             User.is_active == True,
+            or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
+            or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
         ).order_by(User.id)
     )
     users = result.scalars().all()
@@ -321,10 +340,13 @@ async def list_dispatchers(group_id: int, db: AsyncSession = Depends(get_db), us
 async def list_handlers(group_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     """获取某对接部门的处理人列表（分派时选处理人用），部门对接人也可作为处理人。"""
     from app.models.group import UserSkillGroup
+    now = datetime.now(timezone.utc)
     result = await db.execute(
         select(User).join(UserSkillGroup, UserSkillGroup.user_id == User.id).where(
             UserSkillGroup.skill_group_id == group_id,
             User.is_active == True,
+            or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
+            or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
         ).order_by(User.id)
     )
     users = result.scalars().all()

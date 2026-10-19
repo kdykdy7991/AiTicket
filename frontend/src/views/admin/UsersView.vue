@@ -55,7 +55,7 @@
                 {{ skillGroupName(m.skill_group_id) }}{{ m.is_dispatcher ? '·对接' : '' }}
               </el-tag>
             </span>
-            <span v-else class="muted">—</span>
+            <span v-else class="muted">{{ row.role === 'handler' ? '未配置所属组' : '—' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90" align="center">

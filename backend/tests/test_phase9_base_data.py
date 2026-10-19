@@ -1,15 +1,4 @@
-"""Phase 9 tests: v2 base data (skill_groups + users + category_routing_rules).
-
-This test imports scripts/seed.py and runs seed_phase9_base_data() against the
-test DB. The categories are already created by Phase 2 migration.
-
-We verify:
-- New skill_groups seeded (100-106)
-- New users seeded (200-214)
-- User_skill_groups links seeded
-- Category_routing_rules created for each v2 leaf category
-- The data is idempotent: running twice doesn't break
-"""
+"""Phase 9 seed keeps the complaint fallback and current dispatch chains."""
 
 import asyncio
 import subprocess
@@ -189,8 +178,7 @@ async def _seed_legacy_basics(engine):
         await s.commit()
 
 
-async def test_phase9_seed_creates_v2_skill_groups(phase9_env):
-    """Phase 9 seed creates 7 new skill_groups (100..106)."""
+async def test_phase9_seed_keeps_only_required_groups(phase9_env):
     engine = phase9_env["engine"]
     await _seed_phase9_directly(engine)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -198,14 +186,11 @@ async def test_phase9_seed_creates_v2_skill_groups(phase9_env):
         sg_names = (await s.execute(
             select(SkillGroup.name).where(SkillGroup.id >= 100, SkillGroup.id <= 106)
         )).scalars().all()
-    expected = {
-        "服务投诉协调组", "业务运营组", "业务保障组",
-        "核心网组", "测运控组", "卫星组", "即时办结咨询组",
-    }
+    expected = {"服务投诉协调组", "测运控组"}
     assert set(sg_names) == expected
 
 
-async def test_phase9_seed_creates_v2_users(phase9_env):
+async def test_phase9_seed_keeps_only_complaint_placeholder(phase9_env):
     engine = phase9_env["engine"]
     await _seed_phase9_directly(engine)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -213,11 +198,10 @@ async def test_phase9_seed_creates_v2_users(phase9_env):
         usernames = (await s.execute(
             select(User.username).where(User.id >= 200, User.id <= 214)
         )).scalars().all()
-    assert "v2_dispatcher_complaint" in usernames
-    assert "v2_owner_satellite" in usernames
+    assert usernames == ["v2_dispatcher_complaint"]
 
 
-async def test_phase9_seed_creates_routing_rules(phase9_env):
+async def test_phase9_seed_keeps_only_complaint_rule(phase9_env):
     engine = phase9_env["engine"]
     await _seed_phase9_directly(engine)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -229,8 +213,7 @@ async def test_phase9_seed_creates_routing_rules(phase9_env):
     cat_ids = {r.category_id for r in rules}
     from scripts.seed import V2_CAT
     assert 1102 not in cat_ids
-    assert V2_CAT["核心网系统"] in cat_ids
-    assert V2_CAT["卫星系统"] in cat_ids
+    assert cat_ids == {V2_CAT["服务投诉"]}
 
 
 async def test_phase9_seed_idempotent(phase9_env):
@@ -244,11 +227,11 @@ async def test_phase9_seed_idempotent(phase9_env):
         n_rules = len((await s.execute(
             select(CategoryRoutingRule).where(CategoryRoutingRule.category_id >= 1000)
         )).scalars().all())
-    from scripts.seed import V2_ROUTING_RULES, V2_MISSING_LEAF_RULES
-    assert n_rules == len(V2_ROUTING_RULES) + len(V2_MISSING_LEAF_RULES)
+    from scripts.seed import V2_ROUTING_RULES
+    assert n_rules == len(V2_ROUTING_RULES) == 1
 
 
-# ── Phase 9 补丁：rename + 1202/1203/1204 路由 ──────────────────────
+# ── Phase 9 补丁：rename + 正式链 ──────────────────────
 async def test_phase9_renames_legacy_skill_groups(phase9_env):
     """Phase 9 seed 把 品牌公关传播→品牌传播与大客户、产品中心→产品。"""
     engine = phase9_env["engine"]
@@ -264,24 +247,23 @@ async def test_phase9_renames_legacy_skill_groups(phase9_env):
     assert by_id[3] == "产品"
 
 
-async def test_phase9_seed_leaf_rules_make_resolve_match(phase9_env):
-    """Phase 9 补种后,resolve_rule(1202/1203/1204) 都 matched=True。
-
-    走真实 routing resolve 服务,而非直接查表,验证整个链路通。
-    """
+async def test_phase9_seed_resolves_formal_chains_and_complaint_fallback(phase9_env):
     engine = phase9_env["engine"]
     await _seed_phase9_directly(engine)
-    from app.services.routing import resolve_rule
+    from app.services.dispatch_chain import resolve_responsibility
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-    expectations = [
-        (1202, "品牌传播与大客户", "钟梦茜"),
-        (1203, "产品",             "张朝娟"),
-        (1204, "市场生态部",       "谢志鹏"),
-    ]
+    expectations = {
+        1202: "品牌传播与大客户", 1203: "产品", 1204: "市场生态部",
+        2301: "售后", 2311: "软件开发组", 2312: "测运控组",
+        2313: "整星产品", 2203: "市场生态部", 2204: "经营管理部",
+    }
     async with factory() as s:
-        for cat_id, sg_name, user_name in expectations:
-            r = await resolve_rule(s, cat_id)
-            assert r["matched"] is True, f"cat={cat_id}: {r}"
-            assert r["dispatcher_skill_group_name"] == sg_name, r
-            assert r["dispatcher_name"] == user_name, r
+        for cat_id, department in expectations.items():
+            r = await resolve_responsibility(s, cat_id)
+            assert r["via"] == "chain" and r["matched"] is True, r
+            assert r["matched_rule_category_id"] == cat_id, r
+            assert r["dispatcher_skill_group_name"] == department, r
+        for cat_id in (2103, 2104):
+            r = await resolve_responsibility(s, cat_id)
+            assert r["via"] == "rule" and r["matched_rule_category_id"] == 2101, r

@@ -44,6 +44,7 @@ from app.services.category_utils import (
     build_lineage_index,
     build_responsibility_index,
     create_selectable_categories,
+    is_valid_ticket_category,
 )
 from app.services.state_machine import (
     TERMINAL_STATES,
@@ -714,6 +715,9 @@ async def submit_draft(
     if not ticket or not ticket.is_draft or ticket.creator_id != user.id:
         raise NotFoundError("草稿", draft_id)
 
+    if ticket.category_id is not None and not await is_valid_ticket_category(db, ticket.category_id):
+        raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
+
     if not ticket.dispatcher_id:
         raise HTTPException(422, detail="提交前必须指定部门对接人")
 
@@ -776,6 +780,9 @@ async def update_draft(
     ticket = await db.get(Ticket, draft_id)
     if not ticket or not ticket.is_draft or ticket.creator_id != user.id:
         raise NotFoundError("草稿", draft_id)
+
+    if body.category_id is not None and not await is_valid_ticket_category(db, body.category_id):
+        raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
 
     # Update draft fields
     ticket.description = body.description
@@ -1327,12 +1334,8 @@ async def create_ticket(
 ):
     """Create a new ticket."""
     warnings = None
-    if body.category_id is not None:
-        category_active = (await db.execute(
-            select(TicketCategory.is_active).where(TicketCategory.id == body.category_id)
-        )).scalar_one_or_none()
-        if category_active is not True:
-            raise HTTPException(422, detail="所选问题分类不存在或已停用")
+    if body.category_id is not None and not await is_valid_ticket_category(db, body.category_id):
+        raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
     if body.is_instant_resolve:
         raise HTTPException(422, detail="即时咨询不记录工单")
 
@@ -1344,10 +1347,10 @@ async def create_ticket(
             root_id = lineage.l1.id if lineage and lineage.l1 else None
             if not body.is_opportunity:
                 active_categories = list((await db.execute(
-                    select(TicketCategory).where(TicketCategory.is_active == True)  # noqa: E712
+                    select(TicketCategory).where(TicketCategory.is_active.is_(True))
                 )).scalars().all())
                 chain_ids = set((await db.execute(
-                    select(DispatchChain.category_id).where(DispatchChain.enabled == True)  # noqa: E712
+                    select(DispatchChain.category_id).where(DispatchChain.enabled.is_(True))
                 )).scalars().all())
                 selectable = create_selectable_categories(active_categories, chain_ids)
                 if not selectable.get(body.category_id, False):
@@ -1694,13 +1697,8 @@ async def update_ticket(
             raise HTTPException(422, detail="重新提交后须由对接人重新分派处理人")
 
         category_id = body.category_id or ticket.category_id
-        if category_id is not None:
-            category = (await db.execute(
-                select(TicketCategory).where(TicketCategory.id == category_id,
-                                             TicketCategory.is_active == True)
-            )).scalar_one_or_none()
-            if category is None:
-                raise HTTPException(422, detail="所选问题分类不存在或已停用")
+        if category_id is not None and not await is_valid_ticket_category(db, category_id):
+            raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
         routing = await resolve_responsibility(db, category_id) if category_id is not None else {}
         steps = routing.get("chain_steps") or None
         # 有链时责任部门必须与链首一致；无链时才允许人工指定。

@@ -49,8 +49,8 @@
         <span class="field-label">处理人</span>
         <span class="field-value">
           <span>{{ (ticket as any).owner_name || '未分配' }}</span>
-          <span v-if="(ticket as any).owner_department" class="dept-tag">
-            {{ (ticket as any).owner_department }}
+          <span v-if="(ticket as any).owner_name" class="dept-tag">
+            {{ (ticket as any).owner_department || '未配置所属组' }}
           </span>
         </span>
       </div>

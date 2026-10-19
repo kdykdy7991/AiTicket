@@ -1,6 +1,7 @@
 """Sales tickets reuse node submission and the existing resolve/archive transitions."""
 
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -12,6 +13,39 @@ from app.models.ticket import Article, Ticket, TicketStateLog
 from app.models.user import User
 from scripts.seed_sales_opportunity_form import PLACEHOLDER_NAME, PLACEHOLDER_USERNAME, seed_sales_opportunity_form
 from test_workflow_regression import _next_phone, as_user
+
+
+@pytest.mark.asyncio
+async def test_sales_member_lists_respect_effective_dates(client):
+    http, _, engine = client
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    await seed_sales_opportunity_form(factory)
+    async with factory() as db:
+        sales = (await db.execute(select(SkillGroup).where(SkillGroup.name == "销售"))).scalar_one()
+        placeholder = (await db.execute(select(User).where(
+            User.username == PLACEHOLDER_USERNAME,
+        ))).scalar_one()
+        membership = await db.get(UserSkillGroup, (placeholder.id, sales.id))
+        group_id, user_id = sales.id, placeholder.id
+        membership.effective_from = datetime.now(timezone.utc) + timedelta(days=1)
+        await db.commit()
+
+    for path in ("handlers", "dispatchers"):
+        url = f"/api/v1/skill-groups/{group_id}/{path}"
+        future = await http.get(url)
+        assert future.status_code == 200
+        assert user_id not in {person["id"] for person in future.json()["data"]}
+
+    async with factory() as db:
+        membership = await db.get(UserSkillGroup, (user_id, group_id))
+        membership.effective_from = datetime.now(timezone.utc) - timedelta(days=2)
+        membership.effective_to = datetime.now(timezone.utc) - timedelta(days=1)
+        await db.commit()
+
+    for path in ("handlers", "dispatchers"):
+        expired = await http.get(f"/api/v1/skill-groups/{group_id}/{path}")
+        assert expired.status_code == 200
+        assert user_id not in {person["id"] for person in expired.json()["data"]}
 
 
 @pytest.mark.asyncio

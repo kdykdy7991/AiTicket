@@ -111,6 +111,43 @@ async def test_removed_instant_consult_cannot_create_ticket(cats_env):
     assert resp.status_code == 422
 
 
+async def test_business_operations_parent_rejected_by_all_external_writes(cats_env):
+    c = cats_env["client"]
+    dispatcher_id = cats_env["dispatcher_id"]
+    base = {"customer_phone": _next_phone(), "dispatcher_id": dispatcher_id}
+
+    direct = await c.post("/api/v1/tickets", json={**base, "category_id": 2201})
+    assert direct.status_code == 422
+
+    draft = await c.post("/api/v1/tickets", json={**base, "is_draft": True})
+    assert draft.status_code == 201, draft.text
+    draft_id = draft.json()["data"]["id"]
+    changed = await c.patch(f"/api/v1/tickets/drafts/{draft_id}", json={
+        **base, "is_draft": True, "category_id": 2201,
+    })
+    assert changed.status_code == 422
+
+    for category_id in (2203, 2204):
+        created = await c.post("/api/v1/tickets", json={
+            **base, "customer_phone": _next_phone(), "category_id": category_id,
+        })
+        assert created.status_code == 201, created.text
+
+    plain = await c.post("/api/v1/tickets", json={
+        **base, "customer_phone": _next_phone(),
+    })
+    assert plain.status_code == 201, plain.text
+    ticket_id = plain.json()["data"]["id"]
+    returned = await c.patch(f"/api/v1/tickets/{ticket_id}", json={
+        "state": "returned", "reason": "重新分类",
+    })
+    assert returned.status_code == 200, returned.text
+    resubmitted = await c.patch(f"/api/v1/tickets/{ticket_id}", json={
+        "state": "pending", "category_id": 2201,
+    })
+    assert resubmitted.status_code == 422
+
+
 async def test_normal_category_unaffected(cats_env):
     """业务保障等正常分类仍走 pending 等分派（不被即办结预置劫持）。"""
     j = await _create(
