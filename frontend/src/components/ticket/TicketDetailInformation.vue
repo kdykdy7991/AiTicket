@@ -66,7 +66,7 @@
 
     <TicketFormSection v-if="hasResult" title="处理结果" icon="Document">
       <div class="fields result-fields">
-        <div v-if="t.root_cause" class="field"><span>根本原因</span><strong>{{ t.root_cause }}</strong></div>
+        <div v-if="t.root_cause && !hasProcessingSubmission" class="field"><span>根本原因</span><strong>{{ t.root_cause }}</strong></div>
         <div v-if="t.solution || t.resolution" class="field"><span>解决方案</span><strong>{{ t.solution || t.resolution }}</strong></div>
         <div v-if="t.resolved" class="field"><span>解决状态</span><strong>已解决</strong></div>
         <div v-if="t.is_callbacked || t.callback_details || t.satisfaction" class="field"><span>回访</span><strong>{{ t.is_callbacked ? '已回访' : '未回访' }}</strong></div>
@@ -93,7 +93,9 @@ const channelText = computed(() => ({ phone: '语音', web: '在线客服', inte
 const priorityText = computed(() => ({ p1_urgent: 'P1', p2_high: 'P2', p3_normal: 'P3', p4_enterprise: 'P4' } as Record<string, string>)[t.value.priority?.key || t.value.priority] || t.value.priority?.name || '—')
 const satisfactionText = computed(() => ({ satisfied: '满意', average: '一般', dissatisfied: '不满意', unrated: '未评价' } as Record<string, string>)[t.value.satisfaction] || t.value.satisfaction || '—')
 const hasFaultInfo = computed(() => !!(t.value.fault_occurred_at || t.value.fault_recurrence || t.value.fault_location || t.value.is_batch_fault != null))
-const hasResult = computed(() => !!(t.value.root_cause || t.value.solution || t.value.resolution || t.value.resolved || t.value.is_callbacked || t.value.callback_details || t.value.satisfaction || t.value.unsatisfied_reason || t.value.archive_notes))
+const hasProcessingSubmission = computed(() => (t.value.node_submissions || []).some((entry: any) => entry.node_type === 'processing' &&
+  (entry.field_snapshot || []).some((field: any) => field.key === 'root_cause' && field.submitted_value != null)))
+const hasResult = computed(() => !!((t.value.root_cause && !hasProcessingSubmission.value) || t.value.solution || t.value.resolution || t.value.resolved || t.value.is_callbacked || t.value.callback_details || t.value.satisfaction || t.value.unsatisfied_reason || t.value.archive_notes))
 function formatTime(value?: string | null): string { return value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '—' }
 function yesNo(value?: boolean | null): string { return value == null ? '—' : value ? '是' : '否' }
 </script>

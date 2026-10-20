@@ -207,6 +207,49 @@ async def test_only_assigned_aftersale_person_can_judge(renv):
         assert refined.status_code == 200, refined.text
 
 
+@pytest.mark.asyncio
+async def test_phone_feedback_dispatch_returns_to_problem_judger(renv):
+    factory = async_sessionmaker_for(renv["engine"])
+    async with factory() as db:
+        judger = User(username="rf-feedback-judger", name="问题判断人员", password_hash="x", role="handler")
+        db.add(judger)
+        await db.flush()
+        db.add(UserSkillGroup(user_id=judger.id, skill_group_id=renv["sg_aftersale"], is_dispatcher=False))
+        judger_id = judger.id
+        await db.commit()
+
+    ticket = await renv["create_ticket"]()
+    with as_user(renv["aftersale_user"], "handler"):
+        assigned = await renv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
+            "state": "open", "owner_id": judger_id, "reason": "指派售后人员",
+        })
+        assert assigned.status_code == 200, assigned.text
+    with as_user(judger_id, "handler"):
+        refined = await renv["client"].post(
+            f"/api/v1/tickets/{ticket['id']}/refine", json={"category_id": 2302},
+        )
+        assert refined.status_code == 200, refined.text
+    with as_user(renv["platform_user"], "handler"):
+        transferred = await renv["client"].post(f"/api/v1/tickets/{ticket['id']}/articles", data={
+            "type": "reply", "body": "平台处理完成",
+        })
+        assert transferred.status_code == 201, transferred.text
+
+    pending = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert pending["state"] == "pending"
+    assert pending["dispatcher_id"] == judger_id
+    with as_user(renv["aftersale_user"], "handler"):
+        default_dispatcher = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
+        assert "dispatch" not in {action["action"] for action in default_dispatcher["allowed_actions"]}
+    with as_user(judger_id, "handler"):
+        detail = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
+        assert "dispatch" in {action["action"] for action in detail["allowed_actions"]}
+        dispatched = await renv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
+            "state": "open", "owner_id": renv["aftersale_user"],
+        })
+        assert dispatched.status_code == 200, dispatched.text
+
+
 async def test_refine_switches_chain_and_dept(renv):
     """指派售后人员后分诊：分类/链/部门切到子级，留下 refine 自环日志。"""
     t = await renv["create_ticket"]()

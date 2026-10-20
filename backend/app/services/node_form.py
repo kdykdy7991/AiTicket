@@ -24,6 +24,11 @@ class ResolvedForm:
     fields: list[FormFieldDefinition]
 
 
+def allows_process_note(form: ResolvedForm) -> bool:
+    """Conclusion-only forms already provide the node's reply entry."""
+    return form.definition.code not in {"business_opinion_v1", "package_change_execute_v2"}
+
+
 # Ticket columns a published form may write. Explicit whitelist: a form definition
 # is configuration, so it may only touch columns the backend already owns.
 # - device_sn / root_cause: triage + processing

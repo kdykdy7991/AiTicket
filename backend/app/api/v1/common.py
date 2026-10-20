@@ -112,6 +112,7 @@ async def create_user(
     u = User(
         username=body.username, name=body.name, phone=body.phone,
         password_hash=hash_password(body.password), role=body.role,
+        local_login_enabled=True,
         group_id=body.group_id, is_group_leader=body.is_group_leader,
         dingtalk_id=body.dingtalk_id,
     )
@@ -162,6 +163,8 @@ async def update_user(
         u.phone = body.phone
     if body.password:
         u.password_hash = hash_password(body.password)
+        if not u.casdoor_subject:
+            u.local_login_enabled = True
     if body.role is not None:
         u.role = body.role
     if body.group_id is not None:

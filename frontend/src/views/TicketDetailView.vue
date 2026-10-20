@@ -22,14 +22,28 @@
         <div class="detail-main">
           <div class="ticket-content-flow">
             <TicketDetailInformation :ticket="ticket" />
-            <div v-if="salesSubmission" class="sales-submission-card">
+            <template v-for="submission in completedSubmissions" :key="submission.id">
+              <div v-if="submission.node_type === 'sales_opportunity'" class="sales-submission-card">
               <div class="sales-submission-title">销售商机处理</div>
               <div class="sales-submission-fields">
-                <div><span>是否为有效商机</span><strong>{{ salesSubmission.data?.valid_opportunity === true ? '是' : salesSubmission.data?.valid_opportunity === false ? '否' : '—' }}</strong></div>
-                <div><span>客户评级</span><strong>{{ salesSubmission.data?.customer_rating || '—' }}</strong></div>
-                <div class="sales-submission-opinion"><span>处理意见</span><strong>{{ salesSubmission.article_body || '—' }}</strong></div>
+                <div><span>是否为有效商机</span><strong>{{ submission.data?.valid_opportunity === true ? '是' : submission.data?.valid_opportunity === false ? '否' : '—' }}</strong></div>
+                <div><span>客户评级</span><strong>{{ submission.data?.customer_rating || '—' }}</strong></div>
+                <div class="sales-submission-opinion"><span>处理意见</span><strong>{{ submission.article_body || '—' }}</strong></div>
               </div>
-            </div>
+              </div>
+              <div v-else class="sales-submission-card">
+                <div class="sales-submission-title">处理说明</div>
+                <div class="sales-submission-fields">
+                  <div v-for="field in submissionFields(submission)" :key="field.key" :class="{ 'sales-submission-opinion': field.type === 'textarea' }">
+                    <span>{{ field.label }}</span><strong>{{ field.value }}</strong>
+                  </div>
+                  <div v-if="submission.attachments?.length" class="sales-submission-opinion">
+                    <span>相关材料附件</span>
+                    <strong class="submission-attachments"><a v-for="attachment in submission.attachments" :key="attachment.id" :href="attachment.url" target="_blank" rel="noopener noreferrer">{{ attachment.filename }}</a></strong>
+                  </div>
+                </div>
+              </div>
+            </template>
           </div>
 
           <!-- 已退回工单：补充后重新提交 -->
@@ -295,7 +309,7 @@
 
           <div v-if="processingForm" class="refine-card">
             <div class="refine-card-title">{{ isSalesOpportunity ? '完成销售商机处理' : '完成本节点处理' }}</div>
-            <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成商机处理并归档。' : '下方“添加回复”仅记录处理过程；提交本表单才会完成当前部门的处理并按原有流程流转。' }}</p>
+            <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成商机处理并归档。' : ticket.can_note ? '下方“添加回复”仅记录处理过程；提交本表单才会完成当前部门的处理并按原有流程流转。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
               <el-select v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable
@@ -313,7 +327,7 @@
               <el-button type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
               <el-button v-if="canHold" :loading="holding" @click="holdDialogVisible = true">暂缓处理</el-button>
             </div>
-            <p v-if="!isSalesOpportunity" class="refine-card-hint">「添加回复」只记录沟通过程；「完成本节点处理」按流程流转；「暂缓处理」暂停本节点，恢复后继续处理。</p>
+            <p v-if="!isSalesOpportunity && ticket.can_note" class="refine-card-hint">「添加回复」只记录沟通过程；「完成本节点处理」按流程流转；「暂缓处理」暂停本节点，恢复后继续处理。</p>
           </div>
 
           <div v-if="phoneFeedbackForm" class="refine-card">
@@ -469,10 +483,22 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
-const salesSubmission = computed<any | null>(() => {
+const completedSubmissions = computed<any[]>(() => {
   const submissions = (ticket.value as any)?.node_submissions || []
-  return [...submissions].reverse().find((entry: any) => entry.node_type === 'sales_opportunity') || null
+  return submissions.filter((entry: any) => ['processing', 'sales_opportunity'].includes(entry.node_type))
+    .sort((a: any, b: any) => a.id - b.id)
 })
+function submissionFields(submission: any): Array<{ key: string; label: string; type: string; value: string }> {
+  return (submission.field_snapshot || []).flatMap((field: any) => {
+    if (field.type === 'attachment') return []
+    const value = field.storage_type === 'submission' ? submission.data?.[field.storage_key || field.key]
+      : field.storage_type === 'ticket_field' ? field.submitted_value
+        : field.storage_type === 'article' ? submission.article_body : undefined
+    if (value === null || value === undefined || value === '') return []
+    return [{ key: field.key, label: field.label, type: field.type,
+      value: typeof value === 'boolean' ? (value ? '是' : '否') : String(value) }]
+  })
+}
 const articlePlacement = computed(() => {
   const byLogId = new Map<number, any[]>()
   const logs = [...((ticket.value as any)?.state_logs || [])].sort((a: any, b: any) => a.id - b.id)
@@ -1440,6 +1466,7 @@ async function confirmCancel() {
   overflow-wrap: anywhere;
 }
 .sales-submission-opinion { grid-column: 1 / -1; }
+.submission-attachments { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 @media (max-width: 700px) { .sales-submission-fields { grid-template-columns: 1fr; } }
 
 

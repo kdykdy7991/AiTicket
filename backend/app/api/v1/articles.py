@@ -182,7 +182,7 @@ async def create_article(
 
     if type in {"reply", "note"}:
         from app.services.node_context import resolve_node_context
-        from app.services.node_form import resolve_form
+        from app.services.node_form import allows_process_note, resolve_form
         context = await resolve_node_context(db, ticket, user)
         node_form = await resolve_form(db, context) if context.node_type in ("processing", "phone_feedback", "sales_opportunity") else None
         if type == "reply" and node_form:
@@ -192,6 +192,8 @@ async def create_article(
                 raise HTTPException(409, detail="销售商机须通过处理表单提交并归档")
             if not node_form:
                 raise HTTPException(422, detail="当前节点不接受普通处理回复")
+            if not allows_process_note(node_form):
+                raise HTTPException(409, detail="当前节点请通过处理表单提交处理意见")
             if ticket.owner_id != user.id or ticket.state not in REPLY_ALLOWED_STATES:
                 raise HTTPException(403, detail="仅当前处理人可添加处理回复")
             if not body.strip():

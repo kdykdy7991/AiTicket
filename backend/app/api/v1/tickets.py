@@ -926,13 +926,13 @@ async def _compose_node_form(
     if not form:
         return None
     if node_type in ("processing", "phone_feedback", "sales_opportunity") and article_actions["can_reply"]:
-        # The sales form is the sole completion entry; other node forms allow process notes.
-        article_actions["can_note"] = node_type != "sales_opportunity"
+        from app.services.node_form import allows_process_note
+        article_actions["can_note"] = node_type != "sales_opportunity" and allows_process_note(form)
         article_actions["can_reply"] = False
         node_context["allowed_actions"] = [
             a for a in node_context["allowed_actions"] if a["action"] != "reply"
         ]
-        if node_type != "sales_opportunity":
+        if article_actions["can_note"]:
             node_context["allowed_actions"].append(
                 {"action": "note", "target_state": ticket.state, "label": "添加回复"}
             )

@@ -533,6 +533,21 @@ async def transition_permission_error(
             return None
         if allow_sales_intake and (ticket.is_opportunity or ticket.category_id == 2204) and ticket.creator_id == user.id:
             return None
+        steps = ticket.dispatch_chain_steps or []
+        step_index = ticket.dispatch_step_index
+        if (
+            step_index is not None and step_index < len(steps)
+            and steps[step_index].get("stage") == "phone_feedback"
+        ):
+            if ticket.dispatcher_id != user.id or ticket.skill_group_id is None:
+                return "仅当前售后致电反馈对接人可分派工单"
+            member = await db.scalar(select(UserSkillGroup.user_id).where(
+                UserSkillGroup.user_id == user.id,
+                UserSkillGroup.skill_group_id == ticket.skill_group_id,
+            ))
+            if member is not None:
+                return None
+            return "售后致电反馈对接人不属于当前责任部门"
         if not await is_dispatcher(db, user.id, ticket.skill_group_id):
             return "只有该部门的对接人可分派工单"
         return None
@@ -941,14 +956,31 @@ async def apply_transfer(
     ticket.dispatch_step_index = next_index
     ticket.skill_group_id = rx["skill_group_id"]
     ticket.handler_skill_group_id = rx["skill_group_id"]
-    if rx["dispatcher_id"] is not None:
-        ticket.dispatcher_id = rx["dispatcher_id"]
+    feedback_judger_id = None
+    if steps[next_index].get("stage") == "phone_feedback":
+        # 业务保障的问题判断由售后人员完成。回到售后致电反馈时，
+        # 由该判断人指派反馈人，而不是重新取售后组的默认对接人。
+        feedback_judger_id = await db.scalar(
+            select(TicketStateLog.operator_id)
+            .join(UserSkillGroup, UserSkillGroup.user_id == TicketStateLog.operator_id)
+            .where(
+                TicketStateLog.ticket_id == ticket.id,
+                TicketStateLog.action_type == "refine",
+                TicketStateLog.reason.like("分诊：业务保障 → %"),
+                UserSkillGroup.skill_group_id == rx["skill_group_id"],
+            )
+            .order_by(TicketStateLog.id)
+            .limit(1)
+        )
+    next_dispatcher_id = feedback_judger_id or rx["dispatcher_id"]
+    if next_dispatcher_id is not None:
+        ticket.dispatcher_id = next_dispatcher_id
     # 转派本步不设处理人（open→pending 会清空 owner），错配只可能出现在下一步
     # 分派——那里已校验处理人属于当时的 skill_group_id。此处再断言一次处方给出
     # 的对接人属于新落位部门，防 prescribe_dept 返回异常数据导致跨部门落位。
-    if rx["dispatcher_id"] is not None:
+    if next_dispatcher_id is not None:
         await _assert_user_in_department(
-            db, rx["dispatcher_id"], rx["skill_group_id"], "链上对接人"
+            db, next_dispatcher_id, rx["skill_group_id"], "链上对接人"
         )
 
     log = await apply_transition(
