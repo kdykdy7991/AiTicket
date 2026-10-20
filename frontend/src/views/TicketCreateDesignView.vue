@@ -14,7 +14,7 @@
         <div v-if="!isOpportunity" class="field"><label for="email">邮箱</label><input id="email" v-model.trim="form.email" type="email" placeholder="请输入邮箱" :class="{ invalid: errors.email }" /><small v-if="errors.email" class="error">{{ errors.email }}</small></div>
       </div></TicketFormSection>
       <TicketFormSection title="工单内容" icon="Document"><div class="grid content-grid">
-        <div v-if="isOpportunity" class="field"><label for="salesUser" class="required">销售人员</label><select id="salesUser" v-model.number="form.salesUserId" :class="{ invalid: errors.salesUserId }"><option :value="null" disabled>请选择销售人员</option><option v-for="person in salesUsers" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="errors.salesUserId" class="error">{{ errors.salesUserId }}</small></div>
+        <div v-if="isOpportunity || isReconciliation" class="field"><label for="salesUser" class="required">销售人员</label><select id="salesUser" v-model.number="form.salesUserId" :class="{ invalid: errors.salesUserId }"><option :value="null" disabled>请选择销售人员</option><option v-for="person in salesUsers" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="errors.salesUserId" class="error">{{ errors.salesUserId }}</small></div>
         <div v-if="!isOpportunity" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
         <div v-if="!isOpportunity" class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
         <div v-if="!isOpportunity && !rootCategory?.create_selectable" class="field"><label for="subcategory" class="required">细分分类</label><select id="subcategory" v-model="form.subcategory" :disabled="!form.category" :class="{ invalid: errors.subcategory }"><option value="" disabled hidden>{{ form.category ? '请选择可提交的分类' : '请先选择一级分类' }}</option><option v-for="v in subcategoryOptions" :key="v.id" :value="v.label">{{ v.label }}</option></select><small v-if="errors.subcategory" class="error">{{ errors.subcategory }}</small></div>
@@ -99,9 +99,11 @@ const selectedCategoryId = computed(() => rootCategory.value?.create_selectable
   : subcategoryOptions.value.find(c => c.label === form.subcategory)?.id)
 const numberRequired = computed(() => form.category === '业务运营' || form.category === '业务保障')
 const isOpportunity = computed(() => form.businessOpportunity === 'yes')
+const isReconciliation = computed(() => !isOpportunity.value && selectedCategoryId.value === 2204)
 const requiredFields = computed<(keyof TicketCreateDesignForm)[]>(() => {
   const fields: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'businessOpportunity', 'description']
   if (isOpportunity.value) return [...fields, 'contactPhone', 'salesUserId']
+  if (isReconciliation.value) fields.push('salesUserId')
   fields.push('category', 'priority')
   if (!rootCategory.value?.create_selectable) fields.push('subcategory')
   if (numberRequired.value) fields.push('satelliteNumber')
@@ -149,7 +151,7 @@ onMounted(async () => {
       form.category = (Object.keys(rootNames) as CategoryName[]).find(k => rootNames[k] === root?.name) || ''
       form.subcategory = subcategoryOptions.value.find(c => c.id === ticket.category_id)?.label || ''
       form.businessOpportunity = ticket.is_opportunity == null ? '' : ticket.is_opportunity ? 'yes' : 'no'
-      form.salesUserId = ticket.is_opportunity ? ticket.owner_id ?? null : null
+      form.salesUserId = ticket.is_opportunity || ticket.category_id === 2204 ? ticket.owner_id ?? null : null
       form.priority = (Object.keys(priorityCodes).find(k => priorityCodes[k] === ticket.priority)) || 'P4'
       form.description = ticket.description || ''
       form.faultTime = ticket.fault_occurred_at ? new Date(ticket.fault_occurred_at).toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16) : ''
@@ -170,7 +172,7 @@ function validate(): boolean {
     const value = form[key]
     if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) errors[key] = '请填写此项'
   }
-  if (isOpportunity.value && (!salesGroupId.value || !salesUsers.value.some(person => person.id === form.salesUserId))) errors.salesUserId = '请选择有效的销售人员'
+  if ((isOpportunity.value || isReconciliation.value) && (!salesGroupId.value || !salesUsers.value.some(person => person.id === form.salesUserId))) errors.salesUserId = '请选择有效的销售人员'
   if (!isOpportunity.value && form.subcategory && !subcategoryOptions.value.some(c => c.label === form.subcategory)) errors.subcategory = '请选择当前分类下可提交的细分分类'
   const phone = /^(1[3-9]\d{9}|0\d{2,3}-?\d{7,8})$/
   if (form.callerPhone && !phone.test(form.callerPhone)) errors.callerPhone = '请输入有效的手机号或固定电话'
@@ -189,8 +191,8 @@ function payload(isDraft: boolean) {
     contact_phone: form.contactPhone.trim() || null, customer_email: form.email.trim() || null,
     channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
     category_id: isOpportunity.value ? null : selectedCategoryId.value || null, description: form.description.trim(),
-    skill_group_id: isOpportunity.value ? salesGroupId.value : null,
-    sales_owner_id: isOpportunity.value ? form.salesUserId : null,
+    skill_group_id: isOpportunity.value || isReconciliation.value ? salesGroupId.value : null,
+    sales_owner_id: isOpportunity.value || isReconciliation.value ? form.salesUserId : null,
     dispatcher_id: null,
     complaint_level: !isOpportunity.value && form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
     satellite_number: isOpportunity.value ? null : form.satelliteNumber.trim() || null,

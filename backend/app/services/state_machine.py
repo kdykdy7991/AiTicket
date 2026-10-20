@@ -504,6 +504,7 @@ async def transition_permission_error(
     db: AsyncSession, ticket: Ticket, to_state: str, user: User,
     *, allow_phone_feedback_reply: bool = False, enforce_node: bool = True,
     allow_sales_intake: bool = False, allow_sales_completion: bool = False,
+    allow_reconciliation_handoff: bool = False,
 ) -> str | None:
     """身份/角色层面是否允许该状态变更：允许返回 None，否则返回错误文案。
 
@@ -528,7 +529,9 @@ async def transition_permission_error(
 
     # 分派：部门对接人
     if (from_state, to_state) == ("pending", "open"):
-        if allow_sales_intake and ticket.is_opportunity and ticket.creator_id == user.id:
+        if allow_reconciliation_handoff and ticket.category_id == 2204 and ticket.skill_group_id is not None:
+            return None
+        if allow_sales_intake and (ticket.is_opportunity or ticket.category_id == 2204) and ticket.creator_id == user.id:
             return None
         if not await is_dispatcher(db, user.id, ticket.skill_group_id):
             return "只有该部门的对接人可分派工单"
@@ -584,6 +587,7 @@ async def check_transition_permission(
     db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None,
     *, allow_phone_feedback_reply: bool = False,
     allow_sales_intake: bool = False, allow_sales_completion: bool = False,
+    allow_reconciliation_handoff: bool = False,
 ) -> None:
     """校验当前用户是否有权执行该状态变更（非法则抛 ForbiddenError / 422）。
 
@@ -607,6 +611,7 @@ async def check_transition_permission(
         allow_phone_feedback_reply=allow_phone_feedback_reply,
         allow_sales_intake=allow_sales_intake,
         allow_sales_completion=allow_sales_completion,
+        allow_reconciliation_handoff=allow_reconciliation_handoff,
     )
     if error is not None:
         raise ForbiddenError(error)
@@ -720,6 +725,13 @@ async def refine_capability(
     if ticket.category_id is None:
         out["refine_denied_reason"] = "工单未选择分类，无法分诊"
         return out
+    if ticket.category_id == 2301:
+        if ticket.state != "open" or ticket.owner_id is None:
+            out["refine_denied_reason"] = "请先由售后负责人指派售后人员"
+            return out
+        if ticket.owner_id != user.id and user.role != "admin":
+            out["refine_denied_reason"] = "仅被指派的售后人员可进行问题判断"
+            return out
     children = await category_children(db, ticket.category_id)
     if not children:
         out["refine_denied_reason"] = "该分类已是判断末级，无需分诊"
@@ -965,6 +977,7 @@ async def apply_transition(
     allow_intermediate_transfer: bool = False,
     allow_sales_intake: bool = False,
     allow_sales_completion: bool = False,
+    allow_reconciliation_handoff: bool = False,
 ) -> TicketStateLog | None:
     """单条工单状态流转的唯一执行入口。
 
@@ -1043,6 +1056,7 @@ async def apply_transition(
         allow_phone_feedback_reply=allow_intermediate_transfer,
         allow_sales_intake=allow_sales_intake,
         allow_sales_completion=allow_sales_completion,
+        allow_reconciliation_handoff=allow_reconciliation_handoff,
     )
 
     # 4. 原因必填

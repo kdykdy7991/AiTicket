@@ -23,6 +23,14 @@ from app.models.user import User
 
 from test_workflow_regression import _next_phone, action_sequence, as_user
 
+
+async def assign_after_sales(env, ticket_id):
+    response = await env["client"].patch(f"/api/v1/tickets/{ticket_id}", json={
+        "state": "open", "owner_id": env["aftersale_user"], "reason": "指派售后人员",
+    })
+    assert response.status_code == 200, response.text
+    return response.json()
+
 # 只插入用到的分类：2301 业务保障（L2）与其子级
 CATS = [
     (2301, None, "业务保障", 1, 1),
@@ -106,7 +114,17 @@ async def renv(client):
         return r.json()["data"]
 
     async def refine(tid, category_id, expect=200):
-        r = await c.post(f"/api/v1/tickets/{tid}/refine", json={"category_id": category_id})
+        current = (await c.get(f"/api/v1/tickets/{tid}")).json()
+        if current["category_id"] == 2301 and current["state"] == "pending":
+            assigned = await c.patch(f"/api/v1/tickets/{tid}", json={
+                "state": "open", "owner_id": ids["aftersale_user"],
+            })
+            assert assigned.status_code == 200, assigned.text
+        if current["category_id"] == 2301:
+            with as_user(ids["aftersale_user"], "handler"):
+                r = await c.post(f"/api/v1/tickets/{tid}/refine", json={"category_id": category_id})
+        else:
+            r = await c.post(f"/api/v1/tickets/{tid}/refine", json={"category_id": category_id})
         assert r.status_code == expect, r.text
         return r.json()["data"] if expect == 200 else r
 
@@ -136,7 +154,7 @@ async def test_create_writes_chain_snapshot(renv):
     assert t["dispatcher_id"] == renv["aftersale_user"]
 
 
-async def test_business_assurance_goes_directly_to_judgement(renv):
+async def test_business_assurance_requires_aftersale_assignment_before_judgement(renv):
     t = await renv["create_ticket"](
         skill_group_id=renv["sg_platform"],
         dispatcher_id=renv["platform_user"],
@@ -144,19 +162,57 @@ async def test_business_assurance_goes_directly_to_judgement(renv):
     assert t["skill_group_name"] == "售后"
     assert t["dispatcher_id"] == renv["aftersale_user"]
     detail = (await renv["client"].get(f"/api/v1/tickets/{t['id']}")).json()
-    assert detail["can_refine"] is True
-    assert not any(a["action"] == "dispatch" for a in detail["allowed_actions"])
+    assert detail["node_context"]["node_type"] == "assignment"
+    assert detail["can_refine"] is False
+    assert any(a["action"] == "dispatch" for a in detail["allowed_actions"])
+    blocked = await renv["client"].post(f"/api/v1/tickets/{t['id']}/refine", json={"category_id": 2302})
+    assert blocked.status_code == 403
     await renv["patch"](
-        t["id"], {"state": "open", "owner_id": renv["aftersale_user"]}, expect=403
+        t["id"], {"state": "open", "owner_id": renv["aftersale_user"]}
     )
+    with as_user(renv["aftersale_user"], "handler"):
+        assigned = (await renv["client"].get(f"/api/v1/tickets/{t['id']}")).json()
+        assert assigned["node_context"]["node_type"] == "triage"
+        assert assigned["can_refine"] is True
+
+
+async def test_only_assigned_aftersale_person_can_judge(renv):
+    factory = async_sessionmaker_for(renv["engine"])
+    async with factory() as db:
+        colleague = User(username="rf-aftersale-colleague", name="售后人员", password_hash="x", role="handler")
+        db.add(colleague)
+        await db.flush()
+        db.add(UserSkillGroup(user_id=colleague.id, skill_group_id=renv["sg_aftersale"], is_dispatcher=False))
+        colleague_id = colleague.id
+        await db.commit()
+
+    ticket = await renv["create_ticket"]()
+    with as_user(colleague_id, "handler"):
+        denied = await renv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
+            "state": "open", "owner_id": colleague_id,
+        })
+    assert denied.status_code == 403
+    with as_user(renv["aftersale_user"], "handler"):
+        assigned = await renv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
+            "state": "open", "owner_id": colleague_id, "reason": "指派售后人员",
+        })
+        assert assigned.status_code == 200, assigned.text
+        owner_blocked = await renv["client"].post(f"/api/v1/tickets/{ticket['id']}/refine", json={"category_id": 2302})
+        assert owner_blocked.status_code == 403
+    with as_user(colleague_id, "handler"):
+        detail = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
+        assert detail["node_context"]["node_type"] == "triage"
+        assert detail["can_refine"] is True
+        refined = await renv["client"].post(f"/api/v1/tickets/{ticket['id']}/refine", json={"category_id": 2302})
+        assert refined.status_code == 200, refined.text
 
 
 async def test_refine_switches_chain_and_dept(renv):
-    """pending 分诊：分类/链/部门切到子级，状态不变，留下 refine 自环日志。"""
+    """指派售后人员后分诊：分类/链/部门切到子级，留下 refine 自环日志。"""
     t = await renv["create_ticket"]()
     d = await renv["refine"](t["id"], 2302)
 
-    assert d["state"] == "pending"
+    assert d["state"] == "open"
     assert d["category_id"] == 2302
     assert d["skill_group_name"] == "平台运维组"
     assert d["dispatcher_id"] == renv["platform_user"]
@@ -165,7 +221,7 @@ async def test_refine_switches_chain_and_dept(renv):
     # 能力位随之更新：2302 是末级
     assert d["can_refine"] is False
 
-    assert await action_sequence(renv, t["id"]) == ["create", "refine"]
+    assert await action_sequence(renv, t["id"]) == ["create", "dispatch", "refine"]
     factory = async_sessionmaker_for(renv["engine"])
     async with factory() as s:
         log = (await s.execute(
@@ -174,15 +230,15 @@ async def test_refine_switches_chain_and_dept(renv):
                 TicketStateLog.action_type == "refine",
             )
         )).scalar_one()
-        assert log.from_state == "pending" and log.to_state == "pending"
+        assert log.from_state == "open" and log.to_state == "open"
         assert "业务保障" in log.reason and "应用平台" in log.reason
 
 
 async def test_return_after_refine_restores_category_and_department(renv):
     t = await renv["create_ticket"]()
     await renv["refine"](t["id"], 2302)
-    d = await renv["patch"](t["id"], {"state": "returned", "reason": "重新判断问题"})
-    assert d["state"] == "pending"
+    d = await renv["patch"](t["id"], {"state": "pending", "reason": "重新判断问题"})
+    assert d["state"] == "open"
     assert d["category_id"] == 2301
     assert d["skill_group_name"] == "售后"
     assert d["dispatcher_id"] == renv["aftersale_user"]

@@ -127,11 +127,15 @@ async def test_business_operations_parent_rejected_by_all_external_writes(cats_e
     })
     assert changed.status_code == 422
 
-    for category_id in (2203, 2204):
+    for category_id in (2203,):
         created = await c.post("/api/v1/tickets", json={
             **base, "customer_phone": _next_phone(), "category_id": category_id,
         })
         assert created.status_code == 201, created.text
+    reconciliation_without_sales = await c.post("/api/v1/tickets", json={
+        **base, "customer_phone": _next_phone(), "category_id": 2204,
+    })
+    assert reconciliation_without_sales.status_code == 422
 
     plain = await c.post("/api/v1/tickets", json={
         **base, "customer_phone": _next_phone(),

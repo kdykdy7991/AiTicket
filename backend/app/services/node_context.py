@@ -13,7 +13,7 @@ from app.models.ticket import Ticket
 from app.models.user import User
 from app.services.dispatch_chain import category_children, judging_department
 
-NodeType = Literal["intake", "triage", "processing", "phone_feedback", "closure", "sales_opportunity"]
+NodeType = Literal["intake", "assignment", "triage", "processing", "phone_feedback", "closure", "sales_opportunity"]
 
 
 class NodeContextConflict(ValueError):
@@ -65,6 +65,8 @@ async def derive_node_type(db: AsyncSession, ticket: Ticket) -> tuple[NodeType |
     elif ticket.state == "resolved":
         node_type = "closure"
     elif ticket.state in ("pending", "open", "on_hold"):
+        if ticket.category_id == 2301 and ticket.state == "pending" and department_code == "售后":
+            return "assignment", department_code, stage
         if ticket.is_opportunity:
             if ticket.category_id is not None or stage is not None:
                 raise NodeContextConflict("商机工单不应进入分类分派链")
@@ -87,6 +89,8 @@ async def derive_node_type(db: AsyncSession, ticket: Ticket) -> tuple[NodeType |
 
 def node_action_error(node_type: NodeType | None, action: str) -> str | None:
     """Filter candidate domain actions by duty; identity checks remain elsewhere."""
+    if node_type == "assignment" and action in {"refine", "reply", "resolve", "hold", "transfer"}:
+        return "请先由售后负责人指派售后人员，再进行问题判断"
     if node_type == "triage" and action in {"dispatch", "reply", "resolve", "hold", "transfer"}:
         return "当前节点须先细化问题分类，不能分派或提交处理结果"
     if node_type == "phone_feedback" and action in {"refine", "transfer", "resolve", "hold"}:

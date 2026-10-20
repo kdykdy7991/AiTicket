@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.api.v1 import casdoor
 from app.core.config import settings
+from app.core.security import hash_password
 from app.models.user import User
 
 
@@ -139,3 +140,29 @@ async def test_password_login_requires_matching_bound_subject(client, monkeypatc
     assert denied.status_code == 401
     missing = await http.post("/api/v1/auth/login", json={"username": "missing", "password": "anything"})
     assert missing.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_complaint_placeholder_can_use_local_password_with_casdoor_enabled(client, monkeypatch):
+    http, _, engine = client
+    monkeypatch.setattr(settings, "CASDOOR_ISSUER", "http://casdoor.test")
+    monkeypatch.setattr(settings, "CASDOOR_CLIENT_ID", "ticket-client")
+    monkeypatch.setattr(settings, "CASDOOR_CLIENT_SECRET", "server-secret")
+    monkeypatch.setattr(settings, "CASDOOR_REDIRECT_ORIGINS", "http://localhost:5173")
+    Session = async_sessionmaker(engine, class_=AsyncSession)
+    async with Session() as db:
+        db.add(User(username="服务投诉协调人占位账号", name="服务投诉协调人",
+                    role="handler", group_id=None, password_hash=hash_password("test-password"),
+                    local_login_enabled=True))
+        await db.commit()
+
+    payload = {"username": "服务投诉协调人占位账号", "password": "test-password"}
+    good = await http.post("/api/v1/auth/login", json=payload)
+    assert good.status_code == 200, good.text
+    assert good.json()["user"]["username"] == payload["username"]
+    wrong = await http.post("/api/v1/auth/login", json={**payload, "password": "wrong-password"})
+    assert wrong.status_code == 401
+    other_unbound = await http.post("/api/v1/auth/login", json={
+        "username": "test-dispatcher", "password": "test-password",
+    })
+    assert other_unbound.status_code == 401

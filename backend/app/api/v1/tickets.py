@@ -737,11 +737,17 @@ async def submit_draft(
     if ticket.category_id is not None and not await is_valid_ticket_category(db, ticket.category_id):
         raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
 
-    if ticket.is_opportunity:
+    if ticket.is_opportunity or ticket.category_id == 2204:
         sales_group = await _sales_group_for_owner(db, ticket.owner_id)
         ticket.skill_group_id = sales_group.id
         ticket.handler_skill_group_id = sales_group.id
         ticket.dispatcher_id = None
+        if ticket.category_id == 2204:
+            ticket.dispatch_chain_steps = [
+                {"order": 1, "department_code": "销售"},
+                {"order": 2, "department_code": "财务"},
+            ]
+            ticket.dispatch_step_index = 0
     elif not ticket.dispatcher_id:
         raise HTTPException(422, detail="提交前必须指定部门对接人")
 
@@ -764,7 +770,7 @@ async def submit_draft(
 
     # 初始状态落库（None → pending）：与建单共用执行入口
     await apply_initial_state(db, ticket, to_state="pending", operator=user)
-    if ticket.is_opportunity:
+    if ticket.is_opportunity or ticket.category_id == 2204:
         await apply_transition(db, ticket, to_state="open", operator=user,
                                owner_id=ticket.owner_id, allow_sales_intake=True)
     await db.commit()
@@ -839,8 +845,17 @@ async def update_draft(
     ticket.group_id = body.group_id or user.group_id
     ticket.skill_group_id = body.skill_group_id
     ticket.handler_skill_group_id = body.handler_skill_group_id
-    ticket.dispatcher_id = None if body.is_opportunity else body.dispatcher_id
-    ticket.owner_id = body.sales_owner_id if body.is_opportunity else None
+    ticket.dispatcher_id = None if body.is_opportunity or body.category_id == 2204 else body.dispatcher_id
+    ticket.owner_id = body.sales_owner_id if body.is_opportunity or body.category_id == 2204 else None
+    if body.category_id == 2204 and not body.is_opportunity:
+        ticket.dispatch_chain_steps = [
+            {"order": 1, "department_code": "销售"},
+            {"order": 2, "department_code": "财务"},
+        ]
+        ticket.dispatch_step_index = 0
+    else:
+        ticket.dispatch_chain_steps = None
+        ticket.dispatch_step_index = None
     ticket.is_duplicate = body.is_duplicate
     ticket.duplicate_reason = body.duplicate_reason
 
@@ -1170,6 +1185,26 @@ async def submit_node_form(
     data, ticket_updates, article_values, snapshot = await validate_submission(
         db, form, ticket, None, body["values"],
     )
+    finance_owner_id: int | None = None
+    if ticket.category_id == 2204 and context.department_code == "销售":
+        expected_person = {"时空道宇": "姜敏", "青岛上合": "朱景升"}.get(data.get("finance_company"))
+        if expected_person is None or data.get("finance_person") != expected_person:
+            raise HTTPException(422, detail="财务所属公司与财务人员不匹配")
+        finance_group = (await db.execute(select(SkillGroup).where(SkillGroup.name == "财务"))).scalar_one_or_none()
+        if finance_group is None:
+            raise HTTPException(422, detail="财务部门尚未配置")
+        now = datetime.now(timezone.utc)
+        finance_person = (await db.execute(select(User).join(
+            UserSkillGroup, UserSkillGroup.user_id == User.id,
+        ).where(
+            User.name == expected_person, User.is_active.is_(True),
+            UserSkillGroup.skill_group_id == finance_group.id,
+            or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
+            or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
+        ))).scalar_one_or_none()
+        if finance_person is None:
+            raise HTTPException(422, detail="所选财务人员不是当前有效的财务部门成员")
+        finance_owner_id = finance_person.id
     if not article_values.get("body", "").strip():
         raise HTTPException(422, detail="节点反馈正文必填")
     # The reply endpoint uses this log as the completed node's timeline key.
@@ -1194,6 +1229,10 @@ async def submit_node_form(
         log = await apply_transition(db, ticket, to_state="resolved", operator=user,
                                      allow_intermediate_transfer=True,
                                      allow_sales_completion=context.node_type == "sales_opportunity")
+        if finance_owner_id is not None:
+            await apply_transition(db, ticket, to_state="open", operator=user,
+                                   owner_id=finance_owner_id, dispatcher_id=finance_owner_id,
+                                   allow_reconciliation_handoff=True)
         if context.node_type == "sales_opportunity":
             log = await apply_transition(db, ticket, to_state="archived", operator=user,
                                          allow_sales_completion=True)
@@ -1436,7 +1475,8 @@ async def create_ticket(
                 body.satellite_number = None
                 body.expected_result = None
 
-    if body.is_opportunity and not body.is_draft:
+    is_reconciliation = body.category_id == 2204 and not body.is_opportunity
+    if (body.is_opportunity or is_reconciliation) and not body.is_draft:
         sales_group = await _sales_group_for_owner(db, body.sales_owner_id)
         body.skill_group_id = sales_group.id
         body.handler_skill_group_id = sales_group.id
@@ -1450,8 +1490,13 @@ async def create_ticket(
     chain_steps: list[dict] | None = None
     # 是否需要回访由分类规则决定，与「是否已完成回访」无关（callback_policy）。
     callback_required = await resolve_callback_required(db, body.category_id)
+    if is_reconciliation:
+        chain_steps = [
+            {"order": 1, "department_code": "销售"},
+            {"order": 2, "department_code": "财务"},
+        ]
 
-    if body.category_id is not None:
+    if body.category_id is not None and not is_reconciliation:
         from app.services.dispatch_chain import resolve_responsibility
         resp = await resolve_responsibility(db, body.category_id)
         chain_steps = resp.get("chain_steps")
@@ -1497,9 +1542,9 @@ async def create_ticket(
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
             handler_skill_group_id=body.handler_skill_group_id,
-            owner_id=body.sales_owner_id if body.is_opportunity else None,
+            owner_id=body.sales_owner_id if (body.is_opportunity or is_reconciliation) else None,
             creator_id=user.id, first_owner_id=None,
-            dispatcher_id=None if body.is_opportunity else body.dispatcher_id,
+            dispatcher_id=None if (body.is_opportunity or is_reconciliation) else body.dispatcher_id,
             is_duplicate=body.is_duplicate,
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
@@ -1549,7 +1594,7 @@ async def create_ticket(
             }
 
         # Dispatcher required for formal tickets
-        if not body.dispatcher_id and not body.is_opportunity:
+        if not body.dispatcher_id and not (body.is_opportunity or is_reconciliation):
             detail = "所选分类尚未配置对接人，请联系管理员" if body.intake_form else "建单时必须指定部门对接人"
             raise HTTPException(422, detail=detail)
 
@@ -1572,7 +1617,7 @@ async def create_ticket(
             handler_skill_group_id=body.handler_skill_group_id,
             owner_id=None,
             creator_id=user.id, first_owner_id=None,
-            dispatcher_id=body.dispatcher_id,
+            dispatcher_id=None if is_reconciliation else body.dispatcher_id,
             is_duplicate=body.is_duplicate,
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
@@ -1591,7 +1636,7 @@ async def create_ticket(
     # 初始状态日志：仅正式工单记录（None → pending），草稿不写日志
     if not body.is_draft:
         await apply_initial_state(db, ticket, to_state="pending", operator=user, body=body)
-        if body.is_opportunity:
+        if body.is_opportunity or is_reconciliation:
             await apply_transition(db, ticket, to_state="open", operator=user,
                                    owner_id=body.sales_owner_id, allow_sales_intake=True)
 

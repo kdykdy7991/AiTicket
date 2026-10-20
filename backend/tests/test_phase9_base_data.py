@@ -195,10 +195,13 @@ async def test_phase9_seed_keeps_only_complaint_placeholder(phase9_env):
     await _seed_phase9_directly(engine)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
-        usernames = (await s.execute(
-            select(User.username).where(User.id >= 200, User.id <= 214)
+        users = (await s.execute(
+            select(User).where(User.id >= 200, User.id <= 214)
         )).scalars().all()
-    assert usernames == ["v2_dispatcher_complaint"]
+    assert len(users) == 1
+    assert users[0].username == "服务投诉协调人占位账号"
+    assert users[0].role == "handler" and users[0].group_id is None
+    assert users[0].local_login_enabled is True
 
 
 async def test_phase9_seed_keeps_only_complaint_rule(phase9_env):
@@ -256,7 +259,7 @@ async def test_phase9_seed_resolves_formal_chains_and_complaint_fallback(phase9_
     expectations = {
         1202: "品牌传播与大客户", 1203: "产品", 1204: "市场生态部",
         2301: "售后", 2311: "软件开发组", 2312: "测运控组",
-        2313: "整星产品", 2203: "市场生态部", 2204: "经营管理部",
+        2313: "整星产品", 2203: "市场生态部", 2204: "销售",
     }
     async with factory() as s:
         for cat_id, department in expectations.items():

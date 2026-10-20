@@ -17,7 +17,7 @@ from app.models.user import User
 from app.services.node_context import resolve_node_context
 from app.services.node_form import resolve_form
 from scripts.seed_triage_form import FIELDS
-from test_refine import async_sessionmaker_for, renv
+from test_refine import assign_after_sales, async_sessionmaker_for, renv
 from test_workflow_regression import as_user
 
 
@@ -60,6 +60,7 @@ async def test_triage_schema_submit_route_and_history(renv):
     form_id = await install_form(renv)
     c = renv["client"]
     ticket = await renv["create_ticket"]()
+    await assign_after_sales(renv, ticket["id"])
     tid = ticket["id"]
     detail = (await c.get(f"/api/v1/tickets/{tid}")).json()
     assert detail["node_context"]["node_type"] == "triage"
@@ -75,7 +76,7 @@ async def test_triage_schema_submit_route_and_history(renv):
     assert result.status_code == 200, result.text
     data = result.json()["data"]
     assert data["category_id"] == 2310
-    assert data["state"] == "pending"
+    assert data["state"] == "open"
     assert data["skill_group_name"] == "星座大系统负责人"
     assert data["dispatch_chain_steps"] == [{"order": 1, "department_code": "星座大系统负责人"}]
     assert data["node_context"]["node_type"] == "triage"
@@ -117,6 +118,7 @@ async def test_terminal_sn_is_ticket_field_and_failed_refine_rolls_back(renv):
         await s.commit()
     c = renv["client"]
     ticket = await renv["create_ticket"]()
+    await assign_after_sales(renv, ticket["id"])
     tid = ticket["id"]
     terminal = (await c.get(f"/api/v1/tickets/{tid}/current-form", params={"target_category_id": 2321})).json()
     visible = {f["field_key"] for f in terminal["fields"] if f["visible"]}
@@ -142,6 +144,7 @@ async def test_permission_version_and_binding_conflict(renv):
     form_id = await install_form(renv)
     c = renv["client"]
     ticket = await renv["create_ticket"]()
+    await assign_after_sales(renv, ticket["id"])
     tid = ticket["id"]
     with as_user(renv["platform_user"], "handler"):
         denied = await c.post(f"/api/v1/tickets/{tid}/triage-submit", json=payload(form_id, initial_opinion="越权"))
@@ -162,6 +165,7 @@ async def test_permission_version_and_binding_conflict(renv):
 async def test_ancestor_binding_exact_override_and_published_history(renv):
     form_id = await install_form(renv)
     ticket = await renv["create_ticket"]()
+    await assign_after_sales(renv, ticket["id"])
     factory = async_sessionmaker_for(renv["engine"])
     async with factory() as s:
         current = await s.get(Ticket, ticket["id"])
@@ -189,6 +193,7 @@ async def test_ancestor_binding_exact_override_and_published_history(renv):
 async def test_refine_failure_rolls_back_submission_and_ticket_field(renv):
     form_id = await install_form(renv)
     ticket = await renv["create_ticket"]()
+    await assign_after_sales(renv, ticket["id"])
     tid = ticket["id"]
     with patch("app.api.v1.tickets.apply_refine", side_effect=RuntimeError("injected failure")):
         with pytest.raises(RuntimeError, match="injected failure"):
@@ -205,6 +210,7 @@ async def test_refine_failure_rolls_back_submission_and_ticket_field(renv):
 async def test_parallel_triage_submissions_flow_only_once(renv):
     form_id = await install_form(renv)
     ticket = await renv["create_ticket"]()
+    await assign_after_sales(renv, ticket["id"])
     tid = ticket["id"]
     body = payload(form_id, 2322, initial_opinion="并发核查")
     responses = await asyncio.gather(*(

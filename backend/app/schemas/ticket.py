@@ -35,7 +35,7 @@ class TicketCreate(BaseModel):
     skill_group_id: int | None = None
     handler_skill_group_id: int | None = None  # 专业处理部门（Phase 4 新增，可由路由规则自动填）
     dispatcher_id: int | None = None  # 部门对接人（正式提交必填）
-    sales_owner_id: int | None = None  # 商机建单时选择的销售处理人；不持久化为对接人
+    sales_owner_id: int | None = None  # 商机或业财对账建单时选择的销售处理人；不持久化为对接人
     is_duplicate: bool = False
     duplicate_reason: str | None = None
     is_draft: bool = False
@@ -160,7 +160,7 @@ class AllowedAction(BaseModel):
 
 class NodeContextOut(BaseModel):
     ticket_id: int
-    node_type: Literal["intake", "triage", "processing", "phone_feedback", "closure", "sales_opportunity"] | None
+    node_type: Literal["intake", "assignment", "triage", "processing", "phone_feedback", "closure", "sales_opportunity"] | None
     category_id: int | None
     department_id: int | None
     department_code: str | None

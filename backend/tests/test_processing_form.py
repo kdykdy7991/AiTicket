@@ -249,7 +249,7 @@ async def test_hardware_after_sales_and_star_leaf_processing(tenv):
 async def test_triage_node_cannot_complete_processing(renv):
     form_id = await install_form(renv)
     ticket = await renv["create_ticket"]()
-    assert (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()["node_context"]["node_type"] == "triage"
+    assert (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()["node_context"]["node_type"] == "assignment"
     body = request(ticket, form_id)
     body["expected_state"] = "pending"
     response = await renv["client"].post(f"/api/v1/tickets/{ticket['id']}/node-submit",

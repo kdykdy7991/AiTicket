@@ -20,9 +20,9 @@ async def _detail(env, ticket_id):
 async def test_assurance_triage_and_hardware_processing_same_department(renv):
     ticket = await renv["create_ticket"]()
     first = await _detail(renv, ticket["id"])
-    assert first["node_context"]["node_type"] == "triage"
+    assert first["node_context"]["node_type"] == "assignment"
     assert first["node_context"]["department_code"] == "售后"
-    assert "refine" in {a["action"] for a in first["node_context"]["allowed_actions"]}
+    assert "dispatch" in {a["action"] for a in first["node_context"]["allowed_actions"]}
 
     refined = await renv["refine"](ticket["id"], 2322)
     assert refined["node_context"]["node_type"] == "processing"
@@ -40,7 +40,7 @@ async def test_triage_rejects_direct_dispatch_and_reply_even_for_admin(renv):
         f"/api/v1/tickets/{ticket['id']}",
         json={"state": "open", "owner_id": renv["aftersale_user"]},
     )
-    assert direct_dispatch.status_code == 403
+    assert direct_dispatch.status_code == 200
     # Model an older open ticket at a judgement node: admin still cannot
     # bypass refinement with a direct resolve or ordinary reply.
     await set_existing_open_ticket(renv, ticket["id"])
@@ -64,7 +64,7 @@ async def test_refine_to_other_department_and_return_recompute_node(renv):
     assert refined["node_context"]["node_type"] == "processing"
     assert refined["node_context"]["department_code"] == "平台运维组"
 
-    await renv["patch"](ticket["id"], {"state": "returned", "reason": "重新判断"})
+    await renv["patch"](ticket["id"], {"state": "pending", "reason": "重新判断"})
     restored = await _detail(renv, ticket["id"])
     assert restored["node_context"]["node_type"] == "triage"
     assert restored["node_context"]["category_id"] == 2301
@@ -133,7 +133,7 @@ async def test_node_does_not_depend_on_viewer_but_actions_do(renv):
     outsider = await _detail(renv, ticket["id"])
     with as_user(999999, "agent"):
         other = await _detail(renv, ticket["id"])
-    assert outsider["node_context"]["node_type"] == other["node_context"]["node_type"] == "triage"
+    assert outsider["node_context"]["node_type"] == other["node_context"]["node_type"] == "assignment"
     assert "refine" not in {a["action"] for a in other["node_context"]["allowed_actions"]}
 
 
@@ -167,7 +167,7 @@ async def test_constellation_triage_then_core_network_processing(renv):
     assert core["node_context"]["department_code"] == "软件开发组"
     with as_user(dev.id, "handler"):
         core_view = await _detail(renv, ticket["id"])
-        assert "dispatch" in {a["action"] for a in core_view["node_context"]["allowed_actions"]}
+        assert "resolve" in {a["action"] for a in core_view["node_context"]["allowed_actions"]}
 
 
 async def test_invalid_chain_step_returns_explicit_conflict(tenv):

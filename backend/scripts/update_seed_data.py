@@ -25,6 +25,9 @@ from scripts.seed_phone_feedback_form import seed_phone_feedback_form
 from scripts.seed_processing_form import seed_processing_form
 from scripts.seed_sales_opportunity_form import seed_sales_opportunity_form
 from scripts.seed_triage_form import seed_triage_form
+from scripts.seed_package_change_review_form import seed_package_change_review_form
+from scripts.seed_package_change_execute_form import seed_package_change_execute_form
+from scripts.seed_v016_opinion_forms import seed_v016_opinion_forms
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql+asyncpg://skdy:skdy123@localhost:5433/skdy_ticket")
 
@@ -154,6 +157,9 @@ async def main() -> None:
     for name, seed in (
         ("triage", seed_triage_form),
         ("processing", seed_processing_form),
+        ("package_change_review", seed_package_change_review_form),
+        ("package_change_execute", seed_package_change_execute_form),
+        ("v016_opinion", seed_v016_opinion_forms),
         ("phone_feedback", seed_phone_feedback_form),
         ("closure", seed_closure_form),
         ("sales_opportunity", seed_sales_opportunity_form),

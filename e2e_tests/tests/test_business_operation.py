@@ -2,7 +2,7 @@
 
 V0.21 链:
   2203 套餐变更 → 链 [市场生态部, 业务支撑组] (审核→执行,两步)
-  2204 业财对账 → 链 [经营管理部, 财务]       (审核→开票,两步)
+  2204 业财对账 → 客服指定销售 → 销售选公司及财务人员
 
 建单落链首部门为 skill_group/handler_skill_group,dispatcher=链首
 部门对接人;期望值从 /routing-rules/resolve 动态取,不硬编码姓名。
@@ -146,14 +146,53 @@ def test_plan_change_business_operation(
 def test_finance_reconciliation_business_operation(
     e2e_client, token, batch_id, result_collector
 ):
-    """Scenario 05 — 业财对账 (2204) → 链 [经营管理部, 财务] → resolved。"""
-    _run_business_op_scenario(
-        scenario_label="05 业财对账",
-        category_name="业财对账",
-        batch_id=batch_id,
-        client=e2e_client,
-        token=token,
-        result_collector=result_collector,
-        customer_suffix="业财对账",
-        expected_chain=["经营管理部", "财务"],
+    """Scenario 05 — 销售填写对账信息并指定时空道宇财务姜敏。"""
+    import json
+    import os
+
+    cat = helpers.find_category_by_name(e2e_client, token, "业财对账")
+    assert cat is not None
+    users = helpers.list_users(e2e_client, token)
+    sales = next(user for user in users if user["name"] == "陈可意")
+    finance = next(user for user in users if user["name"] == "姜敏")
+    customer_name = f"E2E-业财对账-{batch_id}"
+    payload = helpers.base_ticket_payload(
+        customer_name=customer_name, description="业财对账，请销售核对后交财务",
+        category_id=cat["id"], extra={"sales_owner_id": sales["id"]},
     )
+    ticket = helpers.create_ticket(e2e_client, token, payload)
+    assert ticket["state"] == "open" and ticket["owner_id"] == sales["id"]
+    login = e2e_client.post(
+        f"{helpers.API_BASE}/api/v1/auth/login",
+        json={"username": "chenkeyi", "password": os.environ.get("E2E_SALES_PASSWORD", "skdy123")},
+    )
+    login.raise_for_status()
+    sales_token = login.json()["access_token"]
+    detail = helpers.get_ticket(e2e_client, sales_token, ticket["id"])
+    form = detail["current_form"]
+    assert form["code"] == "reconciliation_sales_v1"
+    result = e2e_client.post(
+        f"{helpers.API_BASE}/api/v1/tickets/{ticket['id']}/node-submit",
+        headers=helpers.auth_headers(sales_token),
+        data={"payload": json.dumps({
+            "form_definition_id": form["form_definition_id"], "form_version": form["version"],
+            "expected_category_id": cat["id"], "expected_department_id": detail["skill_group_id"],
+            "expected_dispatch_step_index": 0, "expected_state": "open",
+            "values": {
+                "reconciliation_customer_name": customer_name,
+                "finance_company": "时空道宇", "finance_person": "姜敏",
+                "processing_opinion": "销售已核对，请财务处理",
+            },
+        }, ensure_ascii=False)},
+    )
+    result.raise_for_status()
+    handed_off = result.json()["data"]
+    assert handed_off["state"] == "open"
+    assert handed_off["owner_id"] == finance["id"]
+    assert handed_off["dispatch_step_index"] == 1
+    result_collector.append(ScenarioResult(
+        scenario="05 业财对账", ticket_number=ticket.get("number"), ticket_id=ticket["id"],
+        category=f"{cat['id']} {cat['name']}", state=handed_off["state"],
+        dispatcher="陈可意", owner="姜敏", result="PASS",
+        extra={"chain": ["销售", "财务"]},
+    ))

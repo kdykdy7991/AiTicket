@@ -20,6 +20,7 @@ class User(Base):
     group_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("groups.id", ondelete="SET NULL"))
     is_group_leader: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    local_login_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     # 会话版本号：每次登录 +1，旧会话的 JWT（版本落后）随之失效，
     # 实现"一个账号同时只能一人在线"（后登录者顶掉前者）
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

@@ -360,7 +360,7 @@ V2_SKILL_GROUPS = [
 #   - 协调人：is_dispatcher=True
 #   - 专业处理人：is_dispatcher=False
 V2_USERS = [
-    (200, "v2_dispatcher_complaint",  "服务投诉协调人",   "agent", 1, False, _SKDY_HASH),
+    (200, "服务投诉协调人占位账号",  "服务投诉协调人",   "handler", None, False, _SKDY_HASH),
 ]
 
 # (user_id, skill_group_id, is_dispatcher)
@@ -440,8 +440,8 @@ DISPATCH_CHAINS: list[tuple[int, list[str], str]] = [
     (1204, ["市场生态部"],         "咨询/渠道/代理合作：单步直达"),
     (2102, ["值班组"],             "一般投诉：值班组承接（人员按班次维护）"),
     (2203, ["市场生态部", "业务支撑组"], "套餐变更：审核→执行，两步"),
-    (2204, ["经营管理部", "财务"],       "业财对账：审核→开票，两步"),
-    (2301, ["售后"],               "业务保障：客服判到此级，售后在此分诊（L2 四选一）"),
+    (2204, ["销售", "财务"],       "业财对账：客服指定销售→销售指定财务"),
+    (2301, ["售后"],               "业务保障：张华先指派售后人员，再由所选人员分诊（L2 四选一）"),
     (2302, ["平台运维组", "售后"], "应用平台处理后由售后致电反馈"),
     (2310, ["星座大系统负责人"],   "售后分诊到此，负责人在此再判断（L3 三选一）"),
     (2311, ["软件开发组", "售后"], "核心网处理后由售后致电反馈"),
@@ -611,6 +611,13 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
                 for u in V2_USERS
             ],
         )
+        # 保留固定 ID 与历史工单关联，重复播种时也修正旧占位账号属性。
+        await db.execute(text("""
+            UPDATE users SET username = '服务投诉协调人占位账号', name = '服务投诉协调人',
+                role = 'handler', group_id = NULL, local_login_enabled = TRUE,
+                updated_at = :now
+            WHERE id = 200 AND username IN ('v2_dispatcher_complaint', '服务投诉协调人占位账号')
+        """), {"now": now})
 
         print("[Phase 9] Seeding v2 user_skill_groups...")
         await db.execute(
@@ -807,6 +814,8 @@ async def seed_node_forms() -> None:
     from scripts.seed_package_change_review_form import seed_package_change_review_form
     from scripts.seed_package_change_execute_form import seed_package_change_execute_form
     from scripts.seed_sales_opportunity_form import seed_sales_opportunity_form
+    from scripts.seed_reconciliation_form import seed_reconciliation_form
+    from scripts.seed_v016_opinion_forms import seed_v016_opinion_forms
     from scripts.seed_triage_form import seed_triage_form
     from scripts.seed_constellation_triage_form import seed_constellation_triage_form
 
@@ -817,7 +826,8 @@ async def seed_node_forms() -> None:
                      seed_processing_form, seed_package_change_review_form,
                      seed_package_change_execute_form,
                      seed_phone_feedback_form, seed_closure_form, seed_closure_v4_form,
-                     seed_sales_opportunity_form):
+                     seed_sales_opportunity_form, seed_reconciliation_form,
+                     seed_v016_opinion_forms):
             await seed(factory)
     finally:
         await local_engine.dispose()

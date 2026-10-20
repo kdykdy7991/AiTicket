@@ -30,8 +30,10 @@
           <div v-if="article.body" class="node-reply-body">{{ article.body }}</div>
           <div v-if="article.append_reason" class="node-record-note">补充原因：{{ article.append_reason }}</div>
           <div v-if="article.attachments?.length" class="node-attachments">
-            <a v-for="att in article.attachments" :key="att.id" :href="att.url" target="_blank" :title="att.original_filename">
-              <img :src="att.url" :alt="att.original_filename" />
+            <a v-for="att in article.attachments" :key="att.id" :href="att.url" target="_blank"
+               rel="noopener noreferrer" :title="att.original_filename">
+              <img v-if="att.content_type?.startsWith('image/')" :src="att.url" :alt="att.original_filename" />
+              <span v-else class="file-attachment"><strong>{{ att.content_type === 'application/pdf' ? 'PDF' : '文件' }}</strong><span>{{ att.original_filename }}</span></span>
             </a>
           </div>
         </div>
@@ -131,6 +133,7 @@ const STATE_FALLBACK: Record<string, string> = {
 
 function actionName(log: TicketStateLog): string {
   const t = log.action_type || ''
+  if (t === 'dispatch' && log.reason === '指派售后人员') return '指派售后人员'
   if (t === 'transfer' && log.reason?.includes('售后致电反馈')) return '流转至售后致电反馈'
   if (ACTION_NAMES[t]) return ACTION_NAMES[t]
   const st = log.to_state_key || ''
@@ -176,6 +179,12 @@ const currentStage = computed(() => {
   const enteredAt = nodes.value[nodes.value.length - 1]?.ts || ''
   const steps = props.ticket?.dispatch_chain_steps || []
   const isPhoneFeedback = steps[props.ticket?.dispatch_step_index]?.stage === 'phone_feedback'
+  if (props.ticket?.node_context?.node_type === 'assignment' && state === 'pending') {
+    return { title: '待指派售后人员', personLabel: '售后负责人', person: props.currentDispatcherName || '', enteredAt }
+  }
+  if (props.ticket?.category_id === 2301 && state === 'open') {
+    return { title: '待售后问题判断', personLabel: '售后人员', person: props.currentOwnerName || '', enteredAt }
+  }
   if (isPhoneFeedback && state === 'pending') return { title: '待指派售后致电反馈人', personLabel: '对接人', person: props.currentDispatcherName || '', enteredAt }
   if (isPhoneFeedback && state === 'open') return { title: '待售后致电反馈', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }
   if (state === 'pending') return { title: '待分派处理人', personLabel: '对接人', person: props.currentDispatcherName || '', enteredAt }
@@ -285,6 +294,9 @@ const currentStage = computed(() => {
 .closure-badge { padding: 1px 7px; border-radius: var(--radius-full); background: var(--color-primary-ghost); color: var(--color-primary); font-size: 11px; }
 .node-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .node-attachments img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-border-light); }
+.file-attachment { display: flex; align-items: center; gap: 6px; max-width: 240px; min-height: 38px; padding: 6px 9px; border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); color: var(--color-text-primary); font-size: 12px; }
+.file-attachment strong { color: #b42318; font-size: 11px; }
+.file-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .empty {
   font-size: 13px;

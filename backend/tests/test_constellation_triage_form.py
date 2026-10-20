@@ -51,6 +51,8 @@ async def setup_triage(env):
         lead_id = lead.id
     await seed_constellation_triage_form(factory)
     ticket = await env["create_ticket"]()
+    from test_refine import assign_after_sales
+    await assign_after_sales(env, ticket["id"])
     first = await env["client"].post(f"/api/v1/tickets/{ticket['id']}/triage-submit",
                                      json=triage_payload(after_sales_id, 2310, initial_opinion="售后初查"))
     assert first.status_code == 200, first.text

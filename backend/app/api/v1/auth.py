@@ -37,7 +37,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
             detail="用户名或密码错误",
         )
 
-    if _configured() and user.role != "admin":
+    if _configured() and user.role != "admin" and not user.local_login_enabled:
         if not user.casdoor_subject or user.casdoor_issuer != settings.CASDOOR_ISSUER.rstrip("/"):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
         subject = await verify_password_subject(body.username, body.password)

@@ -16,6 +16,7 @@ from app.models.ticket import Article, ArticleAttachment, Ticket
 from app.models.user import User
 from scripts.seed_package_change_execute_form import seed_package_change_execute_form
 from scripts.seed_package_change_review_form import seed_package_change_review_form
+from scripts.seed_v016_opinion_forms import seed_v016_opinion_forms
 from test_processing_form import install_form, request
 from test_transfer import tenv
 from test_workflow_regression import as_user
@@ -45,6 +46,7 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
 
     await seed_package_change_review_form(factory)
     await seed_package_change_execute_form(factory)
+    await seed_v016_opinion_forms(factory)
     ticket = await tenv["create_ticket"](category_id=2203)
     assert ticket["category_id"] == 2203
     assert ticket["skill_group_name"] == "市场生态部"
@@ -93,9 +95,10 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
     with as_user(executor_id, "handler"):
         execution_detail = await tenv["get"](ticket["id"])
         execution_form = execution_detail["current_form"]
-        assert execution_form["code"] == "package_change_execute_v1"
+        assert execution_form["code"] == "package_change_execute_v2"
         assert execution_form["form_definition_id"] != base_form_id
         assert {field["field_key"] for field in execution_form["fields"]} == {"processing_opinion", "related_materials"}
+        assert next(field for field in execution_form["fields"] if field["field_key"] == "processing_opinion")["label"] == "处理意见（结论）"
         hold = await tenv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
             "state": "on_hold", "reason": "等待操作窗口", "hold_until": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()})
         assert hold.status_code == 200, hold.text
@@ -104,6 +107,7 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
             "state": "open", "reason": "开始操作"})
         assert resume.status_code == 200, resume.text
         payload = request(next_ticket, execution_form["form_definition_id"])
+        payload["form_version"] = execution_form["version"]
         payload["values"] = {"processing_opinion": "已完成套餐变更操作"}
         missing = dict(payload, values={})
         invalid = await tenv["client"].post(f"/api/v1/tickets/{ticket['id']}/node-submit",

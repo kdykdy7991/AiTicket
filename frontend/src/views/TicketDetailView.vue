@@ -20,7 +20,17 @@
 
       <div class="detail-body">
         <div class="detail-main">
-          <TicketDetailInformation :ticket="ticket" />
+          <div class="ticket-content-flow">
+            <TicketDetailInformation :ticket="ticket" />
+            <div v-if="salesSubmission" class="sales-submission-card">
+              <div class="sales-submission-title">销售商机处理</div>
+              <div class="sales-submission-fields">
+                <div><span>是否为有效商机</span><strong>{{ salesSubmission.data?.valid_opportunity === true ? '是' : salesSubmission.data?.valid_opportunity === false ? '否' : '—' }}</strong></div>
+                <div><span>客户评级</span><strong>{{ salesSubmission.data?.customer_rating || '—' }}</strong></div>
+                <div class="sales-submission-opinion"><span>处理意见</span><strong>{{ salesSubmission.article_body || '—' }}</strong></div>
+              </div>
+            </div>
+          </div>
 
           <!-- 已退回工单：补充后重新提交 -->
           <div v-if="canResubmit" class="resubmit-card">
@@ -288,8 +298,10 @@
             <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成商机处理并归档。' : '下方“添加回复”仅记录处理过程；提交本表单才会完成当前部门的处理并按原有流程流转。' }}</p>
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
-              <el-select v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable>
-                <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
+              <el-select v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable
+                         :disabled="field.field_key === 'finance_person' && !processingValues.finance_company"
+                         @change="field.field_key === 'finance_company' && (processingValues.finance_person = '')">
+                <el-option v-for="option in processingOptions(field)" :key="option" :label="option" :value="option" />
               </el-select>
               <el-radio-group v-else-if="field.field_type === 'boolean'" v-model="processingValues[field.field_key]">
                 <el-radio :label="true">是</el-radio><el-radio :label="false">否</el-radio>
@@ -319,11 +331,11 @@
 
           <!-- 指派处理人（仅部门对接人 + 待受理可见） -->
           <div v-if="canDispatch" class="dispatch-card">
-            <div class="dispatch-card-title">指派处理人</div>
+            <div class="dispatch-card-title">{{ isAssuranceAssignment ? '指派售后人员' : '指派处理人' }}</div>
             <div class="dispatch-card-body">
               <el-select
                 v-model="dispatchOwnerId"
-                placeholder="选择处理人"
+                :placeholder="isAssuranceAssignment ? '选择售后人员' : '选择处理人'"
                 class="dispatch-select"
                 filterable
                 :loading="handlersLoading"
@@ -344,7 +356,7 @@
                 确认指派
               </el-button>
             </div>
-            <p class="dispatch-card-hint">指派后工单将变为「处理中」，由所选处理人负责跟进。</p>
+            <p class="dispatch-card-hint">{{ isAssuranceAssignment ? '指派后由所选售后人员进行下一级问题判断。' : '指派后工单将变为「处理中」，由所选处理人负责跟进。' }}</p>
           </div>
 
           <ReplyEditor
@@ -353,20 +365,7 @@
             :articles="ticket.articles"
             @submitted="onRefresh"
           />
-          <div v-if="nodeHistorySubmissions.length" class="refine-card">
-            <div class="refine-card-title">历史节点记录</div>
-            <div v-for="submission in nodeHistorySubmissions" :key="submission.id" class="processing-history">
-              <strong>{{ submission.node_type === 'phone_feedback' ? '致电反馈' : submission.node_type === 'sales_opportunity' ? '销售商机处理' : '处理表单' }} v{{ submission.form_version }} · 操作人 #{{ submission.operator_id }} · {{ submission.submitted_at }}</strong>
-              <div v-for="field in submission.field_snapshot.filter((item: any) => item.storage_type !== 'system')" :key="field.key" class="triage-field">
-                <label>{{ field.label }}</label>
-                <div>{{ historicalFieldValue(submission, field) }}</div>
-              </div>
-              <div v-for="attachment in submission.attachments" :key="attachment.id">
-                <a :href="attachment.url" target="_blank" rel="noopener noreferrer">{{ attachment.filename }}</a>
-              </div>
-            </div>
-          </div>
-          <div v-else-if="isTerminalState" class="terminal-notice">
+          <div v-if="isTerminalState" class="terminal-notice">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             工单已结束，无法继续提交处理说明。
           </div>
@@ -470,15 +469,10 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
-const nodeHistorySubmissions = computed<any[]>(() => ((ticket.value as any)?.node_submissions || []).filter((entry: any) => ['processing', 'phone_feedback', 'sales_opportunity'].includes(entry.node_type)))
-function historicalFieldValue(submission: any, field: any): string {
-  const value = field.storage_type === 'article' ? submission.article_body
-    : field.storage_type === 'ticket_field' ? field.submitted_value
-    : submission.data?.[field.storage_key || field.key]
-  if (typeof value === 'boolean') return value ? '是' : '否'
-  if (field.type === 'select' && typeof value === 'string') return field.validation?.option_labels?.[value] || value
-  return value == null || value === '' ? '—' : String(value)
-}
+const salesSubmission = computed<any | null>(() => {
+  const submissions = (ticket.value as any)?.node_submissions || []
+  return [...submissions].reverse().find((entry: any) => entry.node_type === 'sales_opportunity') || null
+})
 const articlePlacement = computed(() => {
   const byLogId = new Map<number, any[]>()
   const logs = [...((ticket.value as any)?.state_logs || [])].sort((a: any, b: any) => a.id - b.id)
@@ -579,6 +573,12 @@ const isSalesOpportunity = computed(() => (ticket.value as any)?.node_context?.n
 const processingForm = computed(() =>
   ['processing', 'sales_opportunity'].includes((ticket.value as any)?.node_context?.node_type)
     && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+function processingOptions(field: any): string[] {
+  if (field.field_key === 'finance_person') {
+    return ({ 时空道宇: ['姜敏'], 青岛上合: ['朱景升'] } as Record<string, string[]>)[processingValues.value.finance_company] || []
+  }
+  return field.options || []
+}
 const phoneFeedbackForm = computed(() =>
   (ticket.value as any)?.node_context?.node_type === 'phone_feedback'
     && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
@@ -920,6 +920,9 @@ async function loadTicket() {
     for (const field of currentForm.value?.fields || []) {
       if (field.value != null) processingValues.value[field.field_key] = field.value
     }
+    if (currentForm.value?.code === 'reconciliation_sales_v1') {
+      processingValues.value.reconciliation_customer_name = (ticket.value as any)?.customer_name || ''
+    }
   }
 }
 
@@ -935,6 +938,7 @@ const dispatchOwnerId = ref<number | null>(null)
 const dispatchHandlers = ref<any[]>([])
 const handlersLoading = ref(false)
 const dispatching = ref(false)
+const isAssuranceAssignment = computed(() => (ticket.value as any)?.node_context?.node_type === 'assignment')
 
 // 当指派卡片可见时，加载该对接部门的处理人列表
 watch(canDispatch, async (visible) => {
@@ -970,8 +974,9 @@ async function confirmDispatch() {
     await ticketStore.updateTicket((ticket.value as any).id, {
       state: findAction('dispatch')?.target_state || 'open',
       owner_id: dispatchOwnerId.value,
+      reason: isAssuranceAssignment.value ? '指派售后人员' : undefined,
     } as any)
-    ElMessage.success('已指派处理人')
+    ElMessage.success(isAssuranceAssignment.value ? '已指派售后人员' : '已指派处理人')
     // 同步刷新列表缓存，避免返回列表页时状态不同步
     ticketStore.refreshCurrentInList()
     // 重新拉取详情，确保状态、处理人、流转时间线等全部同步刷新
@@ -1371,6 +1376,8 @@ async function confirmCancel() {
   gap: 20px;
   min-width: 0;
 }
+.ticket-content-flow { display: flex; flex-direction: column; gap: 12px; }
+.ticket-content-flow :deep(.ticket-information > .form-section:last-child) { margin-bottom: 0; }
 .detail-sidebar {
   width: min(360px, 34%);
   flex-shrink: 0;
@@ -1409,6 +1416,31 @@ async function confirmCancel() {
   border-radius: var(--radius-lg);
   padding: 16px;
 }
+.sales-submission-card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-xs);
+}
+.sales-submission-title { font-size: 15px; font-weight: 700; color: var(--color-text-primary); margin-bottom: 16px; }
+.sales-submission-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.sales-submission-fields > div { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.sales-submission-fields span { color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.sales-submission-fields strong {
+  padding: 9px 11px;
+  min-height: 36px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-page);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.sales-submission-opinion { grid-column: 1 / -1; }
+@media (max-width: 700px) { .sales-submission-fields { grid-template-columns: 1fr; } }
 
 
 /* 判断动作与指派动作放在同一处理区域。 */
