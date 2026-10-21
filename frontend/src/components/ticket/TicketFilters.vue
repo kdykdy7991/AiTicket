@@ -49,15 +49,10 @@
         </template>
       </el-input>
       <div class="filter-spacer" />
-      <el-date-picker
-        v-model="dateRange"
-        type="daterange"
-        range-separator="至"
-        start-placeholder="开始"
-        end-placeholder="结束"
-        value-format="YYYY-MM-DD"
-        placeholder="创建时间"
-        class="filter-date"
+      <DateRangeFilter
+        :from="local.date_from ?? null"
+        :to="local.date_to ?? null"
+        label="选择时间"
         @change="onDateChange"
       />
     </div>
@@ -67,7 +62,8 @@
 <script setup lang="ts">
 import { reactive, computed, onMounted, ref, watch } from 'vue'
 import { metaApi } from '@/api/overviews'
-import type { TicketFilters, TicketPriority, User, TicketCategory } from '@/types'
+import DateRangeFilter from '@/components/ticket/DateRangeFilter.vue'
+import type { TicketFilters, TicketPriority, User, TicketCategory, DateRangeValue } from '@/types'
 
 interface L2CategoryOption {
   id: number
@@ -79,7 +75,6 @@ const props = defineProps<{ modelValue: TicketFilters }>()
 const emit = defineEmits<{ 'update:modelValue': [value: TicketFilters] }>()
 
 const local = reactive<TicketFilters>({})
-const dateRange = ref<[string, string] | null>(null)
 const priorities = ref<TicketPriority[]>([])
 const creators = ref<User[]>([])
 const categories = ref<TicketCategory[]>([])
@@ -108,9 +103,9 @@ const l2Categories = computed<L2CategoryOption[]>(() => {
 })
 
 /** 日期区间变化：拆成 date_from / date_to 写回 local */
-function onDateChange(val: [string, string] | null) {
-  local.date_from = val?.[0] || null
-  local.date_to = val?.[1] || null
+function onDateChange(val: DateRangeValue) {
+  local.date_from = val.from || null
+  local.date_to = val.to || null
   emit('update:modelValue', local)
 }
 
@@ -119,12 +114,6 @@ watch(() => props.modelValue, (v) => {
   // 先清空 local 再重新赋值，确保外部删除的字段不会残留
   Object.keys(local).forEach(key => delete (local as any)[key])
   Object.assign(local, v)
-  // 同步日期范围
-  if (local.date_from && local.date_to) {
-    dateRange.value = [local.date_from, local.date_to]
-  } else {
-    dateRange.value = null
-  }
 }, { immediate: true, deep: true })
 
 onMounted(async () => {
@@ -155,9 +144,6 @@ onMounted(async () => {
 
 .filter-select {
   width: 140px;
-}
-.filter-date {
-  width: 200px;
 }
 .filter-spacer {
   flex: 1;

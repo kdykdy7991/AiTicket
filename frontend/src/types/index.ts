@@ -383,6 +383,12 @@ export interface PaginatedResponse<T> {
   pagination: Pagination
 }
 
+/** 日期区间筛选值，from / to 为 YYYY-MM-DD，一端为空表示开放区间 */
+export interface DateRangeValue {
+  from: string | null
+  to: string | null
+}
+
 export interface TicketFilters {
   state_id?: number | null
   priority_id?: number | null
