@@ -8,15 +8,6 @@
         <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD"
           format="YYYY-MM-DD" range-separator="→" start-placeholder="开始日期"
           end-placeholder="结束日期" :clearable="false" class="date-picker" @change="onFilterChange" />
-        <el-select v-model="channel" placeholder="全部渠道" clearable class="filter-select" @change="onFilterChange">
-          <el-option v-for="opt in options.channels" :key="opt.value" :label="opt.label" :value="opt.value" />
-        </el-select>
-        <el-select v-model="industry" placeholder="全部行业" clearable filterable class="filter-select" @change="onFilterChange">
-          <el-option v-for="opt in options.industries" :key="opt.value" :label="opt.label" :value="opt.value" />
-        </el-select>
-        <el-select v-model="ownerId" placeholder="全部销售" clearable class="filter-select" @change="onFilterChange">
-          <el-option v-for="opt in options.salespersons" :key="opt.value" :label="opt.label" :value="opt.value" />
-        </el-select>
         <el-button type="primary" :icon="Download" :disabled="!report" @click="exportCsv">导出</el-button>
       </div>
     </header>
@@ -170,9 +161,6 @@ const report = ref<any>(null)
 const granularity = ref<'day' | 'week'>('day')
 
 const dateRange = ref<[string, string] | null>(null)
-const channel = ref('')
-const industry = ref('')
-const ownerId = ref<number | null>(null)
 
 const trendEl = ref<HTMLElement>()
 const ratingEl = ref<HTMLElement>()
@@ -194,7 +182,6 @@ function stateTagClass(state: string): string {
   return 'is-open'
 }
 
-const options = computed(() => report.value?.options ?? { channels: [], industries: [], salespersons: [] })
 const kpi = computed(() => report.value?.kpi ?? {})
 const prevKpi = computed(() => report.value?.prev_kpi ?? {})
 const trendData = computed(() => report.value?.trend ?? [])
@@ -373,9 +360,6 @@ async function loadAll() {
       params.date_from = dateRange.value[0]
       params.date_to = dateRange.value[1]
     }
-    if (channel.value) params.channel = channel.value
-    if (industry.value) params.industry = industry.value
-    if (ownerId.value) params.owner_id = ownerId.value
     report.value = await statsApi.opportunityAnalysis(params)
     await nextTick()
     renderAll()
@@ -495,9 +479,6 @@ function exportCsv() {
   const rows: Array<Array<string | number | null | undefined>> = [
     ['线索工单分析'],
     ['统计周期', `${report.value?.date_from ?? ''} ~ ${report.value?.date_to ?? ''}`],
-    ['筛选：渠道', options.value.channels?.find((o: any) => o.value === channel.value)?.label || '全部'],
-    ['筛选：行业', industry.value || '全部'],
-    ['筛选：销售人员', options.value.salespersons?.find((o: any) => o.value === ownerId.value)?.label || '全部'],
     [],
     ['核心指标'],
     ['指标', '数值', '上一周期数值'],
@@ -574,7 +555,6 @@ onBeforeUnmount(() => {
 .page-subtitle { font-size: 14px; color: #718098; margin: 0; }
 .header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; max-width: min(100%, 950px); }
 .header-actions :deep(.date-picker) { width: 252px; }
-.filter-select { width: 145px; }
 .kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 17px; }
 .kpi-card { display: flex; align-items: flex-start; gap: 15px; min-width: 0; min-height: 112px; padding: 18px 16px; border: 1px solid #eef0f4; border-radius: 8px; background: #fff; }
 .kpi-card.mint { background: linear-gradient(115deg, #f0f9f5, #fff); }
@@ -653,5 +633,5 @@ onBeforeUnmount(() => {
 .valid-yes { color: #269875; font-weight: 600; }.valid-no { color: #98a4b5; }.rating-stars { color: #b48b48; }
 @media(max-width:1300px) { .page-header { display: block; }.header-actions { justify-content: flex-start; max-width: none; margin-top: 15px; }.kpi-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
 @media(max-width:1000px) { .dual-grid { grid-template-columns: minmax(0, 1fr); } }
-@media(max-width:640px) { .opportunity-view { padding: 14px; }.kpi-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.kpi-card { padding: 13px; }.panel { padding: 16px; }.filter-select { width: 145px; }.page-title { font-size: 21px; }.rating-summary { gap: 8px; }.judgment-body { padding: 12px 0; }.source-head em { display: block; text-align: right; margin-top: 3px; } }
+@media(max-width:640px) { .opportunity-view { padding: 14px; }.kpi-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.kpi-card { padding: 13px; }.panel { padding: 16px; }.page-title { font-size: 21px; }.rating-summary { gap: 8px; }.judgment-body { padding: 12px 0; }.source-head em { display: block; text-align: right; margin-top: 3px; } }
 </style>
