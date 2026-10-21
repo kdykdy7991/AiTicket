@@ -1,4 +1,4 @@
-"""Phase 2 tests: v2 category tree seeded correctly and old categories retired."""
+"""Current category tree, including the new immediate consultation leaf."""
 
 import pytest
 from sqlalchemy import select
@@ -16,6 +16,7 @@ V2_CATEGORIES = [
     (1202, 1001, "品牌合作", 2, 1),
     (1203, 1001, "产品使用/参数咨询", 2, 2),
     (1204, 1001, "渠道/代理合作", 2, 3),
+    (1205, 1001, "即时办结咨询", 2, 4),
     (2101, None, "服务投诉", 1, 2),
     (2102, 2101, "一般投诉", 2, 1),
     (2103, 2101, "重要投诉", 2, 2),
@@ -102,16 +103,16 @@ async def test_v2_tree_present_and_path_correct(seeded_categories):
         return None
 
     top_names = [n["name"] for n in tree]
-    # m7p9q0r1s2t3：中间层「客户服务」已取消，其下三类提为一级
+    # 客户咨询的四个二级分类直接挂在根节点下。
     assert top_names == ["客户咨询", "服务投诉", "业务运营", "业务保障"]
 
     consult = find_by_name(tree, "客户咨询")
     assert consult is not None
     assert [child["name"] for child in consult["children"]] == [
-        "品牌合作", "产品使用/参数咨询", "渠道/代理合作",
+        "品牌合作", "产品使用/参数咨询", "渠道/代理合作", "即时办结咨询",
     ]
     assert find_by_name(tree, "即时") is None
-    assert find_by_name(tree, "即时办结咨询") is None
+    assert find_by_name(tree, "即时办结咨询")["channel"] == "instant"
     assert find_by_name(tree, "非即时") is None
 
     core = find_by_name(tree, "核心网系统")

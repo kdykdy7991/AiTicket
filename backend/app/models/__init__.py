@@ -11,6 +11,7 @@ from app.models.routing import CategoryRoutingRule
 from app.models.dispatch import DispatchChain
 from app.models.complaint import ComplaintEscalationPolicy
 from app.models.node_form import FormDefinition, FormFieldDefinition, FormBinding, TicketNodeSubmission
+from app.models.visit_record import VisitRecord
 
 __all__ = [
     "Group", "SkillGroup", "UserSkillGroup",
@@ -23,4 +24,5 @@ __all__ = [
     "CategoryRoutingRule",
     "DispatchChain",
     "FormDefinition", "FormFieldDefinition", "FormBinding", "TicketNodeSubmission",
+    "VisitRecord",
 ]

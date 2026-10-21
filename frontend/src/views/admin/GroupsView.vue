@@ -3,7 +3,6 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">组管理</h2>
-        <p class="page-subtitle">管理客服组与对接部门及其钉钉通知配置</p>
       </div>
     </div>
 

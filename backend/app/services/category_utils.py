@@ -16,6 +16,9 @@ from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
 
 
+INSTANT_CONSULT_CATEGORY_ID = 1205
+
+
 class CategoryLineage(NamedTuple):
     """工单分类的派生血缘。
 

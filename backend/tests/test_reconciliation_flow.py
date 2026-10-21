@@ -85,6 +85,10 @@ async def test_reconciliation_sales_handoff_validates_company_and_finance_person
         detail = (await http.get(f"/api/v1/tickets/{ticket_id}")).json()
         form = detail["current_form"]
         assert form["code"] == "reconciliation_sales_v1"
+        assert "can_note" not in detail
+        note = await http.post(f"/api/v1/tickets/{ticket_id}/articles",
+            data={"type": "note", "body": "重复的过程回复"})
+        assert note.status_code == 422
         base = {
             "form_definition_id": form["form_definition_id"], "form_version": form["version"],
             "expected_category_id": 2204, "expected_department_id": sales_group_id,
@@ -114,7 +118,7 @@ async def test_reconciliation_sales_handoff_validates_company_and_finance_person
         form = detail["current_form"]
         assert form["code"] == "reconciliation_finance_v1"
         assert [field["field_key"] for field in form["fields"]] == ["processing_opinion"]
-        assert detail["can_note"] is False
+        assert "can_note" not in detail
         base = {
             "form_definition_id": form["form_definition_id"], "form_version": form["version"],
             "expected_category_id": 2204, "expected_department_id": finance_group_id,

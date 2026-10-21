@@ -35,7 +35,7 @@ class TicketCreate(BaseModel):
     skill_group_id: int | None = None
     handler_skill_group_id: int | None = None  # 专业处理部门（Phase 4 新增，可由路由规则自动填）
     dispatcher_id: int | None = None  # 部门对接人（正式提交必填）
-    sales_owner_id: int | None = None  # 商机或业财对账建单时选择的销售处理人；不持久化为对接人
+    sales_owner_id: int | None = None  # 线索或业财对账建单时选择的销售处理人；不持久化为对接人
     is_duplicate: bool = False
     duplicate_reason: str | None = None
     is_draft: bool = False
@@ -45,11 +45,9 @@ class TicketCreate(BaseModel):
     # Phase 8: 投诉级别（仅对服务投诉类工单有意义）
     # 取值: "一般" / "重要" / "重大"
     complaint_level: str | None = None
-    # Phase 6: 即时办结咨询
-    # 走完整表单，但建单后直接进入 archived（终态），
-    # 工单仍然有 number / SLA 记录与 state_log 审计
+    # 即时办结咨询由专用分类决定；旧客户端标记只用于拒绝误用。
     is_instant_resolve: bool = False
-    instant_resolution: str | None = None  # 即时办结的处理记录 / 答案摘要
+    instant_resolution: str | None = Field(default=None, max_length=4000)
 
 
 class TicketUpdate(BaseModel):
@@ -175,7 +173,6 @@ class NodeContextOut(BaseModel):
 class TicketDetail(TicketBrief):
     node_context: NodeContextOut | None = None
     current_form: dict | None = None
-    can_note: bool = False
     description: str
     customer_company: str | None = None
     industry: str | None = None

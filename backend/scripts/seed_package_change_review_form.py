@@ -15,6 +15,7 @@ from app.models.node_form import FormBinding, FormDefinition, FormFieldDefinitio
 
 
 FORM_CODE = "package_change_review_v1"
+CURRENT_FORM_CODE = "package_change_review_v2"
 CATEGORY_ID = 2203
 DEPARTMENT = "市场生态部"
 
@@ -39,15 +40,36 @@ async def seed_package_change_review_form(session_factory: async_sessionmaker | 
                     sort_order=order, required=required, storage_type=storage, storage_key=storage_key,
                     validation={"max_length": 200 if key == "new_package_name" else 4000} if kind != "attachment" else None,
                 ))
-        binding = (await db.execute(select(FormBinding).where(
+        current_form = (await db.execute(select(FormDefinition).where(
+            FormDefinition.code == CURRENT_FORM_CODE, FormDefinition.version == 2,
+        ))).scalar_one_or_none()
+        if current_form is None:
+            current_form = FormDefinition(code=CURRENT_FORM_CODE, name="套餐变更审核",
+                                          node_type="processing", version=2, enabled=True, published_at=None)
+            db.add(current_form)
+            await db.flush()
+            db.add_all([
+                FormFieldDefinition(form_definition_id=current_form.id, field_key="new_package_name",
+                                    label="新套餐名称", field_type="text", sort_order=0,
+                                    required=True, storage_type="submission", validation={"max_length": 200}),
+                FormFieldDefinition(form_definition_id=current_form.id, field_key="processing_opinion",
+                                    label="处理意见（结论）", field_type="textarea", sort_order=1,
+                                    required=True, storage_type="article", storage_key="body",
+                                    validation={"max_length": 4000}),
+            ])
+            await db.flush()
+            current_form.published_at = datetime.now(timezone.utc)
+        bindings = (await db.execute(select(FormBinding).where(
             FormBinding.node_type == "processing",
             FormBinding.department_code == DEPARTMENT,
             FormBinding.category_id == CATEGORY_ID,
-        ))).scalar_one_or_none()
-        if binding is None:
+        ))).scalars().all()
+        if not any(binding.form_definition_id == current_form.id for binding in bindings):
             db.add(FormBinding(node_type="processing", department_code=DEPARTMENT,
                                category_id=CATEGORY_ID, category_match_type="exact",
-                               form_definition_id=form.id, priority=0, enabled=True))
+                               form_definition_id=current_form.id, priority=0, enabled=True))
+        for binding in bindings:
+            binding.enabled = binding.form_definition_id == current_form.id
         if form.published_at is None:
             form.published_at = datetime.now(timezone.utc)
         await db.commit()

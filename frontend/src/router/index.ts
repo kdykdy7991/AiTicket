@@ -31,13 +31,25 @@ const routes: RouteRecordRaw[] = [
     path: '/report',
     name: 'Report',
     component: () => import('@/views/ReportView.vue'),
-    meta: { title: '统计报表', requiresAgent: true },
+    meta: { title: '工单统计', requiresAgent: true },
+  },
+  {
+    path: '/analysis/opportunity',
+    name: 'OpportunityAnalysis',
+    component: () => import('@/views/OpportunityAnalysisView.vue'),
+    meta: { title: '线索分析', requiresAgent: true },
   },
   {
     path: '/tickets',
     name: 'TicketList',
     component: () => import('@/views/TicketListView.vue'),
     meta: { title: '工单列表' },
+  },
+  {
+    path: '/visits',
+    name: 'VisitRecords',
+    component: () => import('@/views/VisitRecordsView.vue'),
+    meta: { title: '来访记录（非工单）' },
   },
   {
     path: '/tickets/new',

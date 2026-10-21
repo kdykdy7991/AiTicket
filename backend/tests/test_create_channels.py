@@ -8,7 +8,7 @@ from test_workflow_regression import _next_phone
 
 # 客服建单可选的判断终点（设计表A 判断级=客服 的行）
 CS_SELECTABLE = {
-    1202, 1203, 1204,      # 品牌合作 / 产品使用 / 渠道代理
+    1202, 1203, 1204, 1205, # 品牌合作 / 产品使用 / 渠道代理 / 即时办结
     2102, 2103, 2104,      # 一般 / 重要 / 重大投诉
     2203, 2204,            # 套餐变更 / 业财对账
     2301,                  # 业务保障（售后在此分诊，二级留空）
@@ -70,6 +70,7 @@ async def test_categories_create_selectable_flags(cats_env):
     assert by_id[2301]["channel"] == "chain"
     assert by_id[2302]["channel"] == "chain"      # 可路由（分诊落位用），但不可建单选
     assert by_id[2103]["channel"] == "manual"     # 重要投诉走升级策略，人工分派
+    assert by_id[1205]["channel"] == "instant"
 
 
 async def _create(c, category_id, **extra):

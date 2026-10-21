@@ -78,7 +78,9 @@ const uiStore = useUIStore()
 const collapsed = computed(() => uiStore.sidebarCollapsed)
 
 const iconReport = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 3 5-5"/></svg>'
+const iconAnalysis = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6" rx="0.5"/><rect x="12.5" y="8" width="3" height="10" rx="0.5"/><rect x="18" y="4" width="3" height="14" rx="0.5"/></svg>'
 const iconTickets = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V8Z"/><polyline points="14,3 14,8 21,8"/></svg>'
+const iconVisits = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 4h18v16H3z"/><path d="M7 9h10M7 13h10M7 17h6"/></svg>'
 const iconDraft = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>'
 const iconUsers = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
 const iconGroup = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>'
@@ -89,11 +91,13 @@ const iconKnowledge = '<svg width="18" height="18" viewBox="0 0 24 24" fill="non
 const mainMenu = computed(() => {
   const items = [
     { path: '/tickets', label: '工单', icon: iconTickets },
+    { path: '/visits', label: '来访记录（非工单）', icon: iconVisits },
   ]
   // 统计报表 / 我的草稿仅客服和管理员可见
   if (authStore.isAgent) {
     items.push(
-      { path: '/report', label: '统计报表', icon: iconReport },
+      { path: '/report', label: '工单统计', icon: iconReport },
+      { path: '/analysis/opportunity', label: '线索工单分析', icon: iconAnalysis },
       { path: '/tickets/drafts', label: '我的草稿', icon: iconDraft },
     )
   }

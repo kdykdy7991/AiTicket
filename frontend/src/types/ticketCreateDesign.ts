@@ -5,11 +5,11 @@ export interface TicketCreateDesignForm {
   satelliteNumber: string; category: CategoryName | ''; subcategory: string
   businessOpportunity: 'yes' | 'no' | ''; priority: string
   salesUserId: number | null
-  description: string; faultTime: string; recurrence: string; faultLocation: string
+  description: string; instantAnswer: string; faultTime: string; recurrence: string; faultLocation: string
   batchFault: 'yes' | 'no' | ''
 }
 export const initialTicketForm = (): TicketCreateDesignForm => ({
   channel: '语音', customerName: '', companyName: '', industry: '', callerPhone: '', contactPhone: '',
   satelliteNumber: '', category: '业务保障', subcategory: '', businessOpportunity: 'no', salesUserId: null,
-  priority: 'P4', description: '', faultTime: '', recurrence: '偶发', faultLocation: '', batchFault: 'no',
+  priority: 'P4', description: '', instantAnswer: '', faultTime: '', recurrence: '偶发', faultLocation: '', batchFault: 'no',
 })

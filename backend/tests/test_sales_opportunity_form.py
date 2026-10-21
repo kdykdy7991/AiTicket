@@ -8,11 +8,47 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.group import SkillGroup, UserSkillGroup
-from app.models.node_form import TicketNodeSubmission
+from app.models.node_form import FormBinding, FormDefinition, FormFieldDefinition, TicketNodeSubmission
 from app.models.ticket import Article, Ticket, TicketStateLog
 from app.models.user import User
 from scripts.seed_sales_opportunity_form import SALES_PEOPLE, seed_sales_opportunity_form
 from test_workflow_regression import _next_phone, as_user
+
+
+@pytest.mark.asyncio
+async def test_existing_sales_form_labels_are_renamed_without_changing_keys(client):
+    _http, _, engine = client
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as db:
+        form = FormDefinition(code="sales_opportunity_v1", name="销售商机处理",
+                              node_type="sales_opportunity", version=1, enabled=True)
+        db.add(form)
+        await db.flush()
+        field = FormFieldDefinition(form_definition_id=form.id, field_key="valid_opportunity",
+                                    label="是否为有效商机", field_type="boolean", required=True, sort_order=0)
+        db.add(field)
+        db.add(FormBinding(node_type="sales_opportunity", department_code="销售",
+                           category_id=None, category_match_type="exact",
+                           form_definition_id=form.id, priority=0, enabled=True))
+        await db.flush()
+        form.published_at = datetime.now(timezone.utc)
+        form_id, field_id = form.id, field.id
+        await db.commit()
+
+    await seed_sales_opportunity_form(factory)
+    async with factory() as db:
+        assert (await db.get(FormDefinition, form_id)).name == "销售商机处理"
+        assert (await db.get(FormFieldDefinition, field_id)).label == "是否为有效商机"
+        active = (await db.execute(select(FormBinding).where(
+            FormBinding.node_type == "sales_opportunity", FormBinding.enabled == True,
+        ))).scalar_one()
+        newer = await db.get(FormDefinition, active.form_definition_id)
+        assert newer.code == "sales_opportunity_v2" and newer.name == "销售线索处理"
+        new_field = (await db.execute(select(FormFieldDefinition).where(
+            FormFieldDefinition.form_definition_id == newer.id,
+            FormFieldDefinition.field_key == "valid_opportunity",
+        ))).scalar_one()
+        assert new_field.label == "是否为有效线索"
 
 
 @pytest.mark.asyncio
@@ -125,13 +161,13 @@ async def test_sales_opportunity_create_submit_and_archive(client):
     with as_user(salesperson_id, "handler"):
         detail = (await http.get(f"/api/v1/tickets/{ticket_id}")).json()
         assert detail["node_context"]["node_type"] == "sales_opportunity"
-        assert detail["current_form"]["code"] == "sales_opportunity_v1"
-        assert detail["can_note"] is False and detail["can_reply"] is False
+        assert detail["current_form"]["code"] == "sales_opportunity_v2"
+        assert "can_note" not in detail and detail["can_reply"] is False
         assert not any(action["action"] == "note" for action in detail["node_context"]["allowed_actions"])
         assert (await http.post(f"/api/v1/tickets/{ticket_id}/articles",
-                                data={"type": "reply", "body": "绕过商机表单"})).status_code == 409
+                                data={"type": "reply", "body": "绕过线索表单"})).status_code == 409
         assert (await http.post(f"/api/v1/tickets/{ticket_id}/articles",
-                                data={"type": "note", "body": "联系客户中"})).status_code == 409
+                                data={"type": "note", "body": "联系客户中"})).status_code == 422
         form = detail["current_form"]
         base = {"form_definition_id": form["form_definition_id"], "form_version": form["version"],
                 "expected_category_id": None, "expected_department_id": sales.id,

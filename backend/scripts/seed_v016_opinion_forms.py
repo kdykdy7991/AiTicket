@@ -20,7 +20,8 @@ from app.models.node_form import FormBinding, FormDefinition, FormFieldDefinitio
 
 
 BUSINESS_CODE = "business_opinion_v1"
-PACKAGE_CODE = "package_change_execute_v2"
+PACKAGE_V2_CODE = "package_change_execute_v2"
+PACKAGE_CODE = "package_change_execute_v3"
 BUSINESS_CATEGORIES = (1202, 1203, 1204)
 COMPLAINT_ROOT = 2101
 PACKAGE_CATEGORY = 2203
@@ -56,8 +57,10 @@ async def seed_v016_opinion_forms(session_factory: async_sessionmaker | None = N
     async with (session_factory or async_session)() as db:
         business = await _ensure_form(db, code=BUSINESS_CODE, name="业务处理结论",
                                       version=1, with_attachment=False)
+        await _ensure_form(db, code=PACKAGE_V2_CODE, name="套餐变更执行",
+                           version=2, with_attachment=True)
         package = await _ensure_form(db, code=PACKAGE_CODE, name="套餐变更执行",
-                                     version=2, with_attachment=True)
+                                     version=3, with_attachment=False)
 
         for category_id, match_type in [
             *((category_id, "exact") for category_id in BUSINESS_CATEGORIES),

@@ -321,7 +321,6 @@ export interface TicketDetail extends Ticket {
       required_condition?: { field_equals?: { field: string; value: unknown } } | null
     }>
   } | null
-  can_note?: boolean
   creator_username?: string | null
   creator_group_name?: string | null
   articles: Article[]
@@ -490,7 +489,7 @@ export interface TicketUpdatePayload {
 }
 
 export interface ArticleCreatePayload {
-  type: 'reply' | 'note' | 'addition' | 'reminder'
+  type: 'reply' | 'addition' | 'reminder'
   body: string
   content_type?: 'text/plain' | 'text/html'
   article_type?: 'note' | 'email' | 'web'

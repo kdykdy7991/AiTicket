@@ -7,7 +7,7 @@
         <div v-if="t.symptom" class="info-row"><span>故障现象</span><strong>{{ t.symptom }}</strong></div>
         <div v-if="t.satellite_number" class="info-row"><span>卫星物联网码号</span><strong>{{ t.satellite_number }}</strong></div>
         <div v-if="t.expected_result" class="info-row"><span>客户期望结果</span><strong>{{ t.expected_result }}</strong></div>
-        <div v-if="t.is_opportunity != null" class="info-row"><span>商机工单</span><strong>{{ t.is_opportunity ? '是' : '否' }}</strong></div>
+        <div v-if="t.is_opportunity != null" class="info-row"><span>线索工单</span><strong>{{ t.is_opportunity ? '是' : '否' }}</strong></div>
         <div class="info-row"><span>创建人</span><strong>{{ t.creator_name || '—' }}</strong></div>
       </div>
       <div class="info-column">

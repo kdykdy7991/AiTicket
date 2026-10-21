@@ -60,10 +60,10 @@ async def test_feedback_form_completion_and_history(tenv, tmp_path, monkeypatch)
         assert detail["current_form"]["form_definition_id"] == form_id
         assert detail["current_form"]["code"] == "phone_feedback_v2"
         assert [field["field_key"] for field in detail["current_form"]["fields"]] == ["phone_feedback_result"]
-        assert detail["can_note"] and not detail["can_reply"]
+        assert "can_note" not in detail and not detail["can_reply"]
         note = await tenv["client"].post(f"/api/v1/tickets/{ticket['id']}/articles",
             data={"type": "note", "body": "正在联系客户"})
-        assert note.status_code == 201, note.text
+        assert note.status_code == 422
         assert (await tenv["get"](ticket["id"]))["state"] == "open"
         bypass = await tenv["client"].post(f"/api/v1/tickets/{ticket['id']}/articles",
             data={"type": "reply", "body": "直接办结"})

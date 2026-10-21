@@ -17,6 +17,10 @@ export const overviewApi = {
 }
 
 export const statsApi = {
+  async serviceAnalysis(params: { date_from?: string; date_to?: string; skill_group_id?: number } = {}): Promise<any> {
+    const res: any = await api.get('/stats/service-analysis', { params: { ...params, _t: Date.now() } })
+    return res.data
+  },
   async dashboard(): Promise<DashboardStats> {
     const res: any = await api.get('/stats/dashboard')
     const d = res.data ?? {}
@@ -55,6 +59,16 @@ export const statsApi = {
 
   async trend(params: { date_from?: string; date_to?: string; skill_group_id?: number } = {}): Promise<any> {
     const res: any = await api.get('/stats/trend', { params: { ...params, _t: Date.now() } })
+    return res.data
+  },
+
+  /** 线索工单分析：机会识别、有效性判断与销售承接效率（真实数据，无 mock） */
+  async opportunityAnalysis(params: {
+    date_from?: string; date_to?: string;
+    channel?: string; industry?: string; owner_id?: number;
+    granularity?: 'day' | 'week';
+  } = {}): Promise<any> {
+    const res: any = await api.get('/stats/opportunity-analysis', { params: { ...params, _t: Date.now() } })
     return res.data
   },
 }

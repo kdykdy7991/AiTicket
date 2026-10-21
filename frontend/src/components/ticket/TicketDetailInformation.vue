@@ -29,7 +29,7 @@
         <div class="field"><span>卫星物联网码号</span><strong>{{ t.satellite_number || '—' }}</strong></div>
         <div class="field"><span>一级分类</span><strong>{{ t.category_l1?.name || '—' }}</strong></div>
         <div class="field"><span>二级分类</span><strong>{{ t.category_l2?.name || '—' }}</strong></div>
-        <div class="field"><span>是否为商机工单</span><strong>{{ yesNo(t.is_opportunity) }}</strong></div>
+        <div class="field"><span>是否为线索工单</span><strong>{{ yesNo(t.is_opportunity) }}</strong></div>
         <div class="field"><span>客户期望结果</span><strong>{{ t.expected_result || '—' }}</strong></div>
         <div class="field"><span>优先级</span><strong>{{ priorityText }}</strong></div>
         <div v-if="t.category_path" class="field full compact-field"><span>当前分类路径</span><strong>{{ t.category_path }}</strong></div>

@@ -3,7 +3,6 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">我的草稿</h2>
-        <p class="page-subtitle">暂存的工单草稿</p>
       </div>
     </div>
 

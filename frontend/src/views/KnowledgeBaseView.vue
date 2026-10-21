@@ -1,6 +1,6 @@
 <template>
   <main class="knowledge-page"><div class="knowledge-content">
-    <header class="page-header"><h1>知识库</h1><span>检索企业知识，辅助工单处理与问题定位</span></header>
+    <header class="page-header"><h1>知识库</h1></header>
     <form class="search-bar" @submit.prevent="search"><el-input v-model="queryInput" clearable size="large" placeholder="搜索知识库（文档标题、内容、关键词）" @clear="search"><template #prefix><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></template></el-input><button type="submit" :disabled="searching">{{ searching ? '搜索中…' : '搜索' }}</button></form>
     <div class="toolbar"><div class="collection-chips"><button type="button" :class="{ active: collectionId === ALL }" @click="selectCollection(ALL)">全部</button><button v-for="collection in collections" :key="collection.id" type="button" :class="{ active: collectionId === collection.id }" @click="selectCollection(collection.id)">{{ collection.name }}</button></div><label class="sort-control"><span class="sr-only">排序方式</span><select v-model="sortMode"><option value="recent">最近更新</option><option value="name">文档名称</option></select></label></div>
     <div class="result-count" aria-live="polite">{{ searching ? '正在搜索…' : loading ? '正在加载文档…' : `共 ${visibleDocuments.length} 个文档` }}</div>

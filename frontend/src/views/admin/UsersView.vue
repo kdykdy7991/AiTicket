@@ -3,7 +3,6 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">用户管理</h2>
-        <p class="page-subtitle">管理系统用户、角色与对接部门归属</p>
       </div>
       <el-button type="primary" @click="openCreate">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right: 6px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>

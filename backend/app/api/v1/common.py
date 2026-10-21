@@ -1,6 +1,7 @@
 """Users, Groups, SkillGroups, Categories, Regions, SLA, Stats routers."""
 
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func, or_, select
@@ -14,6 +15,7 @@ from app.core.security import hash_password
 from app.models.category import TicketCategory, Region
 from app.models.dispatch import DispatchChain
 from app.models.group import Group, SkillGroup, UserSkillGroup
+from app.models.node_form import TicketNodeSubmission
 from app.models.routing import CategoryRoutingRule
 from app.models.sla import SLAPolicy
 from app.models.ticket import Ticket, TicketStateLog
@@ -27,6 +29,7 @@ from app.schemas.common import (
 from app.services.category_utils import (
     build_category_path, build_lineage_index, compute_level, would_create_cycle,
     create_selectable_categories,
+    INSTANT_CONSULT_CATEGORY_ID,
 )  # noqa: F401  (build_category_path used elsewhere if needed)
 from app.services.notification import send_dingtalk_text
 from app.services.routing import create_rule, resolve_rule, update_rule
@@ -525,7 +528,7 @@ async def list_categories(
     for c in all_cats:
         has_chain = _has_chain(c.id)
         is_leaf = active_children.get(c.id, 0) == 0
-        channels[c.id] = "chain" if has_chain else ("manual" if is_leaf else "none")
+        channels[c.id] = "instant" if c.id == INSTANT_CONSULT_CATEGORY_ID else ("chain" if has_chain else ("manual" if is_leaf else "none"))
 
     # Build tree.
     node_map: dict[int, dict] = {}
@@ -1268,6 +1271,536 @@ async def trend_stats(
         cur += timedelta(days=1)
 
     return {"data": {"date_from": date_from, "date_to": date_to, "days": days}}
+
+
+@stats_router.get("/stats/service-analysis")
+async def service_analysis_stats(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    skill_group_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin", "agent")),
+):
+    """全量工单总览。时间范围按北京时间的建单日期筛选。"""
+    from collections import Counter, defaultdict
+    from datetime import date, time
+
+    local_tz = timezone(timedelta(hours=8))
+    today = datetime.now(local_tz).date()
+    try:
+        first = date.fromisoformat(date_from) if date_from else today.replace(day=1)
+        last = date.fromisoformat(date_to) if date_to else today
+    except ValueError as exc:
+        raise HTTPException(422, detail="日期格式应为 YYYY-MM-DD") from exc
+    if first > last or (last - first).days > 366:
+        raise HTTPException(422, detail="日期范围无效或超过 366 天")
+
+    start = datetime.combine(first, time.min, local_tz).astimezone(timezone.utc)
+    end = datetime.combine(last + timedelta(days=1), time.min, local_tz).astimezone(timezone.utc)
+    span = (last - first).days + 1
+    prev_start, prev_end = start - timedelta(days=span), start
+    filters = [Ticket.is_draft.is_(False)]
+    if skill_group_id is not None:
+        filters.append(Ticket.skill_group_id == skill_group_id)
+
+    async def load_tickets(begin: datetime, finish: datetime):
+        return (await db.execute(select(Ticket).where(
+            *filters, Ticket.created_at >= begin, Ticket.created_at < finish,
+        ).options(selectinload(Ticket.owner)))).scalars().all()
+
+    current = await load_tickets(start, end)
+    previous = await load_tickets(prev_start, prev_end)
+    now = datetime.now(timezone.utc)
+    closed_states = {"archived", "cancelled"}
+
+    def is_closed(ticket: Ticket) -> bool:
+        return ticket.closed_at is not None or ticket.state in closed_states
+
+    def is_overdue(ticket: Ticket) -> bool:
+        return bool(ticket.sla_solution_breached or (
+            not is_closed(ticket) and ticket.solution_deadline is not None
+            and ticket.solution_deadline < now
+        ))
+
+    def satisfaction(ticket: Ticket) -> bool | None:
+        if ticket.customer_recognized is not None:
+            return ticket.customer_recognized
+        if ticket.satisfaction in {"satisfied", "average", "dissatisfied"}:
+            return ticket.satisfaction == "satisfied"
+        return None
+
+    def metrics(tickets: list[Ticket]) -> dict:
+        rated = [satisfaction(ticket) for ticket in tickets]
+        rated = [value for value in rated if value is not None]
+        count = len(tickets)
+        return {
+            "total": count,
+            "service_count": sum(ticket.is_opportunity is not True for ticket in tickets),
+            "opportunity_count": sum(ticket.is_opportunity is True for ticket in tickets),
+            "closed_count": sum(is_closed(ticket) for ticket in tickets),
+            "closure_rate": round(sum(is_closed(ticket) for ticket in tickets) / count, 4) if count else 0,
+            "overdue_count": sum(is_overdue(ticket) for ticket in tickets),
+            "overdue_rate": round(sum(is_overdue(ticket) for ticket in tickets) / count, 4) if count else 0,
+            "satisfied_count": sum(value is True for value in rated),
+            "rated_count": len(rated),
+            "satisfaction_rate": round(sum(value is True for value in rated) / len(rated), 4) if rated else None,
+            "long_open_count": sum(not is_closed(ticket) and now - ticket.created_at >= timedelta(hours=72) for ticket in tickets),
+            "dissatisfied_count": sum(satisfaction(ticket) is False for ticket in tickets),
+        }
+
+    lineage = await build_lineage_index(db)
+    categories: Counter[str] = Counter()
+    subcategories: Counter[tuple[str, str]] = Counter()
+    for ticket in current:
+        item = lineage.get(ticket.category_id)
+        root = "线索工单" if ticket.is_opportunity else (item.l1.name if item and item.l1 else "未分类")
+        sub = "销售线索" if ticket.is_opportunity else (item.l2.name if item and item.l2 else "未细分")
+        categories[root] += 1
+        subcategories[(root, sub)] += 1
+
+    daily: dict[str, dict[str, int]] = defaultdict(lambda: {"new": 0, "closed": 0})
+    for ticket in current:
+        created_day = ticket.created_at.astimezone(local_tz).date().isoformat()
+        daily[created_day]["new"] += 1
+        if ticket.closed_at is not None and start <= ticket.closed_at < end:
+            closed_day = ticket.closed_at.astimezone(local_tz).date().isoformat()
+            daily[closed_day]["closed"] += 1
+    days = []
+    cursor = first
+    while cursor <= last:
+        key = cursor.isoformat()
+        days.append({"date": key, **daily[key]})
+        cursor += timedelta(days=1)
+
+    abnormal = sorted(
+        (ticket for ticket in current if is_overdue(ticket) or
+         (not is_closed(ticket) and now - ticket.created_at >= timedelta(hours=72)) or
+         satisfaction(ticket) is False),
+        key=lambda ticket: ticket.created_at, reverse=True,
+    )[:8]
+    return {"data": {
+        "date_from": first.isoformat(), "date_to": last.isoformat(),
+        "metrics": metrics(current), "prev_metrics": metrics(previous),
+        "trend": days,
+        "by_category": [{"name": name, "count": count} for name, count in categories.most_common()],
+        "by_subcategory": [{"root": root, "name": name, "count": count}
+                           for (root, name), count in subcategories.most_common()],
+        "abnormal_tickets": [{
+            "id": ticket.id, "number": ticket.number, "category": (
+                "线索工单" if ticket.is_opportunity else lineage[ticket.category_id].l1.name if ticket.category_id in lineage
+                and lineage[ticket.category_id].l1 else "未分类"),
+            "subcategory": ("销售线索" if ticket.is_opportunity else lineage[ticket.category_id].l2.name if ticket.category_id in lineage
+                             and lineage[ticket.category_id].l2 else "未细分"),
+            "owner": ticket.owner.name if ticket.owner else "未指派",
+            "state": ticket.state,
+            "reason": "SLA 超时" if is_overdue(ticket) else (
+                "客户不满意" if satisfaction(ticket) is False else "超过 72 小时未办结"),
+            "age_hours": round((now - ticket.created_at).total_seconds() / 3600, 1),
+        } for ticket in abnormal],
+    }}
+
+
+# ── 线索工单分析 ────────────────────────────────────────────
+
+# 建单界面「受理渠道」展示名 ⇄ tickets.channel 存储值（与前端 channelCodes 对齐）
+OPPORTUNITY_CHANNEL_LABELS = {"phone": "语音", "web": "在线客服", "internal": "内部转办"}
+
+# 销售处理时长分桶（小时）
+OPPORTUNITY_DURATION_BUCKETS = (
+    ("<2小时", 0, 2),
+    ("2-4小时", 2, 4),
+    ("4-8小时", 4, 8),
+    ("8-24小时", 8, 24),
+    (">24小时", 24, None),
+)
+
+
+def _opportunity_percentile(sorted_values: list[float], p: float) -> float | None:
+    """线性插值分位数；sorted_values 必须已升序排序。"""
+    if not sorted_values:
+        return None
+    k = (len(sorted_values) - 1) * p
+    lower = math.floor(k)
+    upper = math.ceil(k)
+    if lower == upper:
+        return sorted_values[int(k)]
+    return sorted_values[lower] * (upper - k) + sorted_values[upper] * (k - lower)
+
+
+def _opportunity_bucket_key(day, granularity: str):
+    """趋势分桶键：按天返回当天；按周返回本周一。"""
+    if granularity == "week":
+        return day - timedelta(days=day.weekday())
+    return day
+
+
+async def _opportunity_snapshot(
+    db: AsyncSession, start: datetime, end: datetime,
+    channel: str | None, industry: str | None, owner_id: int | None,
+) -> dict:
+    """统计 [start, end] 内创建的线索工单（is_opportunity 且非草稿）。
+
+    数据来源全部为真实字段：
+    - 线索工单总量 / 渠道 / 行业 / 销售承接：tickets 表
+    - 已完成销售判断 / 有效线索 / 客户评级 / 销售处理时长：
+      ticket_node_submissions 表中 node_type='sales_opportunity' 的提交记录
+    """
+    base = [
+        Ticket.is_opportunity == True,  # noqa: E712
+        Ticket.is_draft == False,  # noqa: E712
+        Ticket.created_at >= start,
+        Ticket.created_at <= end,
+    ]
+    if channel:
+        base.append(Ticket.channel == channel)
+    if industry:
+        base.append(Ticket.industry == industry)
+    if owner_id:
+        base.append(Ticket.owner_id == owner_id)
+
+    ticket_rows = (await db.execute(
+        select(
+            Ticket.id, Ticket.number, Ticket.customer_name, Ticket.customer_company,
+            Ticket.industry, Ticket.channel, Ticket.state, Ticket.owner_id,
+            Ticket.created_at,
+        ).where(*base)
+    )).all()
+
+    submission_by_ticket: dict[int, object] = {}
+    if ticket_rows:
+        ticket_ids = [row[0] for row in ticket_rows]
+        submission_rows = (await db.execute(
+            select(
+                TicketNodeSubmission.ticket_id, TicketNodeSubmission.data,
+                TicketNodeSubmission.submitted_at, TicketNodeSubmission.operator_id,
+            ).where(
+                TicketNodeSubmission.ticket_id.in_(ticket_ids),
+                TicketNodeSubmission.node_type == "sales_opportunity",
+            ).order_by(TicketNodeSubmission.submitted_at, TicketNodeSubmission.id)
+        )).all()
+        for ticket_id, data, submitted_at, _operator_id in submission_rows:
+            submission_by_ticket[ticket_id] = (data or {}, submitted_at)
+
+    # ── KPI ──
+    total = len(ticket_rows)
+    judged = 0
+    valid = 0
+    ratings: list[float] = []
+    valid_ratings: list[float] = []
+    invalid_ratings: list[float] = []
+    durations: list[float] = []
+    created_by_day: dict[str, int] = {}
+    judged_by_day: dict[str, int] = {}
+    valid_by_day: dict[str, int] = {}
+    channel_stat: dict[str, dict] = {}
+    industry_stat: dict[str, dict] = {}
+    owner_stat: dict[int, dict] = {}
+    owner_durations: dict[int, list[float]] = {}
+    rating_dist = {str(star): 0 for star in range(1, 6)}
+    bucket_counts = {label: 0 for label, _lo, _hi in OPPORTUNITY_DURATION_BUCKETS}
+
+    def _stat_entry() -> dict:
+        return {"total": 0, "judged": 0, "valid": 0}
+
+    for row in ticket_rows:
+        (ticket_id, _number, _customer_name, _company, row_industry,
+         row_channel, _state, row_owner, created_at) = row
+        day_key = _opportunity_bucket_key(created_at.date(), "day").isoformat()
+        created_by_day[day_key] = created_by_day.get(day_key, 0) + 1
+        for stat_map, key in ((channel_stat, row_channel), (industry_stat, row_industry)):
+            entry = stat_map.setdefault(key, _stat_entry())
+            entry["total"] += 1
+        if row_owner is not None:
+            owner_stat.setdefault(row_owner, _stat_entry())["total"] += 1
+
+        submission = submission_by_ticket.get(ticket_id)
+        if submission is None:
+            continue
+        data, submitted_at = submission
+        judged += 1
+        channel_stat[row_channel]["judged"] += 1
+        industry_stat[row_industry]["judged"] += 1
+        if row_owner is not None:
+            owner_stat[row_owner]["judged"] += 1
+        submit_day = _opportunity_bucket_key(submitted_at.date(), "day").isoformat()
+        judged_by_day[submit_day] = judged_by_day.get(submit_day, 0) + 1
+
+        rating_raw = data.get("customer_rating")
+        if rating_raw is not None:
+            try:
+                star = int(rating_raw)
+            except (TypeError, ValueError):
+                star = None
+            if star is not None and 1 <= star <= 5:
+                ratings.append(float(star))
+                rating_dist[str(star)] += 1
+                if data.get("valid_opportunity") is True:
+                    valid_ratings.append(float(star))
+                else:
+                    invalid_ratings.append(float(star))
+
+        if data.get("valid_opportunity") is True:
+            valid += 1
+            channel_stat[row_channel]["valid"] += 1
+            industry_stat[row_industry]["valid"] += 1
+            if row_owner is not None:
+                owner_stat[row_owner]["valid"] += 1
+            valid_by_day[submit_day] = valid_by_day.get(submit_day, 0) + 1
+
+        # 销售处理时长 = 销售线索表单提交时间 - 工单创建时间
+        if submitted_at is not None and created_at is not None:
+            hours = (submitted_at - created_at).total_seconds() / 3600
+            if hours >= 0:
+                durations.append(hours)
+                if row_owner is not None:
+                    owner_durations.setdefault(row_owner, []).append(hours)
+                for label, lo, hi in OPPORTUNITY_DURATION_BUCKETS:
+                    if hours >= lo and (hi is None or hours < hi):
+                        bucket_counts[label] += 1
+                        break
+
+    durations.sort()
+    kpi = {
+        "total": total,
+        "judged": judged,
+        "valid": valid,
+        "valid_rate": round(valid / judged, 4) if judged else 0.0,
+        "avg_rating": round(sum(ratings) / len(ratings), 2) if ratings else None,
+        "avg_handle_hours": round(sum(durations) / len(durations), 2) if durations else None,
+    }
+
+    def _rate(entry: dict) -> float:
+        return round(entry["valid"] / entry["judged"], 4) if entry["judged"] else 0.0
+
+    def _owner_entry(owner_id: int, entry: dict) -> dict:
+        hours = owner_durations.get(owner_id, [])
+        return {
+            "total": entry["total"], "judged": entry["judged"],
+            "valid": entry["valid"], "valid_rate": _rate(entry),
+            "avg_hours": round(sum(hours) / len(hours), 2) if hours else None,
+        }
+
+    return {
+        "kpi": kpi,
+        "created_by_day": created_by_day,
+        "judged_by_day": judged_by_day,
+        "valid_by_day": valid_by_day,
+        "by_channel": [
+            {"channel": key, "total": entry["total"], "judged": entry["judged"],
+             "valid": entry["valid"], "valid_rate": _rate(entry)}
+            for key, entry in sorted(channel_stat.items(), key=lambda kv: -kv[1]["total"])
+        ],
+        "by_industry": [
+            {"industry": key or "未提供", "total": entry["total"], "judged": entry["judged"],
+             "valid": entry["valid"], "valid_rate": _rate(entry)}
+            for key, entry in sorted(industry_stat.items(), key=lambda kv: -kv[1]["total"])
+        ],
+        "by_owner": {
+            owner_id: _owner_entry(owner_id, entry)
+            for owner_id, entry in owner_stat.items()
+        },
+        "rating_distribution": rating_dist,
+        "valid_avg_rating": round(sum(valid_ratings) / len(valid_ratings), 2) if valid_ratings else None,
+        "invalid_avg_rating": round(sum(invalid_ratings) / len(invalid_ratings), 2) if invalid_ratings else None,
+        "duration": {
+            "avg_hours": round(sum(durations) / len(durations), 2) if durations else None,
+            "p50_hours": (lambda v: round(v, 2) if v is not None else None)(_opportunity_percentile(durations, 0.5)),
+            "p90_hours": (lambda v: round(v, 2) if v is not None else None)(_opportunity_percentile(durations, 0.9)),
+            "buckets": [
+                {"label": label, "count": bucket_counts[label]}
+                for label, _lo, _hi in OPPORTUNITY_DURATION_BUCKETS
+            ],
+        },
+    }
+
+
+@stats_router.get("/stats/opportunity-analysis")
+async def opportunity_analysis_stats(
+    date_from: str | None = None,
+    date_to: str | None = None,
+    channel: str | None = None,
+    industry: str | None = None,
+    owner_id: int | None = None,
+    granularity: str = Query("day", pattern="^(day|week)$"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin", "agent")),
+):
+    """线索工单分析：机会识别、有效性判断与销售承接效率。
+
+    仅统计 is_opportunity=True 且非草稿工单；销售判断结果取自
+    sales_opportunity 节点提交（有效线索 / 客户评级 / 处理时长）。
+    """
+    from datetime import date
+
+    today = date.today()
+    if not date_from or not date_to:
+        date_to = today.isoformat()
+        date_from = (today - timedelta(days=29)).isoformat()
+
+    start = datetime.fromisoformat(date_from).replace(tzinfo=timezone.utc)
+    end = datetime.fromisoformat(date_to).replace(tzinfo=timezone.utc, hour=23, minute=59, second=59)
+
+    snapshot = await _opportunity_snapshot(db, start, end, channel, industry, owner_id)
+
+    # 上一周期（用于 KPI「较上一周期」对比）
+    span_days = (end.date() - start.date()).days + 1
+    prev_end_date = start.date() - timedelta(days=1)
+    prev_start_date = prev_end_date - timedelta(days=span_days - 1)
+    prev_start = datetime.combine(prev_start_date, datetime.min.time()).replace(tzinfo=timezone.utc)
+    prev_end = datetime.combine(prev_end_date, datetime.max.time()).replace(tzinfo=timezone.utc)
+    prev_snapshot = await _opportunity_snapshot(db, prev_start, prev_end, channel, industry, owner_id)
+
+    # ── 趋势（按天/周分桶，补全无数据桶）──
+    if granularity == "week":
+        def _to_weekly(daily: dict[str, int]) -> dict[str, int]:
+            weekly: dict[str, int] = {}
+            for day_key, count in daily.items():
+                week_key = _opportunity_bucket_key(
+                    date.fromisoformat(day_key), "week",
+                ).isoformat()
+                weekly[week_key] = weekly.get(week_key, 0) + count
+            return weekly
+
+        trend_created = _to_weekly(snapshot["created_by_day"])
+        trend_judged = _to_weekly(snapshot["judged_by_day"])
+        trend_valid = _to_weekly(snapshot["valid_by_day"])
+    else:
+        trend_created = snapshot["created_by_day"]
+        trend_judged = snapshot["judged_by_day"]
+        trend_valid = snapshot["valid_by_day"]
+
+    trend: list[dict] = []
+    cur = _opportunity_bucket_key(start.date(), granularity)
+    last = _opportunity_bucket_key(end.date(), granularity)
+    step = timedelta(days=7 if granularity == "week" else 1)
+    while cur <= last:
+        key = cur.isoformat()
+        trend.append({
+            "date": key,
+            "created": trend_created.get(key, 0),
+            "judged": trend_judged.get(key, 0),
+            "valid": trend_valid.get(key, 0),
+        })
+        cur += step
+
+    # ── 销售承接分析（负责人维度）──
+    owner_ids = [oid for oid in snapshot["by_owner"] if oid is not None]
+    owner_names: dict[int, str] = {}
+    if owner_ids:
+        owner_rows = (await db.execute(
+            select(User.id, User.name).where(User.id.in_(owner_ids))
+        )).all()
+        owner_names = {row[0]: row[1] for row in owner_rows}
+    by_salesperson = []
+    for oid, entry in sorted(snapshot["by_owner"].items(), key=lambda kv: -kv[1]["total"]):
+        if oid is None:
+            continue
+        by_salesperson.append({
+            "owner_id": oid,
+            "name": owner_names.get(oid, f"用户{oid}"),
+            "assigned": entry["total"],
+            "judged": entry["judged"],
+            "valid": entry["valid"],
+            "valid_rate": entry["valid_rate"],
+            "avg_hours": entry["avg_hours"],
+        })
+
+    # ── 近期线索工单（最近 8 条）──
+    recent_rows = (await db.execute(
+        select(
+            Ticket.id, Ticket.number, Ticket.customer_name, Ticket.industry,
+            Ticket.state, Ticket.owner_id, Ticket.created_at,
+        )
+        .where(
+            Ticket.is_opportunity == True,  # noqa: E712
+            Ticket.is_draft == False,  # noqa: E712
+            Ticket.created_at >= start,
+            Ticket.created_at <= end,
+            *([Ticket.channel == channel] if channel else []),
+            *([Ticket.industry == industry] if industry else []),
+            *([Ticket.owner_id == owner_id] if owner_id else []),
+        )
+        .order_by(Ticket.created_at.desc(), Ticket.id.desc())
+        .limit(8)
+    )).all()
+    recent_ticket_ids = [row[0] for row in recent_rows]
+    recent_submission: dict[int, tuple] = {}
+    if recent_ticket_ids:
+        sub_rows = (await db.execute(
+            select(
+                TicketNodeSubmission.ticket_id, TicketNodeSubmission.data,
+            ).where(
+                TicketNodeSubmission.ticket_id.in_(recent_ticket_ids),
+                TicketNodeSubmission.node_type == "sales_opportunity",
+            ).order_by(TicketNodeSubmission.submitted_at, TicketNodeSubmission.id)
+        )).all()
+        for ticket_id, data in sub_rows:
+            recent_submission[ticket_id] = (data or {})
+    recent_tickets = []
+    for row in recent_rows:
+        ticket_id, number, customer_name, row_industry, state, _owner, _created = row
+        data = recent_submission.get(ticket_id, {})
+        recent_tickets.append({
+            "id": ticket_id,
+            "number": number,
+            "customer_name": customer_name,
+            "industry": row_industry or "未提供",
+            "state": state,
+            "valid_opportunity": data.get("valid_opportunity"),
+            "customer_rating": data.get("customer_rating"),
+        })
+
+    # ── 筛选项（不受日期/筛选影响，覆盖全部线索工单）──
+    option_rows = (await db.execute(
+        select(Ticket.channel, Ticket.industry, Ticket.owner_id)
+        .where(
+            Ticket.is_opportunity == True,  # noqa: E712
+            Ticket.is_draft == False,  # noqa: E712
+        )
+    )).all()
+    channel_values = sorted({row[0] for row in option_rows if row[0]})
+    industry_values = sorted({row[1] for row in option_rows if row[1]})
+    owner_values = sorted({row[2] for row in option_rows if row[2] is not None})
+    owner_option_names: dict[int, str] = {}
+    if owner_values:
+        name_rows = (await db.execute(
+            select(User.id, User.name).where(User.id.in_(owner_values))
+        )).all()
+        owner_option_names = {row[0]: row[1] for row in name_rows}
+
+    return {"data": {
+        "date_from": date_from,
+        "date_to": date_to,
+        "prev_date_from": prev_start_date.isoformat(),
+        "prev_date_to": prev_end_date.isoformat(),
+        "kpi": snapshot["kpi"],
+        "prev_kpi": prev_snapshot["kpi"],
+        "trend": trend,
+        "by_channel": [
+            {"channel": item["channel"],
+             "label": OPPORTUNITY_CHANNEL_LABELS.get(item["channel"], item["channel"]),
+             **item}
+            for item in snapshot["by_channel"]
+        ],
+        "by_industry": snapshot["by_industry"],
+        "rating_distribution": snapshot["rating_distribution"],
+        "valid_avg_rating": snapshot["valid_avg_rating"],
+        "invalid_avg_rating": snapshot["invalid_avg_rating"],
+        "duration": snapshot["duration"],
+        "by_salesperson": by_salesperson,
+        "recent_tickets": recent_tickets,
+        "options": {
+            "channels": [
+                {"value": value, "label": OPPORTUNITY_CHANNEL_LABELS.get(value, value)}
+                for value in channel_values
+            ],
+            "industries": [{"value": value, "label": value} for value in industry_values],
+            "salespersons": [
+                {"value": oid, "label": owner_option_names.get(oid, f"用户{oid}")}
+                for oid in owner_values
+            ],
+        },
+    }}
 
 
 # ── Category Routing Rules ──────────────────────────────────

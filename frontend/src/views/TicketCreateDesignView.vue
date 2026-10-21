@@ -4,21 +4,22 @@
     <h1>创建工单</h1>
     <form id="ticket-create-form" novalidate @submit.prevent="submitTicket">
       <div class="create-layout"><div class="form-main">
-      <TicketFormSection title="工单信息" icon="MessageBox"><div class="grid intake-grid"><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div><fieldset class="field radio-field"><legend class="required">是否为商机工单</legend><div class="radio-options"><label><input v-model="form.businessOpportunity" type="radio" value="yes" /> 是</label><label><input v-model="form.businessOpportunity" type="radio" value="no" /> 否</label></div><small v-if="errors.businessOpportunity" class="error">{{ errors.businessOpportunity }}</small></fieldset></div></TicketFormSection>
+      <TicketFormSection title="工单信息" icon="MessageBox"><div class="grid intake-grid"><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div><fieldset v-if="!isInstantConsult" class="field radio-field"><legend class="required">是否为线索工单</legend><div class="radio-options"><label><input v-model="form.businessOpportunity" type="radio" value="yes" /> 是</label><label><input v-model="form.businessOpportunity" type="radio" value="no" /> 否</label></div><small v-if="errors.businessOpportunity" class="error">{{ errors.businessOpportunity }}</small></fieldset></div></TicketFormSection>
       <TicketFormSection title="客户信息" icon="User"><div class="grid customer-grid">
-        <div class="field"><label for="customerName" class="required">客户名称</label><input id="customerName" v-model.trim="form.customerName" placeholder="请输入客户名称" :class="{ invalid: errors.customerName }" /><small v-if="errors.customerName" class="error">{{ errors.customerName }}</small></div>
-        <div class="field"><label for="companyName" class="required">单位全称</label><input id="companyName" v-model.trim="form.companyName" placeholder="请输入单位全称" :class="{ invalid: errors.companyName }" /><small v-if="errors.companyName" class="error">{{ errors.companyName }}</small></div>
-        <div class="field"><label for="industry" class="required">行业</label><select id="industry" v-model="form.industry" :class="{ invalid: errors.industry }"><option value="" disabled hidden>请选择行业</option><option v-for="v in industries" :key="v">{{ v }}</option></select><small v-if="errors.industry" class="error">{{ errors.industry }}</small></div>
+        <div class="field"><label for="customerName" :class="{ required: !isInstantConsult }">客户名称</label><input id="customerName" v-model.trim="form.customerName" placeholder="请输入客户名称" :class="{ invalid: errors.customerName }" /><small v-if="errors.customerName" class="error">{{ errors.customerName }}</small></div>
+        <div class="field"><label for="companyName" :class="{ required: !isInstantConsult }">单位全称</label><input id="companyName" v-model.trim="form.companyName" placeholder="请输入单位全称" :class="{ invalid: errors.companyName }" /><small v-if="errors.companyName" class="error">{{ errors.companyName }}</small></div>
+        <div class="field"><label for="industry" :class="{ required: !isInstantConsult }">行业</label><select id="industry" v-model="form.industry" :class="{ invalid: errors.industry }"><option value="" :disabled="!isInstantConsult" hidden>请选择行业</option><option v-for="v in industries" :key="v">{{ v }}</option></select><small v-if="errors.industry" class="error">{{ errors.industry }}</small></div>
         <div class="field"><label for="callerPhone" class="required">来电号码</label><input id="callerPhone" v-model.trim="form.callerPhone" inputmode="tel" placeholder="请输入来电号码" :class="{ invalid: errors.callerPhone }" /><small v-if="errors.callerPhone" class="error">{{ errors.callerPhone }}</small></div>
         <div class="field"><label for="contactPhone" :class="{ required: isOpportunity }">联系号码</label><input id="contactPhone" v-model.trim="form.contactPhone" inputmode="tel" placeholder="请输入联系号码" :class="{ invalid: errors.contactPhone }" /><small v-if="!isOpportunity" class="help">联系方式与来电号码不同时补充</small><small v-if="errors.contactPhone" class="error">{{ errors.contactPhone }}</small></div>
       </div></TicketFormSection>
       <TicketFormSection title="工单内容" icon="Document"><div class="grid content-grid">
         <div v-if="isOpportunity || isReconciliation" class="field"><label for="salesUser" class="required">销售人员</label><select id="salesUser" v-model.number="form.salesUserId" :class="{ invalid: errors.salesUserId }"><option :value="null" disabled>请选择销售人员</option><option v-for="person in salesUsers" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="errors.salesUserId" class="error">{{ errors.salesUserId }}</small></div>
-        <div v-if="!isOpportunity" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
+        <div v-if="!isOpportunity && !isInstantConsult" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
         <div v-if="!isOpportunity" class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
         <div v-if="!isOpportunity && !rootCategory?.create_selectable" class="field"><label for="subcategory" class="required">细分分类</label><select id="subcategory" v-model="form.subcategory" :disabled="!form.category" :class="{ invalid: errors.subcategory }"><option value="" disabled hidden>{{ form.category ? '请选择可提交的分类' : '请先选择一级分类' }}</option><option v-for="v in subcategoryOptions" :key="v.id" :value="v.label">{{ v.label }}</option></select><small v-if="errors.subcategory" class="error">{{ errors.subcategory }}</small></div>
-        <fieldset v-if="!isOpportunity" class="field radio-field priority-field"><legend class="required">优先级</legend><div class="priority-options"><label v-for="v in priorities" :key="v" :class="{ chosen: form.priority === v }"><input v-model="form.priority" type="radio" :value="v" />{{ v }}</label></div><small v-if="errors.priority" class="error">{{ errors.priority }}</small></fieldset>
-        <div class="field full"><label for="description" class="required">客户问题详情</label><div class="textarea-wrap"><textarea id="description" v-model="form.description" maxlength="1000" rows="5" placeholder="请尽量记录客户原始描述" :class="{ invalid: errors.description }"></textarea><span>{{ form.description.length }}/1000</span></div><small v-if="errors.description" class="error">{{ errors.description }}</small></div>
+        <fieldset v-if="!isOpportunity && !isInstantConsult" class="field radio-field priority-field"><legend class="required">优先级</legend><div class="priority-options"><label v-for="v in priorities" :key="v" :class="{ chosen: form.priority === v }"><input v-model="form.priority" type="radio" :value="v" />{{ v }}</label></div><small v-if="errors.priority" class="error">{{ errors.priority }}</small></fieldset>
+        <div class="field full"><label for="description" class="required">{{ isInstantConsult ? '咨询内容' : '客户问题详情' }}</label><div class="textarea-wrap"><textarea id="description" v-model="form.description" maxlength="1000" rows="5" placeholder="请尽量记录客户原始描述" :class="{ invalid: errors.description }"></textarea><span>{{ form.description.length }}/1000</span></div><small v-if="errors.description" class="error">{{ errors.description }}</small></div>
+        <div v-if="isInstantConsult" class="field full"><label for="instantAnswer" class="required">即时答复内容</label><div class="textarea-wrap"><textarea id="instantAnswer" v-model="form.instantAnswer" maxlength="4000" rows="5" placeholder="记录客服当场提供的答复" :class="{ invalid: errors.instantAnswer }"></textarea><span>{{ form.instantAnswer.length }}/4000</span></div><small v-if="errors.instantAnswer" class="error">{{ errors.instantAnswer }}</small></div>
       </div></TicketFormSection>
       <TicketFormSection v-if="!isOpportunity && form.category === '业务保障'" title="故障信息" icon="Tools" hint="（一级分类为“业务保障”时需填写）"><div class="grid fault-grid">
         <div class="field"><label for="faultTime" class="required">故障发生时间</label><input id="faultTime" v-model="form.faultTime" type="datetime-local" :class="{ invalid: errors.faultTime }" /><small v-if="errors.faultTime" class="error">{{ errors.faultTime }}</small></div>
@@ -34,7 +35,7 @@
           <span class="progress-ring" :style="{ '--progress': `${requiredPercent}%` }"><span>{{ requiredPercent }}%</span></span>
           <span class="progress-copy"><span>必填完成度</span><strong>{{ completedRequired }} / {{ requiredFields.length }}</strong></span>
         </div>
-        <div class="action-buttons"><button type="button" class="cancel" :disabled="busy" @click="router.push('/tickets')">取消</button><button type="button" class="secondary" :disabled="busy" @click="saveDraft">{{ busy ? '保存中…' : '保存草稿' }}</button><button type="submit" form="ticket-create-form" class="primary" :disabled="busy">{{ busy ? '处理中…' : '提交工单' }}</button></div>
+        <div class="action-buttons"><button type="button" class="cancel" :disabled="busy" @click="router.push('/tickets')">取消</button><button type="button" class="secondary" :disabled="busy" @click="saveDraft">{{ busy ? '保存中…' : '保存草稿' }}</button><button type="submit" form="ticket-create-form" class="primary" :disabled="busy">{{ busy ? '处理中…' : isInstantConsult ? '记录并办结' : '提交工单' }}</button></div>
       </div>
     </Teleport>
   </main>
@@ -98,8 +99,10 @@ const selectedCategoryId = computed(() => rootCategory.value?.create_selectable
   : subcategoryOptions.value.find(c => c.label === form.subcategory)?.id)
 const numberRequired = computed(() => form.category === '业务运营' || form.category === '业务保障')
 const isOpportunity = computed(() => form.businessOpportunity === 'yes')
+const isInstantConsult = computed(() => !isOpportunity.value && selectedCategoryId.value === 1205)
 const isReconciliation = computed(() => !isOpportunity.value && selectedCategoryId.value === 2204)
 const requiredFields = computed<(keyof TicketCreateDesignForm)[]>(() => {
+  if (isInstantConsult.value) return ['channel', 'callerPhone', 'category', 'subcategory', 'description', 'instantAnswer']
   const fields: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'businessOpportunity', 'description']
   if (isOpportunity.value) return [...fields, 'contactPhone', 'salesUserId']
   if (isReconciliation.value) fields.push('salesUserId')
@@ -144,6 +147,7 @@ onMounted(async () => {
       form.industry = ticket.industry || ''
       form.callerPhone = ticket.customer_phone || ''
       form.contactPhone = ticket.contact_phone || ''
+      form.instantAnswer = ticket.resolution || ''
       form.satelliteNumber = ticket.satellite_number || ''
       const root = categories.value.find(c => c.id === ticket.category_l1_id)
       form.category = (Object.keys(rootNames) as CategoryName[]).find(k => rootNames[k] === root?.name) || ''
@@ -181,19 +185,21 @@ function validate(): boolean {
 function payload(isDraft: boolean) {
   return {
     intake_form: true, is_draft: isDraft,
+    is_instant_resolve: isInstantConsult.value && !isDraft,
+    instant_resolution: isInstantConsult.value ? form.instantAnswer.trim() || null : null,
     customer_type: 'enterprise', customer_name: form.customerName.trim() || null,
     customer_company: form.companyName.trim() || null, industry: form.industry || null,
     customer_phone: form.callerPhone.trim(),
     customer_phone_type: form.callerPhone.startsWith('1') ? 'mobile' : 'landline',
     contact_phone: form.contactPhone.trim() || null, customer_email: null,
-    channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
+    channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value || isInstantConsult.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
     category_id: isOpportunity.value ? null : selectedCategoryId.value || null, description: form.description.trim(),
     skill_group_id: isOpportunity.value || isReconciliation.value ? salesGroupId.value : null,
     sales_owner_id: isOpportunity.value || isReconciliation.value ? form.salesUserId : null,
     dispatcher_id: null,
     complaint_level: !isOpportunity.value && form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
-    satellite_number: isOpportunity.value ? null : form.satelliteNumber.trim() || null,
-    is_opportunity: form.businessOpportunity ? form.businessOpportunity === 'yes' : null,
+    satellite_number: isOpportunity.value || isInstantConsult.value ? null : form.satelliteNumber.trim() || null,
+    is_opportunity: isInstantConsult.value ? false : form.businessOpportunity ? form.businessOpportunity === 'yes' : null,
     expected_result: null,
     fault_occurred_at: !isOpportunity.value && form.category === '业务保障' && form.faultTime ? new Date(form.faultTime).toISOString() : null,
     fault_recurrence: !isOpportunity.value && form.category === '业务保障' ? form.recurrence || null : null,
@@ -224,7 +230,7 @@ async function submitTicket() {
       try { await api.delete(`/tickets/drafts/${draftId.value}`, { silent: true }) }
       catch { ElMessage.warning('工单已创建，但旧草稿未能删除，请稍后手动清理') }
     }
-    ElMessage.success('工单提交成功')
+    ElMessage.success(isInstantConsult.value ? '咨询记录已办结' : '工单提交成功')
     await router.push(`/tickets/${res.data.id}`)
   } catch { /* API 拦截器显示错误 */ }
   finally { busy.value = false }

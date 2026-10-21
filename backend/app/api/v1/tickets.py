@@ -45,6 +45,7 @@ from app.services.category_utils import (
     build_responsibility_index,
     create_selectable_categories,
     is_valid_ticket_category,
+    INSTANT_CONSULT_CATEGORY_ID,
 )
 from app.services.state_machine import (
     TERMINAL_STATES,
@@ -206,7 +207,6 @@ def _ticket_to_detail(
     responsibility: dict[int, ResponsibilitySlots] | None = None,
     allowed_actions: list[dict] | None = None,
     can_reply: bool = False,
-    can_note: bool = False,
     can_addition: bool = False,
     can_remind: bool = False,
     can_refine: bool = False,
@@ -223,7 +223,6 @@ def _ticket_to_detail(
         allowed_actions=allowed_actions or [],
         is_terminal=t.state in TERMINAL_STATES,
         can_reply=can_reply,
-        can_note=can_note,
         can_addition=can_addition,
         can_remind=can_remind,
         can_refine=can_refine,
@@ -519,19 +518,15 @@ async def export_tickets(
     keyword: str | None = None,
     date_from: str | None = Query(None, description="创建时间起始 (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="创建时间结束 (YYYY-MM-DD)"),
-    columns: str | None = Query(None, description="逗号分隔的列组：base,customer,category,workflow"),
+    columns: str | None = Query(None, description="逗号分隔的字段键，顺序即导出列顺序"),
     db: AsyncSession = Depends(get_db),
     cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(get_current_user),
 ):
     """导出工单为 CSV（真实数据，按当前筛选条件）。"""
     from datetime import datetime, time
-    from app.models.group import Group, SkillGroup
-    from app.models.category import TicketCategory
-    from app.models.user import User as UserModel
-
     query = (
-        select(Ticket)
+        select(Ticket).where(Ticket.is_draft.is_(False))
         .options(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
             selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
@@ -603,14 +598,19 @@ async def export_tickets(
             except ValueError:
                 raise HTTPException(422, detail="date_to 格式错误，应为 YYYY-MM-DD")
 
-    query = query.order_by(Ticket.created_at.desc())
+    in_progress_breached = (
+        Ticket.state.notin_(["archived", "cancelled"])
+        & (Ticket.sla_solution_breached.is_(True))
+    )
+    query = query.order_by(
+        Ticket.urged_at.desc().nulls_last(),
+        in_progress_breached.desc(),
+        Ticket.created_at.desc(),
+    )
     result = await db.execute(query)
     tickets = result.scalars().all()
 
-    # 列组：默认全部
-    col_groups = set((columns or "base,customer,category,workflow").split(","))
-
-    # 状态/优先级中文名
+    # 逐列选择，字段键、顺序和用户在弹窗中的选择保持一致。
     state_labels = {
         "pending": "待受理", "open": "处理中", "resolved": "已处理",
         "on_hold": "暂缓处理", "returned": "退回",
@@ -619,60 +619,62 @@ async def export_tickets(
     priority_labels = {
         "p1_urgent": "P1 特别重大事件", "p2_high": "P2 重大事件", "p3_normal": "P3 较大事件", "p4_enterprise": "P4 一般事件",
     }
-    customer_type_labels = {"personal": "个人", "enterprise": "政企"}
     channel_labels = {"phone": "语音", "wechat": "微信服务号/公众号", "internal": "内部转办", "web": "在线客服", "email": "邮件", "app": "App"}
     satisfaction_labels = {"satisfied": "满意", "average": "一般", "dissatisfied": "不满意", "unrated": "未评价"}
+    local_tz = timezone(timedelta(hours=8))
 
-    # 列定义：(表头, 取值函数)
-    col_defs: list[tuple[str, any]] = []
-    if "base" in col_groups:
-        col_defs += [
-            ("工单编号", lambda t: t.number),
-            ("创建时间", lambda t: t.created_at.strftime("%Y-%m-%d %H:%M") if t.created_at else ""),
-            ("结束时间", lambda t: t.closed_at.strftime("%Y-%m-%d %H:%M") if t.closed_at else ""),
-            ("关闭时长(分)", lambda t: t.closed_duration_minutes or ""),
-            ("当前状态", lambda t: state_labels.get(t.state, t.state)),
-            ("工单来源", lambda t: channel_labels.get(t.channel, t.channel)),
-        ]
-    if "customer" in col_groups:
-        col_defs += [
-            ("用户姓名", lambda t: t.customer_name),
-            ("单位名称", lambda t: t.customer_company or ""),
-            ("来电号码", lambda t: t.customer_phone),
-            ("联系号码", lambda t: t.contact_phone or ""),
-            ("设备编号/SN", lambda t: t.device_sn or ""),
-            ("所属区域", lambda t: t.region_name or ""),
-        ]
-    if "category" in col_groups:
-        # L1/L2 走血缘索引（沿 parent 链到根），不能只取一层 parent。
-        # 血缘在生成 CSV 时才计算（tickets 那时才可用），故先建占位的
-        # per-ticket 缓存 dict，lambda 只查表。
-        _lin_cache: dict[int, tuple] = {}
+    def _local_time(value: datetime | None) -> str:
+        return value.astimezone(local_tz).strftime("%Y-%m-%d %H:%M") if value else ""
 
-        def _lin(t: Ticket) -> tuple:
-            if t.id not in _lin_cache:
-                _lin_cache[t.id] = _resolve_lineage(t, cat_idx.lineage)
-            return _lin_cache[t.id]
+    lineage_cache: dict[int, tuple] = {}
 
-        col_defs += [
-            ("一级分类", lambda t: _lin(t)[1].name if _lin(t)[1] else ""),
-            ("二级分类", lambda t: _lin(t)[2].name if _lin(t)[2] else ""),
-            ("分类路径", lambda t: _lin(t)[3] or ""),
-            ("问题详情", lambda t: t.symptom or ""),
-            ("优先级", lambda t: priority_labels.get(t.priority, t.priority)),
-        ]
-    if "workflow" in col_groups:
-        col_defs += [
-            ("工单创建人", lambda t: t.creator.name if t.creator else ""),
-            ("实际对接人", lambda t: t.dispatcher.name if t.dispatcher else ""),
-            ("实际处理人", lambda t: t.owner.name if t.owner else ""),
-            ("解决方案内容", lambda t: t.resolution or ""),
-            ("是否回访", lambda t: "是" if t.is_callbacked else "否"),
-            ("回访时间", lambda t: ""),  # 暂无独立回访时间字段
-            ("客户满意度", lambda t: satisfaction_labels.get(t.satisfaction, "") if t.satisfaction else ""),
-            ("归档说明", lambda t: t.archive_notes or ""),
-            ("SLA是否达标", lambda t: "超时" if t.sla_solution_breached else "达标"),
-        ]
+    def _lineage(ticket: Ticket) -> tuple:
+        if ticket.id not in lineage_cache:
+            lineage_cache[ticket.id] = _resolve_lineage(ticket, cat_idx.lineage)
+        return lineage_cache[ticket.id]
+
+    column_specs: dict[str, tuple[str, Any]] = {
+        "number": ("工单号", lambda t: t.number or ""),
+        "created_at": ("受理时间", lambda t: _local_time(t.created_at)),
+        "closed_at": ("结束时间", lambda t: _local_time(t.closed_at)),
+        "close_duration": ("关闭时长（分钟）", lambda t: t.closed_duration_minutes if t.closed_duration_minutes is not None else ""),
+        "state": ("当前状态", lambda t: state_labels.get(t.state, t.state)),
+        "channel": ("受理渠道", lambda t: channel_labels.get(t.channel, t.channel)),
+        "customer_name": ("客户名称", lambda t: t.customer_name or ""),
+        "customer_company": ("单位全称", lambda t: t.customer_company or ""),
+        "industry": ("行业", lambda t: t.industry or ""),
+        "customer_phone": ("来电号码", lambda t: t.customer_phone or ""),
+        "contact_phone": ("联系号码", lambda t: t.contact_phone or ""),
+        "device_sn": ("设备 SN", lambda t: t.device_sn or ""),
+        "region_name": ("区域", lambda t: t.region_name or ""),
+        "is_opportunity": ("是否为线索工单", lambda t: "是" if t.is_opportunity else "否" if t.is_opportunity is False else ""),
+        "satellite_number": ("卫星物联网码号", lambda t: t.satellite_number or ""),
+        "category_l1": ("一级分类", lambda t: _lineage(t)[1].name if _lineage(t)[1] else ""),
+        "category_l2": ("二级分类", lambda t: _lineage(t)[2].name if _lineage(t)[2] else ""),
+        "category_path": ("分类路径", lambda t: _lineage(t)[3] or ""),
+        "description": ("客户问题详情", lambda t: t.description or ""),
+        "priority": ("优先级", lambda t: priority_labels.get(t.priority, t.priority)),
+        "fault_occurred_at": ("故障发生时间", lambda t: _local_time(t.fault_occurred_at)),
+        "fault_recurrence": ("故障复现规律", lambda t: t.fault_recurrence or ""),
+        "fault_location": ("故障发生地理位置", lambda t: t.fault_location or ""),
+        "is_batch_fault": ("是否批量故障", lambda t: "是" if t.is_batch_fault else "否" if t.is_batch_fault is False else ""),
+        "creator_name": ("受理人", lambda t: t.creator.name if t.creator else ""),
+        "creator_group": ("受理班组", lambda t: t.group.name if t.group else ""),
+        "dispatcher_name": ("对接人", lambda t: t.dispatcher.name if t.dispatcher else ""),
+        "owner_name": ("当前处理人", lambda t: t.owner.name if t.owner else ""),
+        "resolution": ("处理结果", lambda t: t.resolution or ""),
+        "is_callbacked": ("是否已回访", lambda t: "是" if t.is_callbacked else "否"),
+        "callback_details": ("回访记录", lambda t: t.callback_details or ""),
+        "customer_recognized": ("客户是否认可", lambda t: "认可" if t.customer_recognized else "不认可" if t.customer_recognized is False else ""),
+        "customer_satisfaction_score": ("客户满意度评分", lambda t: t.customer_satisfaction_score if t.customer_satisfaction_score is not None else ""),
+        "satisfaction": ("客户满意度", lambda t: satisfaction_labels.get(t.satisfaction, "")),
+        "archive_notes": ("归档说明", lambda t: t.archive_notes or ""),
+        "sla_breached": ("SLA 解决时限", lambda t: "超时" if t.sla_solution_breached else "未超时"),
+    }
+    selected_keys = columns.split(",") if columns is not None else list(column_specs)
+    if not selected_keys or any(key not in column_specs for key in selected_keys):
+        raise HTTPException(422, detail="导出字段无效")
+    col_defs = [column_specs[key] for key in selected_keys]
 
     # 生成 CSV（UTF-8 BOM，Excel 友好）
     output = io.StringIO()
@@ -737,7 +739,21 @@ async def submit_draft(
     if ticket.category_id is not None and not await is_valid_ticket_category(db, ticket.category_id):
         raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
 
-    if ticket.is_opportunity or ticket.category_id == 2204:
+    is_instant_consult = ticket.category_id == INSTANT_CONSULT_CATEGORY_ID
+    if is_instant_consult:
+        if ticket.is_opportunity:
+            raise HTTPException(422, detail="即时办结咨询不能作为线索工单")
+        if not ticket.customer_phone.strip() or not ticket.description.strip() or not (ticket.resolution or "").strip():
+            raise HTTPException(422, detail="请填写来电号码、咨询内容和即时答复内容")
+        ticket.priority = "p4_enterprise"
+        ticket.owner_id = None
+        ticket.dispatcher_id = None
+        ticket.skill_group_id = None
+        ticket.handler_skill_group_id = None
+        ticket.dispatch_chain_steps = None
+        ticket.dispatch_step_index = None
+
+    if not is_instant_consult and (ticket.is_opportunity or ticket.category_id == 2204):
         sales_group = await _sales_group_for_owner(db, ticket.owner_id)
         ticket.skill_group_id = sales_group.id
         ticket.handler_skill_group_id = sales_group.id
@@ -748,7 +764,7 @@ async def submit_draft(
                 {"order": 2, "department_code": "财务"},
             ]
             ticket.dispatch_step_index = 0
-    elif not ticket.dispatcher_id:
+    elif not is_instant_consult and not ticket.dispatcher_id:
         raise HTTPException(422, detail="提交前必须指定部门对接人")
 
     today = datetime.now().strftime("%Y%m%d")
@@ -763,14 +779,18 @@ async def submit_draft(
         seq = int(max_number.split("-")[-1]) + 1
     ticket.number = f"{today}-{seq:04d}"
 
-    ticket.solution_deadline = await _calculate_sla_deadline(db, ticket.priority, ticket.skill_group_id)
+    ticket.solution_deadline = None if is_instant_consult else await _calculate_sla_deadline(db, ticket.priority, ticket.skill_group_id)
 
     ticket.is_draft = False
     await db.flush()
 
     # 初始状态落库（None → pending）：与建单共用执行入口
-    await apply_initial_state(db, ticket, to_state="pending", operator=user)
-    if ticket.is_opportunity or ticket.category_id == 2204:
+    await apply_initial_state(db, ticket, to_state="archived" if is_instant_consult else "pending", operator=user)
+    if is_instant_consult:
+        ticket.resolved = True
+        ticket.solved_at = ticket.closed_at
+        ticket.first_response_at = ticket.closed_at
+    elif ticket.is_opportunity or ticket.category_id == 2204:
         await apply_transition(db, ticket, to_state="open", operator=user,
                                owner_id=ticket.owner_id, allow_sales_intake=True)
     await db.commit()
@@ -816,6 +836,8 @@ async def update_draft(
 
     if body.category_id is not None and not await is_valid_ticket_category(db, body.category_id):
         raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
+    if body.category_id == INSTANT_CONSULT_CATEGORY_ID and body.is_opportunity:
+        raise HTTPException(422, detail="即时办结咨询不能作为线索工单")
 
     # Update draft fields
     ticket.description = body.description
@@ -829,6 +851,8 @@ async def update_draft(
     ticket.customer_company = body.customer_company
     ticket.industry = body.industry
     ticket.customer_email = body.customer_email
+    ticket.resolution = ((body.instant_resolution or "").strip() or None
+                         if body.category_id == INSTANT_CONSULT_CATEGORY_ID else None)
     ticket.satellite_number = body.satellite_number
     ticket.is_opportunity = body.is_opportunity
     ticket.expected_result = body.expected_result
@@ -926,16 +950,10 @@ async def _compose_node_form(
     if not form:
         return None
     if node_type in ("processing", "phone_feedback", "sales_opportunity") and article_actions["can_reply"]:
-        from app.services.node_form import allows_process_note
-        article_actions["can_note"] = node_type != "sales_opportunity" and allows_process_note(form)
         article_actions["can_reply"] = False
         node_context["allowed_actions"] = [
             a for a in node_context["allowed_actions"] if a["action"] != "reply"
         ]
-        if article_actions["can_note"]:
-            node_context["allowed_actions"].append(
-                {"action": "note", "target_state": ticket.state, "label": "添加回复"}
-            )
     return await present_form(db, form, ticket)
 
 
@@ -1416,8 +1434,22 @@ async def create_ticket(
     warnings = None
     if body.category_id is not None and not await is_valid_ticket_category(db, body.category_id):
         raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
-    if body.is_instant_resolve:
-        raise HTTPException(422, detail="即时咨询不记录工单")
+    is_instant_consult = body.category_id == INSTANT_CONSULT_CATEGORY_ID
+    if body.is_instant_resolve and not is_instant_consult:
+        raise HTTPException(422, detail="只有即时办结咨询分类可以创建时办结")
+    if is_instant_consult and body.is_opportunity:
+        raise HTTPException(422, detail="即时办结咨询不能作为线索工单")
+    if is_instant_consult:
+        body.is_opportunity = False
+        body.priority = "p4_enterprise"
+        body.skill_group_id = None
+        body.handler_skill_group_id = None
+        body.dispatcher_id = None
+        if not body.is_draft and not body.description.strip():
+            raise HTTPException(422, detail="请填写咨询内容")
+        if not body.is_draft and not (body.instant_resolution or "").strip():
+            raise HTTPException(422, detail="请填写即时答复内容")
+        body.instant_resolution = (body.instant_resolution or "").strip() or None
 
     if not body.is_draft:
         if not body.customer_phone.strip():
@@ -1435,15 +1467,15 @@ async def create_ticket(
                 selectable = create_selectable_categories(active_categories, chain_ids)
                 if not selectable.get(body.category_id, False):
                     raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
-            required = {
-                "客户名称": body.customer_name, "单位全称": body.customer_company,
-                "行业": body.industry, "客户问题详情": body.description,
-            }
+            required = {"客户问题详情": body.description}
+            if not is_instant_consult:
+                required.update({"客户名称": body.customer_name, "单位全称": body.customer_company,
+                                 "行业": body.industry})
             if body.is_opportunity and not body.contact_phone:
                 required["联系号码"] = body.contact_phone
             missing = [label for label, value in required.items() if not value]
-            if body.is_opportunity is None:
-                missing.append("是否为商机工单")
+            if body.is_opportunity is None and not is_instant_consult:
+                missing.append("是否为线索工单")
             if not body.is_opportunity and root_id in (2201, 2301) and not body.satellite_number:
                 missing.append("卫星物联网码号")
             if not body.is_opportunity and root_id == 2301:
@@ -1463,7 +1495,7 @@ async def create_ticket(
                 raise HTTPException(422, detail="优先级无效")
             if len(body.description) > 1000:
                 raise HTTPException(422, detail="客户问题详情不能超过1000字")
-            if body.industry not in ("海洋渔业", "工程机械", "智能网联", "交通物流", "能源行业", "应急通信", "智慧林草", "低空出行", "智慧水利", "智慧农业", "Robotaxi", "未提供"):
+            if (body.industry or not is_instant_consult) and body.industry not in ("海洋渔业", "工程机械", "智能网联", "交通物流", "能源行业", "应急通信", "智慧林草", "低空出行", "智慧水利", "智慧农业", "Robotaxi", "未提供"):
                 raise HTTPException(422, detail="行业无效")
             if not body.is_opportunity and root_id == 2301 and body.fault_recurrence not in ("必现", "偶发", "仅特定时段"):
                 raise HTTPException(422, detail="故障复现规律无效")
@@ -1508,7 +1540,7 @@ async def create_ticket(
             {"order": 2, "department_code": "财务"},
         ]
 
-    if body.category_id is not None and not is_reconciliation:
+    if body.category_id is not None and not is_reconciliation and not is_instant_consult:
         from app.services.dispatch_chain import resolve_responsibility
         resp = await resolve_responsibility(db, body.category_id)
         chain_steps = resp.get("chain_steps")
@@ -1561,6 +1593,7 @@ async def create_ticket(
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
             solution=body.solution,
+            resolution=body.instant_resolution if is_instant_consult else None,
             complaint_level=body.complaint_level,
             dispatch_chain_steps=chain_steps,
             dispatch_step_index=0 if chain_steps else None,
@@ -1583,7 +1616,7 @@ async def create_ticket(
         number = f"{today}-{seq:04d}"
 
         # Calculate SLA deadline
-        solution_deadline = await _calculate_sla_deadline(db, body.priority, body.skill_group_id, body.complaint_level)
+        solution_deadline = None if is_instant_consult else await _calculate_sla_deadline(db, body.priority, body.skill_group_id, body.complaint_level)
 
         # Check duplicates
         dup_result = await db.execute(
@@ -1606,7 +1639,7 @@ async def create_ticket(
             }
 
         # Dispatcher required for formal tickets
-        if not body.dispatcher_id and not (body.is_opportunity or is_reconciliation):
+        if not body.dispatcher_id and not (body.is_opportunity or is_reconciliation or is_instant_consult):
             detail = "所选分类尚未配置对接人，请联系管理员" if body.intake_form else "建单时必须指定部门对接人"
             raise HTTPException(422, detail=detail)
 
@@ -1634,6 +1667,7 @@ async def create_ticket(
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
             solution=body.solution,
+            resolution=body.instant_resolution if is_instant_consult else None,
             complaint_level=body.complaint_level,
             solution_deadline=solution_deadline,
             dispatch_chain_steps=chain_steps,
@@ -1647,11 +1681,17 @@ async def create_ticket(
 
     # 初始状态日志：仅正式工单记录（None → pending），草稿不写日志
     if not body.is_draft:
-        await apply_initial_state(db, ticket, to_state="pending", operator=user, body=body)
-        if body.is_opportunity or is_reconciliation:
+        await apply_initial_state(db, ticket, to_state="archived" if is_instant_consult else "pending",
+                                  operator=user, body=body)
+        if is_instant_consult:
+            ticket.resolved = True
+            ticket.solved_at = ticket.closed_at
+            ticket.first_response_at = ticket.closed_at
+        elif body.is_opportunity or is_reconciliation:
             await apply_transition(db, ticket, to_state="open", operator=user,
                                    owner_id=body.sales_owner_id, allow_sales_intake=True)
 
+    await db.flush()
     await db.refresh(ticket)
 
     # 显式提交，确保工单在返回前已持久化，避免前端立即跳转详情时 404

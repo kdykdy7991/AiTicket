@@ -177,27 +177,19 @@ async def create_article(
             detail="内部备注功能已下线"
         )
 
-    if type not in {"reply", "note", "addition", "reminder"}:
+    if type == "note":
+        raise HTTPException(422, detail="添加回复功能已下线，请通过当前节点表单提交处理意见")
+
+    if type not in {"reply", "addition", "reminder"}:
         raise HTTPException(422, detail="不支持的沟通记录类型")
 
-    if type in {"reply", "note"}:
+    if type == "reply":
         from app.services.node_context import resolve_node_context
-        from app.services.node_form import allows_process_note, resolve_form
+        from app.services.node_form import resolve_form
         context = await resolve_node_context(db, ticket, user)
         node_form = await resolve_form(db, context) if context.node_type in ("processing", "phone_feedback", "sales_opportunity") else None
-        if type == "reply" and node_form:
-            raise HTTPException(409, detail="当前节点须通过结构化表单完成；普通回复请使用 note")
-        if type == "note":
-            if context.node_type == "sales_opportunity":
-                raise HTTPException(409, detail="销售商机须通过处理表单提交并归档")
-            if not node_form:
-                raise HTTPException(422, detail="当前节点不接受普通处理回复")
-            if not allows_process_note(node_form):
-                raise HTTPException(409, detail="当前节点请通过处理表单提交处理意见")
-            if ticket.owner_id != user.id or ticket.state not in REPLY_ALLOWED_STATES:
-                raise HTTPException(403, detail="仅当前处理人可添加处理回复")
-            if not body.strip():
-                raise HTTPException(422, detail="回复内容不能为空")
+        if node_form:
+            raise HTTPException(409, detail="当前节点须通过结构化表单完成")
 
     # 处理说明：只有当前处理人可提交，且工单须处于处理中/暂缓
     # 中间链节点提交后转派下一部门；链末节点提交后进入「已处理」。

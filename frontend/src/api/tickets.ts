@@ -359,16 +359,9 @@ export const ticketApi = {
   async export(params: { filters?: TicketFilters; columns?: string[] }): Promise<Blob> {
     const queryParams: Record<string, any> = buildListParams(params.filters, 1, 10000)
     delete queryParams._t
-    // 前端列 key → 后端列组：base/customer/category/workflow
+    // 后端按字段键和顺序逐列输出，与勾选结果完全一致。
     if (params.columns?.length) {
-      const colGroups = new Set<string>()
-      for (const key of params.columns) {
-        if (['number', 'created_at', 'closed_at', 'close_duration', 'state', 'channel'].includes(key)) colGroups.add('base')
-        if (['customer_name', 'customer_company', 'customer_phone', 'contact_phone', 'device_sn', 'region_name'].includes(key)) colGroups.add('customer')
-        if (['category_l1', 'category_l2', 'symptom', 'priority'].includes(key)) colGroups.add('category')
-        if (['creator_name', 'dispatcher_name', 'owner_name', 'resolution', 'is_callbacked', 'callback_time', 'satisfaction', 'archive_notes', 'sla_breached'].includes(key)) colGroups.add('workflow')
-      }
-      queryParams.columns = [...colGroups].join(',')
+      queryParams.columns = params.columns.join(',')
     }
     // blob 响应不走响应拦截器的 data 提取
     return await api.get('/tickets/export', { params: queryParams, responseType: 'blob' }) as unknown as Blob

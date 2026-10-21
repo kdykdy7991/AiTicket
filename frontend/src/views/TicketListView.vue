@@ -3,7 +3,6 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">工单列表</h2>
-        <p class="page-subtitle">管理和追踪所有工单</p>
       </div>
       <div class="header-actions">
         <el-button @click="exportDialogVisible = true" class="export-btn">
@@ -159,46 +158,57 @@ const columnGroups: Array<{ key: 'base' | 'customer' | 'category' | 'workflow'; 
   {
     key: 'base', label: '基础核心',
     columns: [
-      { key: 'number', label: '工单编号', group: 'base' },
-      { key: 'created_at', label: '创建时间', group: 'base' },
-      { key: 'closed_at', label: '结案时间', group: 'base' },
-      { key: 'close_duration', label: '关闭时长', group: 'base' },
+      { key: 'number', label: '工单号', group: 'base' },
+      { key: 'created_at', label: '受理时间', group: 'base' },
+      { key: 'closed_at', label: '结束时间', group: 'base' },
+      { key: 'close_duration', label: '关闭时长（分钟）', group: 'base' },
       { key: 'state', label: '当前状态', group: 'base' },
-      { key: 'channel', label: '工单来源', group: 'base' },
+      { key: 'channel', label: '受理渠道', group: 'base' },
     ],
   },
   {
-    key: 'customer', label: '用户信息',
+    key: 'customer', label: '客户信息',
     columns: [
-      { key: 'customer_name', label: '用户姓名', group: 'customer' },
-      { key: 'customer_company', label: '单位名称', group: 'customer' },
+      { key: 'customer_name', label: '客户名称', group: 'customer' },
+      { key: 'customer_company', label: '单位全称', group: 'customer' },
+      { key: 'industry', label: '行业', group: 'customer' },
       { key: 'customer_phone', label: '来电号码', group: 'customer' },
       { key: 'contact_phone', label: '联系号码', group: 'customer' },
       { key: 'device_sn', label: '设备 SN', group: 'customer' },
-      { key: 'region_name', label: '所属区域', group: 'customer' },
+      { key: 'region_name', label: '区域', group: 'customer' },
     ],
   },
   {
-    key: 'category', label: '分类标签',
+    key: 'category', label: '工单内容',
     columns: [
+      { key: 'is_opportunity', label: '是否为线索工单', group: 'category' },
+      { key: 'satellite_number', label: '卫星物联网码号', group: 'category' },
       { key: 'category_l1', label: '一级分类', group: 'category' },
       { key: 'category_l2', label: '二级分类', group: 'category' },
-      { key: 'symptom', label: '问题详情', group: 'category' },
+      { key: 'category_path', label: '分类路径', group: 'category' },
+      { key: 'description', label: '客户问题详情', group: 'category' },
       { key: 'priority', label: '优先级', group: 'category' },
+      { key: 'fault_occurred_at', label: '故障发生时间', group: 'category' },
+      { key: 'fault_recurrence', label: '故障复现规律', group: 'category' },
+      { key: 'fault_location', label: '故障发生地理位置', group: 'category' },
+      { key: 'is_batch_fault', label: '是否批量故障', group: 'category' },
     ],
   },
   {
     key: 'workflow', label: '处理流转',
     columns: [
-      { key: 'creator_name', label: '工单创建人', group: 'workflow' },
-      { key: 'dispatcher_name', label: '实际对接人', group: 'workflow' },
-      { key: 'owner_name', label: '实际处理人', group: 'workflow' },
-      { key: 'resolution', label: '解决方案内容', group: 'workflow' },
-      { key: 'is_callbacked', label: '是否回访', group: 'workflow' },
-      { key: 'callback_time', label: '回访时间', group: 'workflow' },
+      { key: 'creator_name', label: '受理人', group: 'workflow' },
+      { key: 'creator_group', label: '受理班组', group: 'workflow' },
+      { key: 'dispatcher_name', label: '对接人', group: 'workflow' },
+      { key: 'owner_name', label: '当前处理人', group: 'workflow' },
+      { key: 'resolution', label: '处理结果', group: 'workflow' },
+      { key: 'is_callbacked', label: '是否已回访', group: 'workflow' },
+      { key: 'callback_details', label: '回访记录', group: 'workflow' },
+      { key: 'customer_recognized', label: '客户是否认可', group: 'workflow' },
+      { key: 'customer_satisfaction_score', label: '客户满意度评分', group: 'workflow' },
       { key: 'satisfaction', label: '客户满意度', group: 'workflow' },
       { key: 'archive_notes', label: '归档说明', group: 'workflow' },
-      { key: 'sla_breached', label: 'SLA 达标', group: 'workflow' },
+      { key: 'sla_breached', label: 'SLA 解决时限', group: 'workflow' },
     ],
   },
 ]
@@ -250,7 +260,7 @@ async function onExport() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `tickets_${Date.now()}.csv`
+    a.download = `工单列表_${new Date().toLocaleDateString('sv-SE')}.csv`
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success('导出成功')

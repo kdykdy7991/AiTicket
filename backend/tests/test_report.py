@@ -57,3 +57,33 @@ async def test_report_groups_deep_and_direct_tickets_under_root(client):
         "待确定二级分类": 1, "星座大系统": 1,
     }
     assert next(row for row in data["by_category"] if row["name"] == "业务保障")["trend"][0]["value"] == 2
+
+
+async def test_service_analysis_uses_real_tickets_and_separates_opportunities(client):
+    c, _dispatcher_id, engine = client
+    when = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+    async with AsyncSession(engine) as session:
+        root = TicketCategory(name="业务保障")
+        session.add(root)
+        await session.flush()
+        session.add_all([
+            Ticket(number="SVC-1", customer_phone="13900000000", creator_id=1,
+                   category_id=root.id, is_opportunity=False, created_at=when),
+            Ticket(number="OPP-1", customer_phone="13900000001", creator_id=1,
+                   is_opportunity=True, created_at=when),
+            Ticket(number="DRAFT-1", customer_phone="13900000002", creator_id=1,
+                   is_draft=True, created_at=when),
+        ])
+        await session.commit()
+
+    resp = await c.get("/api/v1/stats/service-analysis", params={
+        "date_from": "2026-07-15", "date_to": "2026-07-15",
+    })
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["metrics"]["total"] == 2
+    assert data["metrics"]["service_count"] == 1
+    assert data["metrics"]["opportunity_count"] == 1
+    assert {row["name"]: row["count"] for row in data["by_category"]} == {
+        "业务保障": 1, "线索工单": 1,
+    }

@@ -56,8 +56,14 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
         detail = await tenv["get"](ticket["id"])
         assert detail["node_context"]["node_type"] == "processing"
         review_form = detail["current_form"]
-        assert review_form["code"] == "package_change_review_v1"
+        assert review_form["code"] == "package_change_review_v2"
+        assert [field["field_key"] for field in review_form["fields"]] == ["new_package_name", "processing_opinion"]
+        assert "can_note" not in detail
+        note = await tenv["client"].post(f"/api/v1/tickets/{ticket['id']}/articles",
+            data={"type": "note", "body": "重复的过程回复"})
+        assert note.status_code == 422
         missing = request(ticket, review_form["form_definition_id"])
+        missing["form_version"] = review_form["version"]
         missing["values"] = {"processing_opinion": "审核通过"}
         response = await tenv["client"].post(f"/api/v1/tickets/{ticket['id']}/node-submit",
             data={"payload": json.dumps(missing)})
@@ -69,12 +75,12 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
         resume = await tenv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
             "state": "open", "reason": "申请单已到"})
         assert resume.status_code == 200, resume.text
-        assert (await tenv["get"](ticket["id"]))["current_form"]["code"] == "package_change_review_v1"
+        assert (await tenv["get"](ticket["id"]))["current_form"]["code"] == "package_change_review_v2"
         payload = request(ticket, review_form["form_definition_id"])
+        payload["form_version"] = review_form["version"]
         payload["values"] = {"new_package_name": "企业通信套餐", "processing_opinion": "审核通过"}
         result = await tenv["client"].post(f"/api/v1/tickets/{ticket['id']}/node-submit",
-            data={"payload": json.dumps(payload)},
-            files=[("attachments", ("application.pdf", b"%PDF-1.4 test", "application/pdf"))])
+            data={"payload": json.dumps(payload)})
     assert result.status_code == 200, result.text
     transferred = result.json()["data"]
     assert transferred["state"] == "pending" and transferred["dispatch_step_index"] == 1
@@ -89,15 +95,15 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
         assert submission.action_type == "transfer"
         attachments = (await db.execute(select(ArticleAttachment).where(
             ArticleAttachment.article_id == submission.article_id))).scalars().all()
-        assert len(attachments) == 1
+        assert len(attachments) == 0
 
     next_ticket = await tenv["patch"](ticket["id"], {"state": "open", "owner_id": executor_id})
     with as_user(executor_id, "handler"):
         execution_detail = await tenv["get"](ticket["id"])
         execution_form = execution_detail["current_form"]
-        assert execution_form["code"] == "package_change_execute_v2"
+        assert execution_form["code"] == "package_change_execute_v3"
         assert execution_form["form_definition_id"] != base_form_id
-        assert {field["field_key"] for field in execution_form["fields"]} == {"processing_opinion", "related_materials"}
+        assert [field["field_key"] for field in execution_form["fields"]] == ["processing_opinion"]
         assert next(field for field in execution_form["fields"] if field["field_key"] == "processing_opinion")["label"] == "处理意见（结论）"
         hold = await tenv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
             "state": "on_hold", "reason": "等待操作窗口", "hold_until": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()})
@@ -114,8 +120,7 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
             data={"payload": json.dumps(missing)})
         assert invalid.status_code == 422
         completed = await tenv["client"].post(f"/api/v1/tickets/{ticket['id']}/node-submit",
-            data={"payload": json.dumps(payload)},
-            files=[("attachments", ("execution.pdf", b"%PDF-1.4 execution", "application/pdf"))])
+            data={"payload": json.dumps(payload)})
     assert completed.status_code == 200, completed.text
     resolved = completed.json()["data"]
     assert resolved["state"] == "resolved" and resolved["callback_required"] is True
@@ -129,7 +134,7 @@ async def test_package_change_review_then_execution(tenv, tmp_path, monkeypatch)
         assert article.body == "已完成套餐变更操作"
         attachments = (await db.execute(select(ArticleAttachment).where(
             ArticleAttachment.article_id == article.id))).scalars().all()
-        assert len(attachments) == 1
+        assert len(attachments) == 0
         stored_ticket = await db.get(Ticket, ticket["id"])
         assert stored_ticket.root_cause is None
 

@@ -13,7 +13,7 @@ FIELDS = {
     'category': ('一级分类', 'select', ['咨询', '投诉', '业务运营', '业务保障'], True),
     'subcategory': ('二级分类', 'select', [], True),
     'satelliteNumber': ('卫星物联码号', 'text', [], False),
-    'businessOpportunity': ('是否为商机工单', 'radio', [], True),
+    'businessOpportunity': ('是否为线索工单', 'radio', [], True),
     'expectedResult': ('客户期望结果', 'select', ['解释说明', '远程排查', '上门检修', '换终端', '退费', '销户', '体验优化'], True),
     'priority': ('优先级', 'select', ['P1', 'P2', 'P3', 'P4'], True),
     'description': ('客户问题详情', 'textarea', [], True),

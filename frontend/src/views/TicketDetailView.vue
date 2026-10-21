@@ -50,6 +50,7 @@
                   <div v-if="ticket.root_cause" class="sales-submission-opinion"><span>根本原因</span><strong>{{ ticket.root_cause }}</strong></div>
                   <div v-if="ticket.solution || ticket.resolution" class="sales-submission-opinion"><span>解决方案</span><strong>{{ ticket.solution || ticket.resolution }}</strong></div>
                 </template>
+                <div v-if="card.showInstantResolution" class="sales-submission-opinion"><span>即时答复内容</span><strong>{{ ticket.resolution }}</strong></div>
               </div>
             </div>
           </div>
@@ -316,8 +317,8 @@
           </div>
 
           <div v-if="processingForm" class="refine-card">
-            <div class="refine-card-title">{{ isSalesOpportunity ? '完成销售商机处理' : '完成本节点处理' }}</div>
-            <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成商机处理并归档。' : ticket.can_note ? '下方“添加回复”仅记录处理过程；提交本表单才会完成当前部门的处理并按原有流程流转。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
+            <div class="refine-card-title">{{ isSalesOpportunity ? '完成销售线索处理' : '完成本节点处理' }}</div>
+            <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成线索处理并归档。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
               <el-select v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable
@@ -335,12 +336,11 @@
               <el-button type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
               <el-button v-if="canHold" :loading="holding" @click="holdDialogVisible = true">暂缓处理</el-button>
             </div>
-            <p v-if="!isSalesOpportunity && ticket.can_note" class="refine-card-hint">「添加回复」只记录沟通过程；「完成本节点处理」按流程流转；「暂缓处理」暂停本节点，恢复后继续处理。</p>
           </div>
 
           <div v-if="phoneFeedbackForm" class="refine-card">
             <div class="refine-card-title">提交售后致电反馈</div>
-            <p class="refine-card-hint">下方“添加回复”仅记录沟通过程；提交本表单才会完成反馈并按现有流程流转。</p>
+            <p class="refine-card-hint">提交本表单会完成反馈并按现有流程流转。</p>
             <div v-for="field in phoneFeedbackForm.fields.filter((item: any) => item.visible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="field.required"> *</span></label>
               <el-select v-if="field.field_type === 'select'" v-model="phoneFeedbackValues[field.field_key]" clearable>
@@ -382,7 +382,7 @@
           </div>
 
           <ReplyEditor
-            v-if="!isSalesOpportunity && !isTerminalState && (ticket.can_reply || ticket.can_note || ticket.can_addition || ticket.can_remind)"
+            v-if="!isSalesOpportunity && !isTerminalState && (ticket.can_reply || ticket.can_addition || ticket.can_remind)"
             :ticket="ticket"
             :articles="ticket.articles"
             @submitted="onRefresh"
@@ -500,9 +500,16 @@ function submissionFields(submission: any): Array<{ key: string; label: string; 
       : field.storage_type === 'ticket_field' ? field.submitted_value
         : field.storage_type === 'article' ? submission.article_body : undefined
     if (value === null || value === undefined || value === '') return []
-    return [{ key: field.key, label: field.label, type: field.type,
+    const label = ['sales_opportunity_v1', 'sales_opportunity_v2'].includes(submission.form_code) && field.key === 'valid_opportunity'
+      ? '是否为有效线索' : field.label
+    return [{ key: field.key, label, type: field.type,
       value: typeof value === 'boolean' ? (value ? '是' : '否') : String(value) }]
   })
+}
+function normalizeOpportunityForm(form: any) {
+  if (!['sales_opportunity_v1', 'sales_opportunity_v2'].includes(form?.code)) return form
+  return { ...form, name: '销售线索处理', fields: form.fields.map((field: any) =>
+    field.field_key === 'valid_opportunity' ? { ...field, label: '是否为有效线索' } : field) }
 }
 const articlePlacement = computed(() => {
   const byLogId = new Map<number, any[]>()
@@ -562,8 +569,9 @@ const timelineCards = computed(() => {
         && Boolean(t.is_callbacked || t.callback_details || t.archive_notes || t.satisfaction)
       const showLegacyResult = legacyResultLog?.id === log.id && !submissions.some((entry: any) => entry.node_type === 'processing')
         && Boolean(t.root_cause || t.solution || t.resolution)
-      if (!nodeSubmissions.length && !articles.length && !showLegacyClosure && !showLegacyResult) return []
-      return [{ log, title: timelineActionName(log, submissions, logs), submissions: nodeSubmissions, articles, showLegacyClosure, showLegacyResult }]
+      const showInstantResolution = log.action_type === 'instant_resolve' && Boolean(t.resolution)
+      if (!nodeSubmissions.length && !articles.length && !showLegacyClosure && !showLegacyResult && !showInstantResolution) return []
+      return [{ log, title: timelineActionName(log, submissions, logs), submissions: nodeSubmissions, articles, showLegacyClosure, showLegacyResult, showInstantResolution }]
     })
 })
 const closureLogId = computed<number | null>(() => {
@@ -706,7 +714,7 @@ async function submitProcessingForm() {
       expected_state: t.state_key,
       values,
     }, processingFiles.value)
-    ElMessage.success(isSalesOpportunity.value ? '销售商机已处理并归档' : '本节点处理已完成')
+    ElMessage.success(isSalesOpportunity.value ? '销售线索已处理并归档' : '本节点处理已完成')
     processingValues.value = {}
     phoneFeedbackValues.value = {}
     processingFiles.value = []
@@ -886,7 +894,7 @@ watch(closureForm, () => { prefillClosureForm() }, { immediate: true })
 async function loadTriageForm(categoryId: number) {
   if (!ticket.value) return
   try {
-    currentForm.value = await ticketApi.currentForm((ticket.value as any).id, categoryId)
+    currentForm.value = normalizeOpportunityForm(await ticketApi.currentForm((ticket.value as any).id, categoryId))
     for (const field of currentForm.value.fields) {
       if (field.value != null && triageValues.value[field.field_key] == null) {
         triageValues.value[field.field_key] = field.value
@@ -967,7 +975,7 @@ async function loadTicket() {
   const id = Number(route.params.id)
   if (id) {
     await ticketStore.fetchTicketDetail(id)
-    currentForm.value = (ticket.value as any)?.current_form ?? null
+    currentForm.value = normalizeOpportunityForm((ticket.value as any)?.current_form ?? null)
     processingValues.value = {}
     for (const field of currentForm.value?.fields || []) {
       if (field.value != null) processingValues.value[field.field_key] = field.value

@@ -69,9 +69,9 @@ async def derive_node_type(db: AsyncSession, ticket: Ticket) -> tuple[NodeType |
             return "assignment", department_code, stage
         if ticket.is_opportunity:
             if ticket.category_id is not None or stage is not None:
-                raise NodeContextConflict("商机工单不应进入分类分派链")
+                raise NodeContextConflict("线索工单不应进入分类分派链")
             if department_code != "销售":
-                raise NodeContextConflict("商机工单当前责任部门不是销售")
+                raise NodeContextConflict("线索工单当前责任部门不是销售")
             return "sales_opportunity", department_code, stage
         judgement = await judging_department(db, ticket.category_id)
         children = await category_children(db, ticket.category_id) if ticket.category_id else []
@@ -97,7 +97,7 @@ def node_action_error(node_type: NodeType | None, action: str) -> str | None:
         # 致电反馈是链末步：先提交反馈记录，不做与反馈无关的暂缓。
         return "当前节点须提交致电反馈记录"
     if node_type == "sales_opportunity" and action in {"refine", "dispatch", "reply", "transfer", "resolve", "hold"}:
-        return "当前节点须提交销售商机处理表单"
+        return "当前节点须提交销售线索处理表单"
     return None
 
 

@@ -55,15 +55,15 @@ async def seed_sales_opportunity_form(session_factory: async_sessionmaker | None
             else:
                 membership.is_dispatcher = False
         form = (await db.execute(select(FormDefinition).where(
-            FormDefinition.code == "sales_opportunity_v1", FormDefinition.version == 1,
+            FormDefinition.code == "sales_opportunity_v2", FormDefinition.version == 2,
         ))).scalar_one_or_none()
         if form is None:
-            form = FormDefinition(code="sales_opportunity_v1", name="销售商机处理",
-                                  node_type="sales_opportunity", version=1, enabled=True, published_at=None)
+            form = FormDefinition(code="sales_opportunity_v2", name="销售线索处理",
+                                  node_type="sales_opportunity", version=2, enabled=True, published_at=None)
             db.add(form)
             await db.flush()
             fields = (
-                ("valid_opportunity", "是否为有效商机", "boolean", None, "submission", None),
+                ("valid_opportunity", "是否为有效线索", "boolean", None, "submission", None),
                 ("customer_rating", "客户评级", "select", RATING_OPTIONS, "submission", None),
                 ("sales_opinion", "处理意见", "textarea", None, "article", "body"),
             )
@@ -72,11 +72,17 @@ async def seed_sales_opportunity_form(session_factory: async_sessionmaker | None
                     field_type=kind, sort_order=order, required=True, options=options,
                     validation={"max_length": 4000} if kind == "textarea" else None,
                     storage_type=storage, storage_key=storage_key))
+            await db.flush()
+            form.published_at = datetime.now(timezone.utc)
+        bindings = (await db.execute(select(FormBinding).where(
+            FormBinding.node_type == "sales_opportunity", FormBinding.department_code == "销售",
+        ))).scalars().all()
+        if not any(binding.form_definition_id == form.id for binding in bindings):
             db.add(FormBinding(node_type="sales_opportunity", department_code="销售", category_id=None,
                                category_match_type="exact", form_definition_id=form.id,
                                priority=0, enabled=True))
-            await db.flush()
-            form.published_at = datetime.now(timezone.utc)
+        for binding in bindings:
+            binding.enabled = binding.form_definition_id == form.id
         await db.commit()
 
 

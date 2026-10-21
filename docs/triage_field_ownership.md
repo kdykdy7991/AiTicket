@@ -24,7 +24,7 @@
 | 相关材料附件 | 有通用附件 | ArticleAttachment | 可能 | 文章附件 | B 附件结构 |
 | 处理意见 | 是，叙述记录 | Article.body | 有 | 处理日志 | B Article.body |
 | 最终处理结论 | 是 | Ticket.solution、Ticket.resolution（语义重叠） | 有 | resolve 路径 | A 暂定 Ticket.solution；接入 processing 前核定 resolution 迁移关系 |
-| 是否为有效商机 | 不完全等价 | Ticket.is_opportunity 表示“是否商机” | 有 | 建单字段 | C 有效性判断（后续，先区分语义） |
+| 是否为有效线索 | 不完全等价 | Ticket.is_opportunity 表示“是否线索” | 有 | 建单字段 | C 有效性判断（后续，先区分语义） |
 | 客户初步评级 | 不完全等价 | Ticket.customer_level 表示客户等级 | 有 | 客户信息 | C 销售评级（后续，先区分语义） |
 | 销售处理意见 | 是，通用记录 | Article.body | 有 | 文章日志 | B Article.body |
 | 暂缓原因 | 是，动作原因 | TicketStateLog.reason | 有 | hold 动作 | B 状态日志原因（停用动作，未接表单） |

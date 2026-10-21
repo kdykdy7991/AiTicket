@@ -77,10 +77,10 @@ async def test_processing_form_mid_chain_article_submission_and_feedback(tenv, t
         detail = await tenv["get"](t["id"])
         assert detail["node_context"]["node_type"] == "processing"
         assert detail["current_form"]["form_definition_id"] == form_id
-        assert detail["can_note"] is True and detail["can_reply"] is False
+        assert "can_note" not in detail and detail["can_reply"] is False
         note = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/articles",
                                           data={"type": "note", "body": "正在排查"})
-        assert note.status_code == 201, note.text
+        assert note.status_code == 422
         assert (await tenv["get"](t["id"]))["state"] == "open"
         bypass = await tenv["client"].post(f"/api/v1/tickets/{t['id']}/articles",
                                             data={"type": "reply", "body": "绕过表单"})

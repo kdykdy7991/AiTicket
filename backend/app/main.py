@@ -102,11 +102,12 @@ app.mount(settings.PUBLIC_UPLOAD_URL, StaticFiles(directory=settings.UPLOAD_DIR)
 
 
 # ── Routers ───────────────────────────────────────────────
-from app.api.v1 import auth, articles, tickets, common, mcp_read, agent_embed, casdoor, knowledge_mock, knowledge
+from app.api.v1 import auth, articles, tickets, common, mcp_read, agent_embed, casdoor, knowledge_mock, knowledge, visit_records
 
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(casdoor.router, prefix="/api/v1")
 app.include_router(tickets.router, prefix="/api/v1")
+app.include_router(visit_records.router, prefix="/api/v1")
 app.include_router(articles.router, prefix="/api/v1")
 app.include_router(common.users_router, prefix="/api/v1")
 app.include_router(common.groups_router, prefix="/api/v1")

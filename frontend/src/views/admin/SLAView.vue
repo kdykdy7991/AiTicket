@@ -3,7 +3,6 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">SLA 策略</h2>
-        <p class="page-subtitle">配置各对接部门与优先级的响应/解决时限，超时将触发钉钉预警</p>
       </div>
       <el-button type="primary" @click="openCreate">新增策略</el-button>
     </div>

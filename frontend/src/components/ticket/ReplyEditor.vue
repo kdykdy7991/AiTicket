@@ -9,7 +9,7 @@
           @click="activeTab = 'reply'"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9,17 4,12 9,7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-          {{ isNodeNote ? '添加回复' : isPhoneFeedback ? '致电反馈' : '处理说明' }}
+          {{ isPhoneFeedback ? '致电反馈' : '处理说明' }}
         </button>
         <button
           v-if="canAppend"
@@ -150,9 +150,7 @@ const currentStateKey = computed(() => (props.ticket as any).state_key || '')
 
 // ── V0.86：能力位/动作全部来自后端详情接口（唯一事实来源）──
 // 后端按 articles 端点同一份规则生成 can_*；hold 等状态动作用 allowed_actions。
-const canReply = computed(() => (props.ticket as any).can_reply === true || (props.ticket as any).can_note === true)
-const canNote = computed(() => (props.ticket as any).can_note === true)
-const isNodeNote = computed(() => canNote.value && ['processing', 'phone_feedback', 'sales_opportunity'].includes((props.ticket as any).node_context?.node_type))
+const canReply = computed(() => (props.ticket as any).can_reply === true)
 const canAppend = computed(() => (props.ticket as any).can_addition === true)
 const canRemind = computed(() => (props.ticket as any).can_remind === true)
 const willTransferAfterReply = computed(() => {
@@ -175,7 +173,7 @@ const currentStateLogId = computed(() => {
 
 // 是否已存在处理说明（当前状态下已有 reply）
 const hasSummary = computed(() =>
-  !isNodeNote.value && props.articles.some(a => a.type === 'reply' && a.state_key === currentStateLogId.value)
+  props.articles.some(a => a.type === 'reply' && a.state_key === currentStateLogId.value)
 )
 
 const inputDisabled = computed(() =>
@@ -193,7 +191,6 @@ const placeholder = computed(() => {
     return `当前状态下已提交${isPhoneFeedback.value ? '致电反馈' : '处理说明'}`
   }
   if (isPhoneFeedback.value) return '请填写售后致电反馈结果，提交后交客服回访归档...'
-  if (isNodeNote.value) return '添加过程回复；此操作不会完成当前节点或推进部门链...'
   return willTransferAfterReply.value
     ? '请输入本部门处理说明，提交后将流转至下一部门...'
     : '请输入处理说明，提交后将标记为已处理...'
@@ -202,7 +199,6 @@ const placeholder = computed(() => {
 const submitLabel = computed(() => {
   if (activeTab.value === 'addition') return '补充记录'
   if (activeTab.value === 'reminder') return '发起催办'
-  if (isNodeNote.value) return '添加回复'
   return isPhoneFeedback.value ? '提交致电反馈' : willTransferAfterReply.value ? '提交并流转' : '提交处理说明'
 })
 
@@ -290,7 +286,7 @@ async function onSubmit() {
 
   submitting.value = true
   try {
-    const type = activeTab.value === 'reply' && isNodeNote.value ? 'note' : activeTab.value
+    const type = activeTab.value
     const payload: ArticleCreatePayload = {
       type,
       body: body.value,
@@ -305,7 +301,6 @@ async function onSubmit() {
     clearAttachments()
     const msgMap: Record<string, string> = {
       reply: isPhoneFeedback.value ? '致电反馈已提交，工单已交客服回访归档' : willTransferAfterReply.value ? '处理说明已提交，已流转至下一部门' : '处理说明已提交',
-      note: '回复已记录，当前处理节点仍待完成',
       addition: '补充已记录',
       reminder: '催办已发起',
     }
