@@ -38,7 +38,7 @@ async def seed_triage_form(session_factory: async_sessionmaker | None = None) ->
         ))).scalar_one_or_none()
         if existing:
             return  # Published versions are immutable.
-        form = FormDefinition(code="after_sales_triage", name="售后分诊", node_type="triage",
+        form = FormDefinition(code="after_sales_triage", name="初步判断依据", node_type="triage",
                               version=1, enabled=True, published_at=None)
         db.add(form)
         await db.flush()

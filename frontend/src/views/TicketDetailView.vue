@@ -22,28 +22,36 @@
         <div class="detail-main">
           <div class="ticket-content-flow">
             <TicketDetailInformation :ticket="ticket" />
-            <template v-for="submission in completedSubmissions" :key="submission.id">
-              <div v-if="submission.node_type === 'sales_opportunity'" class="sales-submission-card">
-              <div class="sales-submission-title">销售商机处理</div>
+            <div v-for="card in timelineCards" :key="card.log.id" class="sales-submission-card">
+              <div class="sales-submission-title">{{ card.title }}</div>
               <div class="sales-submission-fields">
-                <div><span>是否为有效商机</span><strong>{{ submission.data?.valid_opportunity === true ? '是' : submission.data?.valid_opportunity === false ? '否' : '—' }}</strong></div>
-                <div><span>客户评级</span><strong>{{ submission.data?.customer_rating || '—' }}</strong></div>
-                <div class="sales-submission-opinion"><span>处理意见</span><strong>{{ submission.article_body || '—' }}</strong></div>
-              </div>
-              </div>
-              <div v-else class="sales-submission-card">
-                <div class="sales-submission-title">处理说明</div>
-                <div class="sales-submission-fields">
-                  <div v-for="field in submissionFields(submission)" :key="field.key" :class="{ 'sales-submission-opinion': field.type === 'textarea' }">
+                <template v-for="submission in card.submissions" :key="submission.id">
+                  <div v-for="field in submissionFields(submission)" :key="`${submission.id}-${field.key}`" :class="{ 'sales-submission-opinion': field.type === 'textarea' }">
                     <span>{{ field.label }}</span><strong>{{ field.value }}</strong>
                   </div>
                   <div v-if="submission.attachments?.length" class="sales-submission-opinion">
-                    <span>相关材料附件</span>
+                    <span>附件</span>
                     <strong class="submission-attachments"><a v-for="attachment in submission.attachments" :key="attachment.id" :href="attachment.url" target="_blank" rel="noopener noreferrer">{{ attachment.filename }}</a></strong>
                   </div>
+                </template>
+                <div v-for="article in card.articles" :key="`article-${article.id}`" class="sales-submission-opinion">
+                  <span>{{ articleLabel(article.type) }}<template v-if="article.origin_by?.firstname"> · {{ article.origin_by.firstname }}</template></span>
+                  <strong v-if="article.body">{{ article.body }}</strong>
+                  <strong v-if="article.append_reason">补充原因：{{ article.append_reason }}</strong>
+                  <strong v-if="article.attachments?.length" class="submission-attachments"><a v-for="attachment in article.attachments" :key="attachment.id" :href="attachment.url" target="_blank" rel="noopener noreferrer">{{ attachment.original_filename }}</a></strong>
                 </div>
+                <template v-if="card.showLegacyClosure">
+                  <div><span>回访</span><strong>{{ ticket.is_callbacked ? '已回访' : '未回访' }}</strong></div>
+                  <div v-if="ticket.satisfaction"><span>满意度</span><strong>{{ ticket.satisfaction }}</strong></div>
+                  <div v-if="ticket.callback_details" class="sales-submission-opinion"><span>回访记录</span><strong>{{ ticket.callback_details }}</strong></div>
+                  <div v-if="ticket.archive_notes" class="sales-submission-opinion"><span>归档说明</span><strong>{{ ticket.archive_notes }}</strong></div>
+                </template>
+                <template v-if="card.showLegacyResult">
+                  <div v-if="ticket.root_cause" class="sales-submission-opinion"><span>根本原因</span><strong>{{ ticket.root_cause }}</strong></div>
+                  <div v-if="ticket.solution || ticket.resolution" class="sales-submission-opinion"><span>解决方案</span><strong>{{ ticket.solution || ticket.resolution }}</strong></div>
+                </template>
               </div>
-            </template>
+            </div>
           </div>
 
           <!-- 已退回工单：补充后重新提交 -->
@@ -393,9 +401,7 @@
               :current-owner-name="(ticket as any).owner_name || ''"
               :current-dispatcher-name="(ticket as any).dispatcher_name || ''"
               :current-creator-name="(ticket as any).creator_name || ''"
-              :articles-by-log="articlePlacement"
               :ticket="ticket"
-              :closure-log-id="closureLogId"
             />
           </div>
         </aside>
@@ -477,17 +483,16 @@ import StateTag from '@/components/common/StateTag.vue'
 import ReplyEditor from '@/components/ticket/ReplyEditor.vue'
 import TicketDetailInformation from '@/components/ticket/TicketDetailInformation.vue'
 import StateLogTimeline from '@/components/ticket/StateLogTimeline.vue'
+import { timelineActionName } from '@/utils/ticketTimeline'
 
 const route = useRoute()
 const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
-const completedSubmissions = computed<any[]>(() => {
-  const submissions = (ticket.value as any)?.node_submissions || []
-  return submissions.filter((entry: any) => ['processing', 'sales_opportunity'].includes(entry.node_type))
-    .sort((a: any, b: any) => a.id - b.id)
-})
+function articleLabel(type?: string): string {
+  return ({ reply: '处理说明', note: '普通回复', addition: '补充信息', reminder: '催办', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
+}
 function submissionFields(submission: any): Array<{ key: string; label: string; type: string; value: string }> {
   return (submission.field_snapshot || []).flatMap((field: any) => {
     if (field.type === 'attachment') return []
@@ -503,17 +508,20 @@ const articlePlacement = computed(() => {
   const byLogId = new Map<number, any[]>()
   const logs = [...((ticket.value as any)?.state_logs || [])].sort((a: any, b: any) => a.id - b.id)
   const articles = (ticket.value as any)?.articles || []
+  const submissionLogByArticle = new Map<number, number>(
+    ((ticket.value as any)?.node_submissions || [])
+      .filter((entry: any) => entry.article_id && entry.state_log_id)
+      .map((entry: any) => [entry.article_id, entry.state_log_id]),
+  )
   const nodeAt = (time: string) =>
     [...logs].reverse().find((entry: any) =>
       new Date(entry.entered_at).getTime() <= new Date(time).getTime(),
     ) || logs[0]
-  const processingNodeBefore = (completion: any) =>
-    [...logs].reverse().find((entry: any) =>
-      entry.id < completion.id && ['open', 'on_hold'].includes(entry.to_state_key),
-    )
   for (const article of articles) {
     let log: any
-    if (article.type === 'reply') {
+    const submissionLogId = submissionLogByArticle.get(article.id)
+    if (submissionLogId) log = logs.find((entry: any) => entry.id === submissionLogId)
+    else if (article.type === 'reply') {
       log = logs.find((entry: any) => String(entry.id) === String(article.state_key))
       // 旧处理说明可能只保存了状态名；按操作人及提交时间找对应的完成节点。
       const senderId = article.origin_by?.id
@@ -525,9 +533,6 @@ const articlePlacement = computed(() => {
         Math.abs(new Date(a.entered_at).getTime() - new Date(article.created_at).getTime()) -
         Math.abs(new Date(b.entered_at).getTime() - new Date(article.created_at).getTime()),
       )[0]
-      if (log && ['resolve', 'transfer'].includes(log.action_type)) {
-        log = processingNodeBefore(log) || log
-      }
       log ||= nodeAt(article.created_at)
     } else {
       // 补充和催办没有精确节点 ID，以发生时间归入当时的流程节点。
@@ -539,6 +544,27 @@ const articlePlacement = computed(() => {
     items.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
   }
   return byLogId
+})
+const timelineCards = computed(() => {
+  const t = ticket.value as any
+  if (!t) return []
+  const submissions = t.node_submissions || []
+  const linkedArticleIds = new Set(submissions.map((entry: any) => entry.article_id).filter(Boolean))
+  const logs = [...(t.state_logs || [])]
+  const legacyResultLog = [...logs].reverse().find((entry: any) => ['resolve', 'transfer'].includes(entry.action_type))
+  return logs
+    .sort((a: any, b: any) => new Date(a.entered_at).getTime() - new Date(b.entered_at).getTime())
+    .flatMap((log: any) => {
+      if (log.action_type === 'create') return []
+      const nodeSubmissions = submissions.filter((entry: any) => entry.state_log_id === log.id)
+      const articles = (articlePlacement.value.get(log.id) || []).filter((entry: any) => !linkedArticleIds.has(entry.id))
+      const showLegacyClosure = closureLogId.value === log.id && !nodeSubmissions.some((entry: any) => entry.node_type === 'closure')
+        && Boolean(t.is_callbacked || t.callback_details || t.archive_notes || t.satisfaction)
+      const showLegacyResult = legacyResultLog?.id === log.id && !submissions.some((entry: any) => entry.node_type === 'processing')
+        && Boolean(t.root_cause || t.solution || t.resolution)
+      if (!nodeSubmissions.length && !articles.length && !showLegacyClosure && !showLegacyResult) return []
+      return [{ log, title: timelineActionName(log, submissions, logs), submissions: nodeSubmissions, articles, showLegacyClosure, showLegacyResult }]
+    })
 })
 const closureLogId = computed<number | null>(() => {
   const t = ticket.value as any
@@ -1450,6 +1476,7 @@ async function confirmCancel() {
   box-shadow: var(--shadow-xs);
 }
 .sales-submission-title { font-size: 15px; font-weight: 700; color: var(--color-text-primary); margin-bottom: 16px; }
+.submission-operator { font-size: 13px; font-weight: 500; color: var(--color-text-secondary); }
 .sales-submission-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .sales-submission-fields > div { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .sales-submission-fields span { color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }

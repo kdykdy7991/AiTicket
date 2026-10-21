@@ -87,9 +87,7 @@ const routes: RouteRecordRaw[] = [
     children: [
       { path: 'users', name: 'AdminUsers', component: () => import('@/views/admin/UsersView.vue'), meta: { title: '用户管理' } },
       { path: 'groups', name: 'AdminGroups', component: () => import('@/views/admin/GroupsView.vue'), meta: { title: '组管理' } },
-      { path: 'triggers', name: 'AdminTriggers', component: () => import('@/views/admin/PlaceholderView.vue'), meta: { title: '触发器' } },
       { path: 'sla', name: 'AdminSLA', component: () => import('@/views/admin/SLAView.vue'), meta: { title: 'SLA 策略' } },
-      { path: 'channels', name: 'AdminChannels', component: () => import('@/views/admin/PlaceholderView.vue'), meta: { title: '邮件渠道' } },
     ],
   },
 ]

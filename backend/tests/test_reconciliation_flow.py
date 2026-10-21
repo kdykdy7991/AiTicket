@@ -112,17 +112,20 @@ async def test_reconciliation_sales_handoff_validates_company_and_finance_person
     with as_user(finance_id, "handler"):
         detail = (await http.get(f"/api/v1/tickets/{ticket_id}")).json()
         form = detail["current_form"]
-        assert form["code"] == "processing_v1"
+        assert form["code"] == "reconciliation_finance_v1"
+        assert [field["field_key"] for field in form["fields"]] == ["processing_opinion"]
+        assert detail["can_note"] is False
+        base = {
+            "form_definition_id": form["form_definition_id"], "form_version": form["version"],
+            "expected_category_id": 2204, "expected_department_id": finance_group_id,
+            "expected_dispatch_step_index": 1, "expected_state": "open",
+        }
+        missing_opinion = await http.post(f"/api/v1/tickets/{ticket_id}/node-submit",
+            data={"payload": json.dumps({**base, "values": {"processing_opinion": ""}})})
+        assert missing_opinion.status_code == 422
         completed = await http.post(f"/api/v1/tickets/{ticket_id}/node-submit",
             data={"payload": json.dumps({
-                "form_definition_id": form["form_definition_id"], "form_version": form["version"],
-                "expected_category_id": 2204, "expected_department_id": finance_group_id,
-                "expected_dispatch_step_index": 1, "expected_state": "open",
-                "values": {
-                    "cause_category": "其他", "root_cause": "账务核对完成",
-                    "temporary_measure": "核对开票资料", "requires_long_term_action": False,
-                    "processing_opinion": "财务已完成处理",
-                },
+                **base, "values": {"processing_opinion": "财务已完成处理"},
             })})
         assert completed.status_code == 200, completed.text
         assert completed.json()["data"]["state"] == "resolved"

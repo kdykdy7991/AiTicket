@@ -26,7 +26,7 @@ from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
 from app.models.sla import SLAPolicy
 from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
-from app.models.node_form import TicketNodeSubmission
+from app.models.node_form import FormDefinition, TicketNodeSubmission
 from app.models.user import User
 from app.schemas.ticket import (
     TicketBatchUpdate,
@@ -1120,6 +1120,15 @@ async def get_node_submissions(
     records = (await db.execute(select(TicketNodeSubmission).where(
         TicketNodeSubmission.ticket_id == ticket_id
     ).order_by(TicketNodeSubmission.id))).scalars().all()
+    form_ids = {record.form_definition_id for record in records}
+    operator_ids = {record.operator_id for record in records}
+    form_rows = (await db.execute(
+        select(FormDefinition.id, FormDefinition.code, FormDefinition.name).where(FormDefinition.id.in_(form_ids))
+    )).all() if form_ids else []
+    form_details = {form_id: (code, name) for form_id, code, name in form_rows}
+    operator_names = dict((await db.execute(
+        select(User.id, User.name).where(User.id.in_(operator_ids))
+    )).all()) if operator_ids else {}
     article_ids = [record.article_id for record in records if record.article_id is not None]
     articles = {}
     if article_ids:
@@ -1130,6 +1139,9 @@ async def get_node_submissions(
     from app.api.v1.articles import _attachment_url
     return [{
         "id": record.id, "node_type": record.node_type,
+        "form_code": form_details.get(record.form_definition_id, (None, None))[0],
+        "form_name": form_details.get(record.form_definition_id, (None, None))[1],
+        "operator_name": operator_names.get(record.operator_id),
         "form_definition_id": record.form_definition_id, "form_version": record.form_version,
         "department_id": record.department_id, "operator_id": record.operator_id,
         "submitted_at": record.submitted_at, "action_type": record.action_type,

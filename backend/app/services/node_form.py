@@ -26,7 +26,9 @@ class ResolvedForm:
 
 def allows_process_note(form: ResolvedForm) -> bool:
     """Conclusion-only forms already provide the node's reply entry."""
-    return form.definition.code not in {"business_opinion_v1", "package_change_execute_v2"}
+    return form.definition.code not in {
+        "business_opinion_v1", "package_change_execute_v2", "reconciliation_finance_v1",
+    }
 
 
 # Ticket columns a published form may write. Explicit whitelist: a form definition

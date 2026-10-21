@@ -14,38 +14,13 @@
       </div>
       <div class="timeline-content">
         <div class="timeline-head">
-          <span class="action-name">{{ actionName(node.log) }}</span>
+          <span class="action-name">{{ timelineActionName(node.log, ticket?.node_submissions || [], logs) }}</span>
           <span class="action-time">
             <DateTimeLabel :iso="node.ts" />
           </span>
         </div>
         <div v-if="responsibleName(node.log)" class="action-operator">
           {{ responsibleLabel(node.log) }}：{{ responsibleName(node.log) }}
-        </div>
-        <div v-for="article in articlesByLog?.get(node.log.id) || []" :key="article.id" class="node-reply">
-          <div class="node-record-head">
-            <span class="node-reply-label">{{ articleLabel(article.type) }}<span v-if="article.origin_by?.firstname"> · {{ article.origin_by.firstname }}</span></span>
-            <DateTimeLabel :iso="article.created_at" />
-          </div>
-          <div v-if="article.body" class="node-reply-body">{{ article.body }}</div>
-          <div v-if="article.append_reason" class="node-record-note">补充原因：{{ article.append_reason }}</div>
-          <div v-if="article.attachments?.length" class="node-attachments">
-            <a v-for="att in article.attachments" :key="att.id" :href="att.url" target="_blank"
-               rel="noopener noreferrer" :title="att.original_filename">
-              <img v-if="att.content_type?.startsWith('image/')" :src="att.url" :alt="att.original_filename" />
-              <span v-else class="file-attachment"><strong>{{ att.content_type === 'application/pdf' ? 'PDF' : '文件' }}</strong><span>{{ att.original_filename }}</span></span>
-            </a>
-          </div>
-        </div>
-        <div v-if="closureLogId === node.log.id" class="node-reply">
-          <div class="node-record-head">
-            <span class="node-reply-label">归档与回访</span>
-            <span class="closure-badge">{{ ticket?.is_callbacked ? '已回访' : ticket?.callback_required === false ? '无需回访' : '未回访' }}</span>
-            <span v-if="ticket?.is_callbacked && ticket?.satisfaction" class="closure-badge">{{ satisfactionText(ticket.satisfaction) }}</span>
-          </div>
-          <div v-if="ticket?.archive_notes" class="node-reply-body">{{ ticket.archive_notes }}</div>
-          <div v-if="ticket?.callback_details" class="node-record-note">回访记录：{{ ticket.callback_details }}</div>
-          <div v-if="ticket?.satisfaction === 'dissatisfied' && ticket?.unsatisfied_reason" class="node-record-note">不满意原因：{{ ticket.unsatisfied_reason }}</div>
         </div>
       </div>
     </div>
@@ -66,7 +41,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import DateTimeLabel from '@/components/common/DateTimeLabel.vue'
-import type { Article, TicketStateLog } from '@/types'
+import type { TicketStateLog } from '@/types'
+import { timelineActionName } from '@/utils/ticketTimeline'
 
 const props = defineProps<{
   logs: TicketStateLog[]
@@ -74,18 +50,8 @@ const props = defineProps<{
   currentOwnerName?: string
   currentDispatcherName?: string
   currentCreatorName?: string
-  articlesByLog?: Map<number, Article[]>
   ticket?: any
-  closureLogId?: number | null
 }>()
-
-function articleLabel(type?: string): string {
-  return ({ reply: '处理说明', note: '普通回复', addition: '补充信息', reminder: '催办', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
-}
-
-function satisfactionText(value: string): string {
-  return { satisfied: '😊 满意', average: '😐 一般', dissatisfied: '😞 不满意', unrated: '未评价' }[value] || value
-}
 
 interface TimelineNode {
   key: string
@@ -102,43 +68,6 @@ const nodes = computed<TimelineNode[]>(() =>
     }))
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()),
 )
-
-/** 动作名：日志动作类型 → 业务语言（回退到目标状态名） */
-const ACTION_NAMES: Record<string, string> = {
-  create: '创建工单',
-  instant_resolve: '即办结归档',
-  dispatch: '分派处理人',
-  refine: '问题判断',
-  transfer: '转派下一部门',
-  hold: '暂缓处理',
-  resume: '恢复处理',
-  return: '退回',
-  reopen: '退回重开',
-  resubmit: '重新提交',
-  resolve: '提交处理结果',
-  archive: '归档',
-  cancel: '撤销',
-}
-const STATE_FALLBACK: Record<string, string> = {
-  pending: '进入待受理',
-  open: '进入处理中',
-  resolved: '进入已处理',
-  on_hold: '进入暂缓处理',
-  returned: '进入已退回',
-  archived: '归档',
-  cancelled: '撤销',
-  awaiting_callback: '进入待回访',
-  callbacked: '回访完成',
-}
-
-function actionName(log: TicketStateLog): string {
-  const t = log.action_type || ''
-  if (t === 'dispatch' && log.reason === '指派售后人员') return '指派售后人员'
-  if (t === 'transfer' && log.reason?.includes('售后致电反馈')) return '流转至售后致电反馈'
-  if (ACTION_NAMES[t]) return ACTION_NAMES[t]
-  const st = log.to_state_key || ''
-  return STATE_FALLBACK[st] || '状态变更'
-}
 
 function responsibleLabel(log: TicketStateLog): string {
   const actionLabels: Record<string, string> = {
@@ -278,26 +207,6 @@ const currentStage = computed(() => {
   color: var(--color-text-tertiary);
   margin-top: 2px;
 }
-.node-reply {
-  margin-top: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--color-border-light);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-card);
-  box-shadow: var(--shadow-xs);
-}
-.node-reply-label { color: var(--color-text-secondary); font-size: 12px; font-weight: 600; }
-.node-record-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--color-text-tertiary); font-size: 11px; }
-.node-record-head > :last-child { margin-left: auto; }
-.node-reply-body { margin-top: 8px; color: var(--color-text-primary); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
-.node-record-note { margin-top: 6px; color: var(--color-text-tertiary); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.closure-badge { padding: 1px 7px; border-radius: var(--radius-full); background: var(--color-primary-ghost); color: var(--color-primary); font-size: 11px; }
-.node-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-.node-attachments img { width: 64px; height: 64px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--color-border-light); }
-.file-attachment { display: flex; align-items: center; gap: 6px; max-width: 240px; min-height: 38px; padding: 6px 9px; border: 1px solid var(--color-border-light); border-radius: var(--radius-sm); color: var(--color-text-primary); font-size: 12px; }
-.file-attachment strong { color: #b42318; font-size: 11px; }
-.file-attachment span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
 .empty {
   font-size: 13px;
   color: var(--color-text-placeholder);

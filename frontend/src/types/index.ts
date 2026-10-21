@@ -284,9 +284,14 @@ export interface TicketDetail extends Ticket {
   customer_company?: string | null
   skill_group_id?: number | null
   priority_key?: string
+  root_cause?: string | null
+  solution?: string | null
   node_submissions?: Array<{
     id: number
     node_type: string
+    form_code?: string | null
+    form_name?: string | null
+    operator_name?: string | null
     form_version: number
     data: Record<string, unknown>
     article_id: number | null

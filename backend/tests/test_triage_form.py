@@ -89,6 +89,9 @@ async def test_triage_schema_submit_route_and_history(renv):
         assert submissions[0].data["initial_opinion"] == "初查正常"
         assert submissions[0].field_snapshot[0]["label"] == "初步核查意见"
     history = (await c.get(f"/api/v1/tickets/{tid}/node-submissions")).json()
+    assert history[0]["form_code"] == "after_sales_triage"
+    assert history[0]["form_name"] == "售后分诊"
+    assert history[0]["operator_name"]
     assert history[0]["field_snapshot"][0]["label"] == "初步核查意见"
     assert history[0]["form_version"] == 1
     async with factory() as s:

@@ -202,6 +202,11 @@ async def test_phase9_seed_keeps_only_complaint_placeholder(phase9_env):
     assert users[0].username == "服务投诉协调人占位账号"
     assert users[0].role == "handler" and users[0].group_id is None
     assert users[0].local_login_enabled is True
+    async with factory() as s:
+        constellation_placeholder = (await s.execute(
+            select(User).where(User.username == "constellation_lead")
+        )).scalar_one_or_none()
+    assert constellation_placeholder is None
 
 
 async def test_phase9_seed_keeps_only_complaint_rule(phase9_env):

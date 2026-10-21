@@ -475,7 +475,7 @@ DISPATCH_DEPT_GROUPS: list[tuple[int, str]] = [
     (112, "经营管理部"),           # 业财对账第 1 步
     (113, "财务"),                 # 业财对账第 2 步
     (114, "平台运维组"),           # 业务保障/应用平台
-    (115, "星座大系统负责人"),     # §5.3 第 3 级判断人（占位账号）
+    (115, "星座大系统负责人"),     # §5.3 第 3 级判断部门
     (116, "软件开发组"),           # L3/核心网系统
     (117, "整星产品"),             # L3/卫星系统
     (118, "终端研发"),             # 业务保障/终端软件
@@ -492,7 +492,6 @@ DISPATCH_EXTRA_USERS: list[tuple[int, str, str]] = [
     (223, "nihanhua",          "倪汉华"),
     (224, "luxiang",           "卢翔"),
     (225, "liyouquan",         "李有全"),
-    (226, "constellation_lead", "星座大系统负责人"),  # §5.3 占位账号
 ]
 
 # 表B 映射（user_id, skill_group_id, is_dispatcher）。
@@ -511,7 +510,6 @@ DISPATCH_USER_SKILL_GROUPS: list[tuple[int, int, bool]] = [
     (223, 104, True),  # 倪汉华 → 测运控组（表B handler；组内唯一对接人）
     (224, 117, True),  # 卢翔 → 整星产品
     (225, 118, True),  # 李有全 → 终端研发
-    (226, 115, True),  # 占位账号 → 星座大系统负责人
 ]
 
 

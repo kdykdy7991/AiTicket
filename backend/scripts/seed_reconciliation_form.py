@@ -67,6 +67,30 @@ async def seed_reconciliation_form(session_factory: async_sessionmaker | None = 
                                priority=0, enabled=True))
             await db.flush()
             form.published_at = datetime.now(timezone.utc)
+
+        finance_form = (await db.execute(select(FormDefinition).where(
+            FormDefinition.code == "reconciliation_finance_v1", FormDefinition.version == 1,
+        ))).scalar_one_or_none()
+        if finance_form is None:
+            finance_form = FormDefinition(code="reconciliation_finance_v1", name="业财对账财务处理",
+                                          node_type="processing", version=1, enabled=True, published_at=None)
+            db.add(finance_form)
+            await db.flush()
+            db.add(FormFieldDefinition(
+                form_definition_id=finance_form.id, field_key="processing_opinion",
+                label="处理意见", field_type="textarea", sort_order=0, required=True,
+                validation={"max_length": 4000}, storage_type="article", storage_key="body",
+            ))
+            await db.flush()
+            finance_form.published_at = datetime.now(timezone.utc)
+        finance_binding = (await db.execute(select(FormBinding).where(
+            FormBinding.node_type == "processing", FormBinding.department_code == "财务",
+            FormBinding.category_id == 2204, FormBinding.form_definition_id == finance_form.id,
+        ))).scalar_one_or_none()
+        if finance_binding is None:
+            db.add(FormBinding(node_type="processing", department_code="财务", category_id=2204,
+                               category_match_type="exact", form_definition_id=finance_form.id,
+                               priority=0, enabled=True))
         await db.commit()
 
 
