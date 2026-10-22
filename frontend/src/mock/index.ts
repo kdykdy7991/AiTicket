@@ -135,8 +135,6 @@ export const mockTicketApi = {
       resolution: null,
       archive_notes: null,
       is_callbacked: false,
-      urged_at: null,
-      urged_by: null,
       has_addition: false,
       has_returned: false,
       is_draft: false,

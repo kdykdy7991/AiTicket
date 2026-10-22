@@ -42,7 +42,7 @@ async def test_send_dingtalk_text_at_mobile():
     with patch("app.services.notification.httpx.AsyncClient.post", post):
         result = await send_dingtalk_text(
             VALID_WEBHOOK,
-            "【客服工单催办提醒】\n处理人：@13800138000",
+            "【客服工单提醒】\n处理人：@13800138000",
             at_mobiles=["13800138000"],
         )
 
@@ -51,7 +51,7 @@ async def test_send_dingtalk_text_at_mobile():
         VALID_WEBHOOK,
         json={
             "msgtype": "text",
-            "text": {"content": "【客服工单催办提醒】\n处理人：@13800138000"},
+            "text": {"content": "【客服工单提醒】\n处理人：@13800138000"},
             "at": {"atMobiles": ["13800138000"], "isAtAll": False},
         },
     )

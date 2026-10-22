@@ -130,9 +130,6 @@ class TicketBrief(BaseModel):
     is_callbacked: bool = False
     sla_solution_breached: bool = False
     solution_deadline: datetime | None = None
-    urged_at: datetime | None = None
-    urged_by_id: int | None = None
-    urged_by_name: str | None = None
     has_addition: bool = False
     has_returned: bool = False
     # 终态操作人：哪个用户执行了 resolved→archived 或 *→cancelled 流转
@@ -226,7 +223,6 @@ class TicketDetail(TicketBrief):
     is_terminal: bool = False                   # 终态（archived/cancelled）
     can_reply: bool = False                     # 可提交处理说明（会触发 →resolved 流转）
     can_addition: bool = False                  # 可追加说明
-    can_remind: bool = False                    # 可催办（且尚未催办过）
 
     # 分派链快照（V0.21）：steps 同构 dispatch_chains.steps；index=当前步骤（0 起）；
     # null = 不走链（旧路由/即时办结）。前端渲染链进度与转派按钮用。

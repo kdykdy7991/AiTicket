@@ -6,7 +6,7 @@
       v-for="(node, index) in nodes"
       :key="node.key"
       class="timeline-item"
-      :class="{ 'is-first': index === 0, 'is-reminder': node.kind === 'reminder' }"
+      :class="{ 'is-first': index === 0 }"
     >
       <div class="timeline-marker">
         <div class="marker-dot" />
@@ -14,14 +14,12 @@
       </div>
       <div class="timeline-content">
         <div class="timeline-head">
-          <span class="action-name">{{ node.kind === 'reminder' ? '催办' : timelineActionName(node.log, ticket?.node_submissions || [], logs) }}</span>
+          <span class="action-name">{{ timelineActionName(node.log, ticket?.node_submissions || [], logs) }}</span>
           <span class="action-time">
             <DateTimeLabel :iso="node.ts" />
           </span>
         </div>
-        <div v-if="node.kind === 'reminder' && node.senderName" class="action-operator">催办人：{{ node.senderName }}</div>
-        <div v-if="node.kind === 'reminder' && node.body" class="reminder-body">{{ node.body }}</div>
-        <div v-if="node.kind === 'state' && responsibleName(node.log)" class="action-operator">
+        <div v-if="responsibleName(node.log)" class="action-operator">
           {{ responsibleLabel(node.log) }}：{{ responsibleName(node.log) }}
         </div>
       </div>
@@ -57,35 +55,17 @@ const props = defineProps<{
 
 interface TimelineNode {
   key: string
-  kind: 'state' | 'reminder'
   log: TicketStateLog
   ts: string
-  senderName?: string
-  body?: string
 }
 
-const stateNodes = computed<TimelineNode[]>(() =>
-  (props.logs || []).map(log => ({
+const nodes = computed<TimelineNode[]>(() =>
+  (props.logs || [])
+    .map(log => ({
       key: `state-${log.id}`,
-      kind: 'state' as const,
       log,
       ts: log.entered_at || (log as any).created_at,
-    })),
-)
-const nodes = computed<TimelineNode[]>(() =>
-  [
-    ...stateNodes.value,
-    ...((props.ticket?.articles || []) as any[])
-      .filter(article => article.type === 'reminder' && article.created_at)
-      .map(article => ({
-        key: `reminder-${article.id}`,
-        kind: 'reminder' as const,
-        log: {} as TicketStateLog,
-        ts: article.created_at,
-        senderName: article.origin_by?.firstname || article.sender_name || '',
-        body: article.body || '',
-      })),
-  ]
+    }))
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()),
 )
 
@@ -123,9 +103,9 @@ function responsibleName(log: TicketStateLog): string {
 const TERMINAL_STATES = new Set(['archived', 'cancelled'])
 
 const currentStage = computed(() => {
-  const state = props.currentState || stateNodes.value[stateNodes.value.length - 1]?.log.to_state_key
+  const state = props.currentState || nodes.value[nodes.value.length - 1]?.log.to_state_key
   if (!state || TERMINAL_STATES.has(state)) return null
-  const enteredAt = stateNodes.value[stateNodes.value.length - 1]?.ts || ''
+  const enteredAt = nodes.value[nodes.value.length - 1]?.ts || ''
   const steps = props.ticket?.dispatch_chain_steps || []
   const isPhoneFeedback = steps[props.ticket?.dispatch_step_index]?.stage === 'phone_feedback'
   if (props.ticket?.node_context?.node_type === 'assignment' && state === 'pending') {
@@ -177,7 +157,6 @@ const currentStage = computed(() => {
 .is-first .marker-dot {
   background: var(--color-text-tertiary);
 }
-.is-reminder .marker-dot { background: #b91c1c; }
 .is-current .marker-dot {
   background: var(--color-primary);
   box-shadow: 0 0 0 3px var(--color-primary-ghost);
@@ -205,7 +184,6 @@ const currentStage = computed(() => {
   font-weight: 600;
   color: var(--color-text-primary);
 }
-.is-reminder .action-name { color: #b91c1c; }
 .is-current .action-name { color: var(--color-primary); }
 
 .current-tag {
@@ -229,7 +207,6 @@ const currentStage = computed(() => {
   color: var(--color-text-tertiary);
   margin-top: 2px;
 }
-.reminder-body { margin-top: 3px; color: var(--color-text-secondary); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .empty {
   font-size: 13px;
   color: var(--color-text-placeholder);

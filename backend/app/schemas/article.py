@@ -18,7 +18,7 @@ class AttachmentOut(BaseModel):
 
 
 class ArticleCreate(BaseModel):
-    type: str = Field(default="reply")  # reply / addition / reminder
+    type: str = Field(default="reply")  # reply / addition
     body: str = Field(..., min_length=1)
     append_reason: str | None = None  # required when type=addition
 

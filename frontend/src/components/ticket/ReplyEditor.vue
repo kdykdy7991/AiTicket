@@ -1,6 +1,6 @@
 <template>
   <div class="reply-editor">
-    <template v-if="canReply || canAppend || canRemind">
+    <template v-if="canReply || canAppend">
       <div class="reply-tab-bar">
         <button
           v-if="canReply"
@@ -20,22 +20,12 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           补充
         </button>
-        <button
-          v-if="canRemind"
-          class="tab-btn"
-          :class="{ active: activeTab === 'reminder' }"
-          @click="activeTab = 'reminder'"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          催办
-        </button>
       </div>
 
       <div
         class="reply-input-area"
         :class="{
           addition: activeTab === 'addition',
-          reminder: activeTab === 'reminder',
         }"
       >
         <el-input
@@ -100,10 +90,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
           补充记录会保留在工单时间线，标注为补充内容
         </span>
-        <span v-if="activeTab === 'reminder'" class="addition-hint reminder-hint">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-          催办后该工单将在列表中置顶，每个工单只能催办一次
-        </span>
         <div class="reply-actions-right">
           <el-button
             type="primary"
@@ -117,9 +103,9 @@
       </div>
     </template>
 
-    <div v-if="!(canReply || canAppend || canRemind)" class="disabled-hint no-perm">
+    <div v-if="!(canReply || canAppend)" class="disabled-hint no-perm">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
-      您当前无权在该工单提交处理说明、补充或催办。
+      您当前无权在该工单提交处理说明或补充。
     </div>
 
   </div>
@@ -138,7 +124,7 @@ const props = defineProps<{
 const emit = defineEmits<{ submitted: [] }>()
 
 const ticketStore = useTicketStore()
-const activeTab = ref<'reply' | 'addition' | 'reminder'>('reply')
+const activeTab = ref<'reply' | 'addition'>('reply')
 const body = ref('')
 const appendReason = ref('')
 const submitting = ref(false)
@@ -152,7 +138,6 @@ const currentStateKey = computed(() => (props.ticket as any).state_key || '')
 // 后端按 articles 端点同一份规则生成 can_*；hold 等状态动作用 allowed_actions。
 const canReply = computed(() => (props.ticket as any).can_reply === true)
 const canAppend = computed(() => (props.ticket as any).can_addition === true)
-const canRemind = computed(() => (props.ticket as any).can_remind === true)
 const willTransferAfterReply = computed(() => {
   const t = props.ticket as any
   const steps = t.dispatch_chain_steps || []
@@ -184,9 +169,6 @@ const placeholder = computed(() => {
   if (activeTab.value === 'addition') {
     return '输入补充内容（如：补充截图说明、补充排查信息）...'
   }
-  if (activeTab.value === 'reminder') {
-    return '请输入催办内容，提交后将通知当前处理人并在时间线记录...'
-  }
   if (hasSummary.value) {
     return `当前状态下已提交${isPhoneFeedback.value ? '致电反馈' : '处理说明'}`
   }
@@ -198,7 +180,6 @@ const placeholder = computed(() => {
 
 const submitLabel = computed(() => {
   if (activeTab.value === 'addition') return '补充记录'
-  if (activeTab.value === 'reminder') return '发起催办'
   return isPhoneFeedback.value ? '提交致电反馈' : willTransferAfterReply.value ? '提交并流转' : '提交处理说明'
 })
 
@@ -249,18 +230,12 @@ function clearAttachments() {
 onUnmounted(clearAttachments)
 
 // 权限变化时自动切到可用的 tab
-watch([canReply, canAppend, canRemind], ([replyAllowed, appendAllowed, remindAllowed]) => {
+watch([canReply, canAppend], ([replyAllowed, appendAllowed]) => {
   if (activeTab.value === 'reply' && !replyAllowed) {
     if (appendAllowed) activeTab.value = 'addition'
-    else if (remindAllowed) activeTab.value = 'reminder'
   }
   if (activeTab.value === 'addition' && !appendAllowed) {
     if (replyAllowed) activeTab.value = 'reply'
-    else if (remindAllowed) activeTab.value = 'reminder'
-  }
-  if (activeTab.value === 'reminder' && !remindAllowed) {
-    if (replyAllowed) activeTab.value = 'reply'
-    else if (appendAllowed) activeTab.value = 'addition'
   }
 }, { immediate: true })
 
@@ -271,10 +246,6 @@ async function onSubmit() {
   }
   if (activeTab.value === 'addition' && !appendReason.value.trim()) {
     ElMessage.warning('请填写补充原因')
-    return
-  }
-  if (activeTab.value === 'reminder' && body.value.trim().length > 200) {
-    ElMessage.warning('催办内容最多 200 字')
     return
   }
   const hasBody = !!body.value.trim()
@@ -302,7 +273,6 @@ async function onSubmit() {
     const msgMap: Record<string, string> = {
       reply: isPhoneFeedback.value ? '致电反馈已提交，工单已交客服回访归档' : willTransferAfterReply.value ? '处理说明已提交，已流转至下一部门' : '处理说明已提交',
       addition: '补充已记录',
-      reminder: '催办已发起',
     }
     ElMessage.success(msgMap[type])
     emit('submitted')
@@ -351,7 +321,6 @@ async function onSubmit() {
 
 .reply-input-area { padding: 12px 16px 0; }
 .reply-input-area.addition { background: rgba(99, 91, 255, 0.04); }
-.reply-input-area.reminder { background: rgba(245, 108, 108, 0.04); }
 .reply-input-area :deep(.el-textarea__inner) {
   border: none;
   box-shadow: none;
@@ -408,9 +377,6 @@ async function onSubmit() {
   gap: 6px;
   font-size: 11.5px;
   color: var(--color-text-tertiary);
-}
-.addition-hint.reminder-hint {
-  color: var(--color-danger);
 }
 
 .send-btn { font-weight: 600; min-width: 100px; }

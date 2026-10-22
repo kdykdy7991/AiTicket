@@ -437,7 +437,7 @@ async function onExport() {
 .list-card :deep(.el-table__empty-block) { background: #041b37; color: #98b7d6; }
 .list-card :deep(.number-cell) { color: #b6d6f8; }
 .list-card :deep(.title-badge) { border-radius: 4px; border: 1px solid transparent; }
-.list-card :deep(.badge-urge), .list-card :deep(.badge-sla) { background: #481c36; border-color: #9a345b; color: #ff9cb1; }
+.list-card :deep(.badge-sla) { background: #481c36; border-color: #9a345b; color: #ff9cb1; }
 .list-card :deep(.badge-returned), .list-card :deep(.badge-dup) { background: #453216; border-color: #97701d; color: #ffd47a; }
 .list-card :deep(.badge-addition) { background: #112e69; border-color: #174dbe; color: #85b7ff; }
 .list-card :deep(.badge-more) { background: #143657; color: #bed4ea; }

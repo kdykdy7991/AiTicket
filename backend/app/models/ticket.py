@@ -1,4 +1,4 @@
-"""Ticket, Article, TicketStateLog, Reminder models."""
+"""Ticket, Article, TicketStateLog models."""
 
 from datetime import datetime
 
@@ -84,7 +84,7 @@ class Ticket(Base):
     # 不是 deadline，也不参与任何计时/超时判定。
     hold_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # 预计恢复时间
     # 预计恢复时间提醒的去重标记：命中并发送过一次提醒后落值，resume 时清空，
-    # 因此每一轮暂缓最多提醒一次（仿 urged_at 的一次性标记先例）。
+    # 因此每一轮暂缓最多提醒一次。
     hold_reminded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # 结案
@@ -113,10 +113,6 @@ class Ticket(Base):
     callback_details: Mapped[str | None] = mapped_column(Text)
     archive_notes: Mapped[str | None] = mapped_column(Text)
     is_callbacked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-
-    # 催办
-    urged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    urged_by_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
 
     # 追加信息
     has_addition: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -152,13 +148,11 @@ class Ticket(Base):
     # relationships
     articles = relationship("Article", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
     state_logs = relationship("TicketStateLog", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
-    reminders = relationship("Reminder", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
     creator = relationship("User", foreign_keys=[creator_id], lazy="selectin")
     dispatcher = relationship("User", foreign_keys=[dispatcher_id], lazy="selectin")
     first_owner = relationship("User", foreign_keys=[first_owner_id], lazy="selectin")
     returned_to_user = relationship("User", foreign_keys=[returned_to_user_id], lazy="selectin")
-    urged_by = relationship("User", foreign_keys=[urged_by_id], lazy="selectin")
     category = relationship("TicketCategory", lazy="selectin")
     group = relationship("Group", lazy="selectin")
     skill_group = relationship("SkillGroup", foreign_keys=[skill_group_id], lazy="selectin")
@@ -236,16 +230,3 @@ class TicketStateLog(Base):
     creator_snapshot = relationship("User", foreign_keys=[creator_id_snapshot], lazy="selectin")
     dispatcher_snapshot = relationship("User", foreign_keys=[dispatcher_id_snapshot], lazy="selectin")
     owner_snapshot = relationship("User", foreign_keys=[owner_id_snapshot], lazy="selectin")
-
-
-class Reminder(Base):
-    __tablename__ = "reminders"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    ticket_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tickets.id", ondelete="CASCADE"), nullable=False)
-    sender_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
-
-    ticket = relationship("Ticket", back_populates="reminders")
-    sender = relationship("User", lazy="selectin")

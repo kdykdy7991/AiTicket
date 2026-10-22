@@ -174,7 +174,7 @@ function handlerName(row: Ticket): string {
 /** 标签徽标最多可见数，超出折叠为 +N（配合 min-width，避免 nowrap 撑破列宽） */
 const MAX_VISIBLE_BADGES = 3
 
-type BadgeVariant = 'sla' | 'dup' | 'urge' | 'addition' | 'returned'
+type BadgeVariant = 'sla' | 'dup' | 'addition' | 'returned'
 
 interface Badge {
   key: string
@@ -185,13 +185,12 @@ interface Badge {
   icon?: 'warning' | 'repeat'
 }
 
-/** 按重要度排序：SLA 超时 > 催办 > 退回 > 补充 > 重投 */
+/** 按重要度排序：SLA 超时 > 退回 > 补充 > 重投 */
 function badgesOf(row: Ticket): Badge[] {
   const list: Badge[] = []
   if (isEscalated(row)) {
     list.push({ key: 'sla', label: 'SLA 已超时', variant: 'sla', icon: 'warning' })
   }
-  if (row.urged_at) list.push({ key: 'urge', label: '已催办', variant: 'urge' })
   if (row.has_returned) list.push({ key: 'returned', label: '曾退回', variant: 'returned' })
   if (row.has_addition) list.push({ key: 'addition', label: '有补充信息', variant: 'addition' })
   if (row.is_duplicate) list.push({ key: 'dup', label: '重投工单', variant: 'dup', icon: 'repeat' })
@@ -330,7 +329,7 @@ function onRowClick(row: Ticket) {
   overflow: hidden;
 }
 
-/* 徽标基类：文字型（催办/退回/补充）撑开，图标型（重投/SLA）固定 20px 圆 */
+/* 徽标基类：文字型（退回/补充）撑开，图标型（重投/SLA）固定 20px 圆 */
 .title-badge {
   display: inline-flex;
   align-items: center;
@@ -351,7 +350,6 @@ function onRowClick(row: Ticket) {
 }
 .badge-sla { background: var(--color-danger-light); color: var(--color-danger); }
 .badge-dup { background: #FEF3C7; color: #92400E; }
-.badge-urge { background: #FEF2F2; color: #B91C1C; }
 .badge-addition { background: #EFF6FF; color: #1D4ED8; }
 .badge-returned { background: #FEF3C7; color: #92400E; }
 .badge-more {

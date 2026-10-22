@@ -773,7 +773,6 @@ async def test_allowed_actions_open_owner_and_capabilities(env):
     # 文章能力位（owner 身份）
     assert d["can_reply"] is True
     assert d["can_addition"] is True
-    assert d["can_remind"] is True
 
     # 非 owner（admin 本人不是处理人）看不到处理说明能力
     d_admin = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
@@ -789,7 +788,7 @@ async def test_allowed_actions_terminal_empty(env):
     d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
     assert d["allowed_actions"] == []
     assert d["is_terminal"] is True
-    assert d["can_reply"] is False and d["can_addition"] is False and d["can_remind"] is False
+    assert d["can_reply"] is False and d["can_addition"] is False
 
 
 async def test_allowed_actions_exclude_unpermitted_and_api_rejects(env):
@@ -851,24 +850,6 @@ async def test_allowed_actions_resolved_dedupes_rewritten_on_hold(env):
     assert acts["reopen"]["target_state"] == "open"
     assert acts["archive"]["requires_reason"] is False
     assert acts["reopen"]["requires_reason"] is True   # resolved→open 必填原因
-
-
-async def test_remind_capability_once_only(env):
-    t = await env["create_ticket"]()
-    d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
-    assert d["can_remind"] is True
-    r = await env["client"].post(
-        f"/api/v1/tickets/{t['id']}/articles",
-        data={"type": "reminder", "body": "请尽快处理"},
-    )
-    assert r.status_code == 201, r.text
-    d2 = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
-    assert d2["can_remind"] is False                  # 生命周期只能催办一次
-    r2 = await env["client"].post(
-        f"/api/v1/tickets/{t['id']}/articles",
-        data={"type": "reminder", "body": "再催一次"},
-    )
-    assert r2.status_code == 422
 
 
 # ── 14. 客户回访闭环（Phase 8） ─────────────────────────────

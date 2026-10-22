@@ -143,7 +143,7 @@ async def test_standard_closed_loop(env):
     # 5) 终态：无动作、能力位全关
     d = (await c.get(f"/api/v1/tickets/{t['id']}")).json()
     assert d["allowed_actions"] == [] and d["is_terminal"] is True
-    assert not (d["can_reply"] or d["can_addition"] or d["can_remind"])
+    assert not (d["can_reply"] or d["can_addition"])
 
     # 6) Flow Log 动作序列完整
     assert await action_sequence(env, t["id"]) == ["create", "dispatch", "resolve", "archive"]

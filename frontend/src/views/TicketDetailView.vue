@@ -41,7 +41,7 @@
                   </div>
                 </template>
                 <div v-for="article in card.articles" :key="`article-${article.id}`" class="sales-submission-opinion">
-                  <span><span :class="{ 'reminder-title': article.type === 'reminder' }">{{ articleLabel(article.type) }}</span><template v-if="article.origin_by?.firstname"> · {{ article.origin_by.firstname }}</template></span>
+                  <span>{{ articleLabel(article.type) }}</span><template v-if="article.origin_by?.firstname"> · {{ article.origin_by.firstname }}</template>
                   <strong v-if="article.body">{{ article.body }}</strong>
                   <strong v-if="article.append_reason">补充原因：{{ article.append_reason }}</strong>
                   <strong v-if="article.attachments?.length" class="submission-attachments"><a v-for="attachment in article.attachments" :key="attachment.id" :href="attachment.url" target="_blank" rel="noopener noreferrer">{{ attachment.original_filename }}</a></strong>
@@ -388,7 +388,7 @@
           </div>
 
           <ReplyEditor
-            v-if="!isSalesOpportunity && !isTerminalState && (ticket.can_reply || ticket.can_addition || ticket.can_remind)"
+            v-if="!isSalesOpportunity && !isTerminalState && (ticket.can_reply || ticket.can_addition)"
             :ticket="ticket"
             :articles="ticket.articles"
             @submitted="onRefresh"
@@ -505,7 +505,7 @@ function formatHeaderTime(value?: string | null): string {
   return value && dayjs(value).isValid() ? dayjs(value).format('YYYY/MM/DD HH:mm:ss') : '—'
 }
 function articleLabel(type?: string): string {
-  return ({ reply: '处理说明', note: '普通回复', addition: '补充信息', reminder: '催办', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
+  return ({ reply: '处理说明', note: '普通回复', addition: '补充信息', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
 }
 function submissionFields(submission: any): Array<{ key: string; label: string; type: string; value: string }> {
   return (submission.field_snapshot || []).flatMap((field: any) => {
@@ -556,7 +556,7 @@ const articlePlacement = computed(() => {
       )[0]
       log ||= nodeAt(article.created_at)
     } else {
-      // 补充和催办没有精确节点 ID，以发生时间归入当时的流程节点。
+      // 补充没有精确节点 ID，以发生时间归入当时的流程节点。
       log = nodeAt(article.created_at)
     }
     if (log) byLogId.set(log.id, [...(byLogId.get(log.id) || []), article])
@@ -578,7 +578,7 @@ const timelineCards = computed(() => {
     .flatMap((log: any) => {
       const nodeSubmissions = submissions.filter((entry: any) => entry.state_log_id === log.id)
       const articles = (articlePlacement.value.get(log.id) || []).filter((entry: any) => !linkedArticleIds.has(entry.id))
-      // 建单节点通常由工单信息卡展示；有催办或补充时仍需显示沟通记录。
+      // 建单节点通常由工单信息卡展示；有补充时仍需显示沟通记录。
       if (log.action_type === 'create' && !articles.length) return []
       const showLegacyClosure = closureLogId.value === log.id && !nodeSubmissions.some((entry: any) => entry.node_type === 'closure')
         && Boolean(t.is_callbacked || t.callback_details || t.archive_notes || t.satisfaction)
@@ -1503,7 +1503,6 @@ async function confirmCancel() {
 .sales-submission-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .sales-submission-fields > div { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .sales-submission-fields span { color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
-.sales-submission-fields .reminder-title { color: #b91c1c; }
 .sales-submission-fields strong {
   padding: 9px 11px;
   min-height: 36px;
@@ -1752,13 +1751,10 @@ async function confirmCancel() {
 .timeline-section-title { color: #edf7ff; }
 .sales-submission-title { padding-bottom: 11px; border-bottom: 1px solid #17466d; }
 .sales-submission-fields strong { background: #061a32; border-color: #1b4c73; color: #dcecff; }
-.sales-submission-fields .reminder-title { color: #ff8ca5; }
 .submission-attachments a { color: #65c5ff; }
 .sidebar-card { padding: 19px; }
 .flow-card { border-top-color: #2aa9e9; box-shadow: 0 0 15px #0574bd40; }
 .flow-card :deep(.marker-line) { background: #1a567e; }
-.flow-card :deep(.is-reminder .action-name) { color: #ff8ca5; }
-.flow-card :deep(.is-reminder .marker-dot) { background: #ff6f90; }
 .flow-card :deep(.action-time),
 .flow-card :deep(.action-operator) { color: #91b3d2; }
 .refine-card,
@@ -1883,7 +1879,7 @@ async function confirmCancel() {
 .ticket-detail-view :deep(.tab-btn:hover), .ticket-detail-view :deep(.tab-btn.active) { color: #eaf6ff; }
 .ticket-detail-view :deep(.tab-btn.active) { border-bottom-color: #20a3f7; text-shadow: 0 0 10px #3aaaff66; }
 .ticket-detail-view :deep(.reply-input-area) { margin: 18px 26px 0; padding: 0 12px; border: 1px solid #1b547f; border-radius: 4px; background: #061b34; }
-.ticket-detail-view :deep(.reply-input-area.addition), .ticket-detail-view :deep(.reply-input-area.reminder) { background: #08233e; }
+.ticket-detail-view :deep(.reply-input-area.addition) { background: #08233e; }
 .ticket-detail-view :deep(.reply-input-area .el-textarea__inner) { border: 0; background: transparent; }
 .ticket-detail-view :deep(.reply-input-area:focus-within) { border-color: #37a7e7; box-shadow: 0 0 0 2px #2188d140; }
 .ticket-detail-view :deep(.reply-actions) { padding: 18px 26px 22px; }

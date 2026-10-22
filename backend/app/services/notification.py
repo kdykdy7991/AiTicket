@@ -8,7 +8,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.notification import DingtalkNotification
-from app.models.ticket import Article, Ticket
+from app.models.ticket import Ticket
 
 logger = logging.getLogger(__name__)
 
@@ -114,46 +114,6 @@ async def remind_hold_expiry(ticket: Ticket, hold_reason: str | None, db: AsyncS
     ))
     logger.info(
         "DingTalk hold-expiry reminder handled: ticket_id=%s success=%s",
-        ticket.id,
-        result.success,
-    )
-    return result
-
-
-async def remind_handler(ticket: Ticket, article: Article, db: AsyncSession) -> SendResult:
-    """Notify the ticket's group robot about a reminder."""
-    webhook_url = _ticket_webhook(ticket)
-    ticket_label = ticket.number or str(ticket.id)
-    owner_mobile = ticket.owner.phone.strip() if ticket.owner and ticket.owner.phone else None
-    at_line = f"\n处理人：@{owner_mobile}" if owner_mobile else ""
-    content = (
-        "【客服工单催办提醒】\n"
-        f"工单编号：{ticket_label}\n"
-        f"工单标题：{ticket.title or '工单'}\n"
-        f"催办内容：{article.body.strip()}"
-        f"{at_line}"
-    )
-
-    if webhook_url:
-        result = await send_dingtalk_text(
-            webhook_url,
-            content,
-            at_mobiles=[owner_mobile] if owner_mobile else None,
-        )
-    else:
-        result = SendResult(False, "工单所属技能组或客服组未配置钉钉 Webhook")
-
-    db.add(DingtalkNotification(
-        ticket_id=ticket.id,
-        type="reminder",
-        target_user_id=ticket.owner_id,
-        target_webhook=webhook_url,
-        content=content,
-        success=result.success,
-        error_message=result.error_message,
-    ))
-    logger.info(
-        "DingTalk reminder handled: ticket_id=%s success=%s",
         ticket.id,
         result.success,
     )

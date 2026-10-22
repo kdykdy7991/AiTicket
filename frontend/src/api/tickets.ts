@@ -125,8 +125,8 @@ function stateStrToObj(key: string): any {
 
 /** 后端沟通记录映射为处理流程节点可展示的数据。 */
 function adaptArticle(a: any): any {
-  // type: reply/addition/reminder
-  // sender_type：后端没有此字段，根据 type 推断（客服回复/note/追加/催办都算 agent）
+  // type: reply/addition
+  // sender_type：后端没有此字段，根据 type 推断（客服回复/note/追加都算 agent）
   const senderType = 'agent'
   return {
     ...a,
@@ -191,9 +191,6 @@ function adaptTicket(t: any): any {
     escalation_at: t.solution_deadline || null,
     close_at: t.closed_at || null,
     article_count: t.article_count ?? 0,
-    // 催办
-    urged_at: t.urged_at || null,
-    urged_by: t.urged_by_id ? { id: t.urged_by_id, firstname: t.urged_by_name || '未知', lastname: '' } : null,
     // 终态操作人：执行了 archived / cancelled 流转的人
     archived_by_id: t.archived_by_id ?? null,
     archived_by_name: t.archived_by_name ?? null,

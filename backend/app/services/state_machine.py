@@ -141,10 +141,6 @@ ADDITION_ALLOWED_STATES = {"pending", "open", "on_hold", "returned"}
 ADDITION_ALLOWED_ROLES = {"admin", "agent"}
 # 可提交处理说明的工单状态（处理人提交即流转到已处理）
 REPLY_ALLOWED_STATES = {"open", "on_hold"}
-# 允许催办的状态
-URGE_ALLOWED_STATES = {"pending", "open", "on_hold"}
-# 允许催办的角色（客服团队）
-URGE_ALLOWED_ROLES = {"admin", "agent"}
 
 
 def transition_precondition_error(ticket: Ticket, to_state: str) -> str | None:
@@ -219,7 +215,7 @@ def compute_article_actions(ticket: Ticket, user: User) -> dict[str, bool]:
     """详情页沟通记录能力位：与 articles 端点的服务端规则逐条对应。"""
     if ticket.state in TERMINAL_STATES:
         # 终态工单不接受任何沟通记录（与 create_article 的终态 422 对应）
-        return {"can_reply": False, "can_addition": False, "can_remind": False}
+        return {"can_reply": False, "can_addition": False}
     return {
         # 处理说明：仅当前处理人 + open/on_hold
         "can_reply": (
@@ -237,12 +233,6 @@ def compute_article_actions(ticket: Ticket, user: User) -> dict[str, bool]:
         "can_addition": (
             user.role in ADDITION_ALLOWED_ROLES
             and ticket.state in ADDITION_ALLOWED_STATES
-        ),
-        # 催办：客服团队 + 非终态前三种状态 + 整个生命周期只能催办一次
-        "can_remind": (
-            user.role in URGE_ALLOWED_ROLES
-            and ticket.state in URGE_ALLOWED_STATES
-            and ticket.urged_at is None
         ),
     }
 

@@ -135,7 +135,6 @@ async def resolve_node_context(
     for capability, action, label in (
         ("can_reply", "reply", "提交处理说明"),
         ("can_addition", "addition", "追加信息"),
-        ("can_remind", "remind", "催办"),
     ):
         if article_actions.get(capability) and node_action_error(node_type, action) is None:
             actions.append({"action": action, "target_state": ticket.state, "label": label})

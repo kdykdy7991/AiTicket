@@ -17,23 +17,18 @@ from app.core.deps import get_current_user
 from app.core.exceptions import NotFoundError
 from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
 from app.models.user import User
-from app.services.notification import remind_handler
 from app.services.state_machine import (
     ADDITION_ALLOWED_ROLES,
     ADDITION_ALLOWED_STATES,
     REPLY_ALLOWED_STATES,
     TERMINAL_STATES,
-    URGE_ALLOWED_ROLES,
-    URGE_ALLOWED_STATES,
     apply_transition,
 )
 
 router = APIRouter(tags=["articles"])
 
 # 状态/角色集合已下沉到 app.services.state_machine（与状态机同源，
-# 详情页能力位 can_reply/can_addition/can_remind 复用同一份规则）。
-# 催办内容最大长度（内容规则，非状态规则）
-URGE_MAX_LENGTH = 200
+# 详情页能力位 can_reply/can_addition 复用同一份规则）。
 
 
 @router.get("/tickets/{ticket_id}/articles")
@@ -157,7 +152,7 @@ async def create_article(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Add an article (reply / addition / reminder) to a ticket."""
+    """Add an article (reply / addition) to a ticket."""
     ticket_result = await db.execute(select(Ticket).where(Ticket.id == ticket_id))
     ticket = ticket_result.scalar_one_or_none()
     if not ticket:
@@ -167,7 +162,7 @@ async def create_article(
     if ticket.state in TERMINAL_STATES:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="工单已结束，无法提交处理说明、补充或催办"
+            detail="工单已结束，无法提交处理说明或补充"
         )
 
     # internal_note type has been removed
@@ -180,7 +175,7 @@ async def create_article(
     if type == "note":
         raise HTTPException(422, detail="添加回复功能已下线，请通过当前节点表单提交处理意见")
 
-    if type not in {"reply", "addition", "reminder"}:
+    if type not in {"reply", "addition"}:
         raise HTTPException(422, detail="不支持的沟通记录类型")
 
     if type == "reply":
@@ -232,37 +227,12 @@ async def create_article(
                 detail="仅在已处理之前的状态可补充"
             )
 
-    # 催办：仅客服团队 + 非终态前三种状态 + 整个生命周期只能催办一次
-    if type == "reminder":
-        if user.role not in URGE_ALLOWED_ROLES:
-            raise HTTPException(
-                status.HTTP_403_FORBIDDEN,
-                detail="仅客服团队可催办"
-            )
-        if ticket.state not in URGE_ALLOWED_STATES:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="当前状态不可催办"
-            )
-        if ticket.urged_at is not None:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="该工单已催办"
-            )
-
     # Validate type-specific rules
     if type == "addition" and not append_reason:
         raise HTTPException(422, detail="补充类型必须填写补充原因")
 
     if type == "reply" and not body.strip():
         raise HTTPException(422, detail="请填写处理说明")
-
-    if type == "reminder":
-        content = body.strip() if body else ""
-        if not content:
-            raise HTTPException(422, detail="催办内容不能为空")
-        if len(content) > URGE_MAX_LENGTH:
-            raise HTTPException(422, detail=f"催办内容最多 {URGE_MAX_LENGTH} 字")
 
     if type == "reply":
         # 处理说明属于提交人正在办理的节点，而不是随后生成的完成/流转节点。
@@ -279,7 +249,7 @@ async def create_article(
     article = Article(
         ticket_id=ticket_id, type=type, sender_id=user.id,
         body=body,
-        state_key=str(handling_log.id if handling_log else reply_log.id) if reply_log else (ticket.state if type == "reminder" else None),
+        state_key=str(handling_log.id if handling_log else reply_log.id) if reply_log else None,
         append_reason=append_reason if type == "addition" else None,
     )
     db.add(article)
@@ -294,19 +264,11 @@ async def create_article(
             db.add(att)
         await db.flush()
 
-    # 催办副作用：记录催办时间/催办人，并触发通知扩展点
-    if type == "reminder":
-        now = datetime.now(timezone.utc)
-        ticket.urged_at = now
-        ticket.urged_by_id = user.id
-        await db.flush()
-        await remind_handler(ticket, article, db)
-
     # 追加信息副作用：标记工单已有追加信息
     if type == "addition":
         ticket.has_addition = True
 
-    # 追加/回复/催办后同步更新工单 updated_at，让列表和详情时间一致
+    # 追加/回复后同步更新工单 updated_at，让列表和详情时间一致
     ticket.updated_at = datetime.now(timezone.utc)
     await db.flush()
 

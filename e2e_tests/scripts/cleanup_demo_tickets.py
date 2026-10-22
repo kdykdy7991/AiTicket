@@ -5,7 +5,7 @@
 - 严格按 customer_name LIKE 'DEMO-%' 限定
 - 不写 DELETE FROM tickets(用 IN (id_list))
 - 拒绝 production
-- 删除顺序按 FK:articles → reminders → dingtalk_notifications →
+- 删除顺序按 FK:articles → dingtalk_notifications →
   ticket_state_logs → tickets
 
 跑法:
@@ -109,7 +109,6 @@ def main() -> int:
     id_list = ",".join(str(i) for i in ids)
     delete_chain = [
         ("articles", f"DELETE FROM articles WHERE ticket_id IN ({id_list});"),
-        ("reminders", f"DELETE FROM reminders WHERE ticket_id IN ({id_list});"),
         ("dingtalk_notifications",
          f"DELETE FROM dingtalk_notifications WHERE ticket_id IN ({id_list});"),
         ("ticket_state_logs",

@@ -186,9 +186,6 @@ def _ticket_to_brief(
         is_draft=t.is_draft,
         sla_solution_breached=t.sla_solution_breached,
         solution_deadline=t.solution_deadline,
-        urged_at=t.urged_at,
-        urged_by_id=t.urged_by_id,
-        urged_by_name=t.urged_by.name if t.urged_by else None,
         has_addition=t.has_addition,
         has_returned=t.has_returned,
         archived_by_id=archived_by[0] if archived_by else None,
@@ -208,7 +205,6 @@ def _ticket_to_detail(
     allowed_actions: list[dict] | None = None,
     can_reply: bool = False,
     can_addition: bool = False,
-    can_remind: bool = False,
     can_refine: bool = False,
     refine_options: list[dict] | None = None,
     refine_denied_reason: str | None = None,
@@ -224,7 +220,6 @@ def _ticket_to_detail(
         is_terminal=t.state in TERMINAL_STATES,
         can_reply=can_reply,
         can_addition=can_addition,
-        can_remind=can_remind,
         can_refine=can_refine,
         refine_options=refine_options or [],
         refine_denied_reason=refine_denied_reason,
@@ -401,7 +396,7 @@ async def list_tickets(
     query = select(Ticket).options(
         selectinload(Ticket.owner), selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
         selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
-        selectinload(Ticket.dispatcher), selectinload(Ticket.urged_by),
+        selectinload(Ticket.dispatcher),
     ).where(Ticket.is_draft == False)
     if user.role == "handler":
         # 对接人：看派给自己的待受理工单(dispatcher_id) + 已分派给自己处理的(owner_id)
@@ -477,13 +472,12 @@ async def list_tickets(
     total = (await db.execute(count_q)).scalar() or 0
 
     # Paginate
-    # 排序：催办工单全局置顶，再进行中状态的超时工单优先，再按创建时间倒序
+    # 排序：进行中且 SLA 超时的工单优先，再按创建时间倒序
     in_progress_breached = (
         Ticket.state.notin_(["archived", "cancelled"])
         & (Ticket.sla_solution_breached == True)
     )
     order_clauses = [
-        Ticket.urged_at.desc().nulls_last(),
         in_progress_breached.desc(),
         Ticket.created_at.desc(),
     ]
@@ -603,7 +597,6 @@ async def export_tickets(
         & (Ticket.sla_solution_breached.is_(True))
     )
     query = query.order_by(
-        Ticket.urged_at.desc().nulls_last(),
         in_progress_breached.desc(),
         Ticket.created_at.desc(),
     )
@@ -711,7 +704,7 @@ async def list_drafts(
         .options(
             selectinload(Ticket.owner), selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
             selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
-            selectinload(Ticket.dispatcher), selectinload(Ticket.urged_by),
+            selectinload(Ticket.dispatcher),
         )
         .where(Ticket.is_draft == True, Ticket.creator_id == user.id)
         .order_by(Ticket.updated_at.desc())
@@ -893,7 +886,7 @@ async def update_draft(
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
             selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
             selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group), selectinload(Ticket.urged_by),
+            selectinload(Ticket.group),
         )
         .where(Ticket.id == draft_id)
     )
@@ -971,7 +964,7 @@ async def get_ticket(
             selectinload(Ticket.owner), selectinload(Ticket.creator), selectinload(Ticket.dispatcher),
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
             selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group), selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group), selectinload(Ticket.urged_by),
+            selectinload(Ticket.group),
         )
         .where(Ticket.id == ticket_id)
     )
@@ -1029,7 +1022,7 @@ async def _detail_after_mutation(
             selectinload(Ticket.returned_to_user), selectinload(Ticket.first_owner),
             selectinload(Ticket.skill_group), selectinload(Ticket.handler_skill_group),
             selectinload(Ticket.category).selectinload(TicketCategory.parent),
-            selectinload(Ticket.group), selectinload(Ticket.urged_by),
+            selectinload(Ticket.group),
         ).where(Ticket.id == ticket_id).execution_options(populate_existing=True)
     )
     ticket = result.scalar_one()

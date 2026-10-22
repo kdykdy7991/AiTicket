@@ -208,9 +208,6 @@ export interface Ticket {
   closure_result?: string | null
   unsatisfied_reason?: string | null  // 不认可或历史四档不满意时填写
   hold_until?: string | null  // 后端详情的 ISO 时间；未暂缓时为 null
-  // 催办
-  urged_at: string | null
-  urged_by: User | null
   // 追加信息
   has_addition: boolean
   // 退回历史
@@ -226,7 +223,6 @@ export interface Ticket {
   is_terminal?: boolean
   can_reply?: boolean
   can_addition?: boolean
-  can_remind?: boolean
 
   // —— V0.21 分派链快照与分诊能力位（仅详情接口返回）——
   dispatch_chain_steps?: { order: number; department_code: string; stage?: 'judgement' | 'phone_feedback' }[] | null
@@ -266,7 +262,7 @@ export interface Article {
   origin_by: User
   sender_type: 'agent' | 'customer' | 'system'
   article_type: 'note' | 'email' | 'web' | 'phone'
-  type?: 'note' | 'reply' | 'addition' | 'reminder' | 'return'
+  type?: 'note' | 'reply' | 'addition' | 'return'
   subject?: string
   body: string
   content_type: 'text/plain' | 'text/html'
@@ -495,7 +491,7 @@ export interface TicketUpdatePayload {
 }
 
 export interface ArticleCreatePayload {
-  type: 'reply' | 'addition' | 'reminder'
+  type: 'reply' | 'addition'
   body: string
   content_type?: 'text/plain' | 'text/html'
   article_type?: 'note' | 'email' | 'web'

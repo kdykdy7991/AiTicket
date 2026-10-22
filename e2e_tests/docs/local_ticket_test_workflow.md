@@ -65,7 +65,7 @@ python e2e_tests/scripts/cleanup_e2e.py --confirm
 python e2e_tests/scripts/cleanup_e2e.py --confirm --batch-id 20260923-074451
 ```
 
-删除顺序按 FK:articles → reminders → dingtalk_notifications →
+删除顺序按 FK:articles → dingtalk_notifications →
 ticket_state_logs → tickets。严格按 `customer_name LIKE 'E2E-%'`
 限定,绝不写 `DELETE FROM tickets`。
 

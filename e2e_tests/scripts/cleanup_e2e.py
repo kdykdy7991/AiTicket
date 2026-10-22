@@ -5,7 +5,7 @@
 - 加 --confirm 才执行删除
 - 严格按 customer_name LIKE 'E2E-%' 限定,绝不写 DELETE FROM tickets
 - 同样拒绝 production 环境
-- 先删依赖表(articles / reminders / dingtalk_notifications /
+- 先删依赖表(articles / dingtalk_notifications /
   ticket_state_logs),再删 tickets 本身(避开 FK 报错)
 - 支持 --batch-id 只清某个 batch
 
@@ -129,7 +129,6 @@ def main() -> int:
     id_list = ",".join(str(i) for i in ids)
     delete_chain = [
         ("articles", f"DELETE FROM articles WHERE ticket_id IN ({id_list});"),
-        ("reminders", f"DELETE FROM reminders WHERE ticket_id IN ({id_list});"),
         ("dingtalk_notifications",
          f"DELETE FROM dingtalk_notifications WHERE ticket_id IN ({id_list});"),
         ("ticket_state_logs",
