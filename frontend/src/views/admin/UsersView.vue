@@ -12,12 +12,12 @@
 
     <!-- 筛选 -->
     <div class="filter-bar">
-      <el-select v-model="filterRole" placeholder="全部角色" clearable size="default" style="width: 140px" @change="loadUsers">
+      <el-select v-model="filterRole" popper-class="ticket-dark-select-popper" placeholder="全部角色" clearable size="default" style="width: 140px" @change="loadUsers">
         <el-option label="管理员" value="admin" />
         <el-option label="客服坐席" value="agent" />
         <el-option label="处理人" value="handler" />
       </el-select>
-      <el-select v-model="filterSkillGroup" placeholder="全部对接部门" clearable size="default" style="width: 160px" @change="loadUsers">
+      <el-select v-model="filterSkillGroup" popper-class="ticket-dark-select-popper" placeholder="全部对接部门" clearable size="default" style="width: 160px" @change="loadUsers">
         <el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id" />
       </el-select>
       <el-input v-model="keyword" placeholder="搜索用户名/姓名" clearable size="default" style="width: 220px" @keyup.enter="loadUsers" @clear="loadUsers" />
@@ -26,7 +26,7 @@
 
     <!-- 列表 -->
     <el-card shadow="never" v-loading="loading" class="list-card">
-      <el-table :data="users" stripe>
+      <el-table :data="users">
         <el-table-column label="用户名" prop="username" width="130" />
         <el-table-column label="姓名" prop="name" width="110" />
         <el-table-column label="角色" width="100">
@@ -74,7 +74,7 @@
     </el-card>
 
     <!-- 新建/编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑用户' : '新建用户'" width="560px" align-center :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="editing ? '编辑用户' : '新建用户'" width="560px" align-center append-to-body class="ticket-dark-dialog users-dialog" :close-on-click-modal="false">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" :disabled="editing" placeholder="登录用用户名" />
@@ -89,7 +89,7 @@
           <el-input v-model="form.password" type="password" show-password :placeholder="editing ? '留空则不修改' : '请输入密码'" />
         </el-form-item>
         <el-form-item label="角色" prop="role">
-          <el-select v-model="form.role" style="width: 100%" @change="onRoleChange">
+          <el-select v-model="form.role" popper-class="ticket-dark-select-popper" style="width: 100%" @change="onRoleChange">
             <el-option label="管理员" value="admin" />
             <el-option label="客服坐席" value="agent" />
             <el-option label="处理人" value="handler" />
@@ -98,7 +98,7 @@
         <!-- 客服坐席：选客服组 + 组长开关 -->
         <template v-if="form.role === 'agent'">
           <el-form-item label="客服组" prop="group_id">
-            <el-select v-model="form.group_id" style="width: 100%" clearable placeholder="选择客服组">
+            <el-select v-model="form.group_id" popper-class="ticket-dark-select-popper" style="width: 100%" clearable placeholder="选择客服组">
               <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
             </el-select>
           </el-form-item>
@@ -291,7 +291,7 @@ async function onSubmit() {
 
 async function onDisable(row: UserItem) {
   try {
-    await ElMessageBox.confirm(`确定要禁用用户「${row.name}」吗？禁用后该用户将无法登录。`, '禁用用户', { type: 'warning' })
+    await ElMessageBox.confirm(`确定要禁用用户「${row.name}」吗？禁用后该用户将无法登录。`, '禁用用户', { type: 'warning', customClass: 'ticket-dark-dialog' })
   } catch { return }
   await userApi.disable(row.id)
   ElMessage.success('已禁用')
@@ -340,4 +340,35 @@ onMounted(async () => {
 .dispatcher-list { margin-top: 8px; border-top: 1px solid var(--color-border-light); padding-top: 8px; }
 .dispatcher-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 13px; }
 .dispatcher-name { color: var(--color-text-secondary); }
+.users-view { min-width: 0; color: #eaf4ff; }
+.page-header { align-items: center; margin: 4px 0 20px; }
+.page-title { color: #f1f8ff; font-size: 28px; text-shadow: 0 0 17px #40aaff38; }
+.page-header :deep(.el-button) { min-width: 132px; height: 40px; font-weight: 600; }
+.filter-bar { gap: 12px; margin-bottom: 13px; padding: 12px 14px; border: 1px solid #176496; border-radius: 6px; background: #06213e; box-shadow: 0 0 12px #0064ae2b; }
+.filter-bar :deep(.el-select__wrapper), .filter-bar :deep(.el-input__wrapper) { min-height: 38px; }
+.filter-bar :deep(.el-checkbox__label) { color: #bdd9f0; }
+.filter-bar :deep(.el-checkbox__input.is-checked .el-checkbox__inner) { border-color: #168cea; background: #086ac9; }
+.list-card { position: relative; overflow: hidden; border: 1px solid #0d8cda; border-radius: 6px; background: #041b37; box-shadow: 0 0 19px #006fca4d; }
+.list-card::before, .list-card::after { content: ''; position: absolute; z-index: 2; width: 55px; height: 2px; background: #4bd5ff; box-shadow: 0 0 11px #4bd5ff; pointer-events: none; }
+.list-card::before { top: 0; left: 13px; }
+.list-card::after { bottom: 0; right: 13px; }
+.list-card :deep(.el-card__body) { padding: 0; }
+.list-card :deep(.el-table) { --el-table-bg-color: #041b37; --el-table-tr-bg-color: #041b37; --el-table-header-bg-color: #0a315a; --el-table-row-hover-bg-color: #0b345b; --el-table-border-color: #0c3c65; --el-table-text-color: #c4d8f0; --el-table-header-text-color: #c9e2fb; background: #041b37; }
+.list-card :deep(.el-table__header th.el-table__cell) { height: 46px; background: linear-gradient(180deg, #0c4278, #072c52); color: #c9e2fb; border-bottom-color: #1b6193; font-size: 12px; font-weight: 600; }
+.list-card :deep(.el-table__body td.el-table__cell) { height: 48px; border-bottom-color: #0c385f; color: #c4d8f0; }
+.list-card :deep(.el-table__body tr:nth-child(odd) > td.el-table__cell) { background: #031a34; }
+.list-card :deep(.el-table__body tr:nth-child(even) > td.el-table__cell) { background: #051f3c; }
+.list-card :deep(.el-table__body tr:hover > td.el-table__cell) { background: #0b345b; }
+.list-card :deep(.el-table__empty-block) { background: #041b37; }
+.list-card :deep(.el-table__empty-text) { color: #91afcb; }
+.list-card :deep(.el-tag) { border-radius: 4px; background: #0a365d; border-color: #1b6a9c; color: #9ed7ff; }
+.list-card :deep(.el-tag--warning) { background: #433516; border-color: #8d6a29; color: #ffcf74; }
+.list-card :deep(.el-tag--danger) { background: #482039; border-color: #8d3e64; color: #ff9fbe; }
+.list-card :deep(.el-tag--success) { background: #073e3c; border-color: #178b84; color: #64dfc1; }
+.list-card :deep(.el-tag--info) { background: #183249; border-color: #3b617e; color: #acc7dc; }
+.list-card :deep(.el-button.is-text) { color: #76caff; }
+.list-card :deep(.el-button--danger.is-text) { color: #ffa8b9; }
+.list-card :deep(.el-button--success.is-text) { color: #65dec0; }
+.muted { color: #91afcb; }
+@media (max-width: 700px) { .page-title { font-size: 24px; } .filter-bar :deep(.el-select), .filter-bar :deep(.el-input) { width: 100% !important; } .page-header :deep(.el-button) { min-width: 0; } }
 </style>

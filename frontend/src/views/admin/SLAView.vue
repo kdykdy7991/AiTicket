@@ -8,7 +8,7 @@
     </div>
 
     <el-card shadow="never" class="list-card" v-loading="loading">
-      <el-table :data="policies" :key="tableKey" row-key="id" stripe>
+      <el-table :data="policies" :key="tableKey" row-key="id">
         <el-table-column label="适用范围" width="160">
           <template #default="{ row }">
             <el-tag v-if="!row.skill_group_id" size="small" type="info">全局默认</el-tag>
@@ -33,16 +33,16 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑策略' : '新增策略'" width="500px" align-center :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="editing ? '编辑策略' : '新增策略'" width="500px" align-center append-to-body class="ticket-dark-dialog sla-dialog" :close-on-click-modal="false">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
         <el-form-item label="适用范围" prop="skill_group_id">
-          <el-select v-model="form.skill_group_id" style="width: 100%" :disabled="editing" placeholder="全局默认（不选）">
+          <el-select v-model="form.skill_group_id" popper-class="ticket-dark-select-popper" style="width: 100%" :disabled="editing" placeholder="全局默认（不选）">
             <el-option label="全局默认" :value="null" />
             <el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id" />
           </el-select>
         </el-form-item>
         <el-form-item label="优先级" prop="priority">
-          <el-select v-model="form.priority" style="width: 100%" :disabled="editing">
+          <el-select v-model="form.priority" popper-class="ticket-dark-select-popper" style="width: 100%" :disabled="editing">
             <el-option v-for="p in priorities" :key="p.value" :label="p.label" :value="p.value" />
           </el-select>
         </el-form-item>
@@ -174,7 +174,7 @@ async function onSubmit() {
 
 async function onRemove(row: SLAPolicyItem) {
   try {
-    await ElMessageBox.confirm('确定删除该 SLA 策略吗？删除后对应工单将使用全局默认时限。', '删除策略', { type: 'warning' })
+    await ElMessageBox.confirm('确定删除该 SLA 策略吗？删除后对应工单将使用全局默认时限。', '删除策略', { type: 'warning', customClass: 'ticket-dark-dialog' })
   } catch { return }
   await slaApi.remove(row.id)
   ElMessage.success('已删除')
@@ -195,4 +195,26 @@ onMounted(async () => {
 .page-subtitle { font-size: 13px; color: var(--color-text-tertiary); margin-top: 4px; }
 .list-card { border-radius: var(--radius-lg); }
 .priority-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+.sla-view { min-width: 0; color: #eaf4ff; }
+.page-header { align-items: center; margin: 4px 0 20px; }
+.page-title { color: #f1f8ff; font-size: 28px; text-shadow: 0 0 17px #40aaff38; }
+.page-header :deep(.el-button) { min-width: 126px; height: 40px; font-weight: 600; }
+.list-card { position: relative; overflow: hidden; border: 1px solid #0d8cda; border-radius: 6px; background: #041b37; box-shadow: 0 0 19px #006fca4d; }
+.list-card::before, .list-card::after { content: ''; position: absolute; z-index: 2; width: 55px; height: 2px; background: #4bd5ff; box-shadow: 0 0 11px #4bd5ff; pointer-events: none; }
+.list-card::before { top: 0; left: 13px; }
+.list-card::after { bottom: 0; right: 13px; }
+.list-card :deep(.el-card__body) { padding: 0; }
+.list-card :deep(.el-table) { --el-table-bg-color: #041b37; --el-table-tr-bg-color: #041b37; --el-table-header-bg-color: #0a315a; --el-table-row-hover-bg-color: #0b345b; --el-table-border-color: #0c3c65; --el-table-text-color: #c4d8f0; --el-table-header-text-color: #c9e2fb; background: #041b37; }
+.list-card :deep(.el-table__header th.el-table__cell) { height: 46px; background: linear-gradient(180deg, #0c4278, #072c52); color: #c9e2fb; border-bottom-color: #1b6193; font-size: 12px; font-weight: 600; }
+.list-card :deep(.el-table__body td.el-table__cell) { height: 48px; border-bottom-color: #0c385f; color: #c4d8f0; }
+.list-card :deep(.el-table__body tr:nth-child(odd) > td.el-table__cell) { background: #031a34; }
+.list-card :deep(.el-table__body tr:nth-child(even) > td.el-table__cell) { background: #051f3c; }
+.list-card :deep(.el-table__body tr:hover > td.el-table__cell) { background: #0b345b; }
+.list-card :deep(.el-table__empty-block) { background: #041b37; }
+.list-card :deep(.el-table__empty-text) { color: #91afcb; }
+.list-card :deep(.el-tag--info) { border-color: #3b617e; border-radius: 4px; background: #183249; color: #acc7dc; }
+.list-card :deep(.el-button.is-text) { color: #76caff; }
+.list-card :deep(.el-button--danger.is-text) { color: #ffa8b9; }
+.priority-dot { box-shadow: 0 0 7px currentColor; }
+@media (max-width: 700px) { .page-title { font-size: 24px; } .page-header :deep(.el-button) { min-width: 0; } }
 </style>

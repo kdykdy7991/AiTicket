@@ -15,7 +15,7 @@
           <el-button type="primary" size="small" @click="openCreate('group')">新建客服组</el-button>
         </div>
       </template>
-      <el-table :data="groups" :key="groupKey" v-loading="loadingGroup" stripe>
+      <el-table :data="groups" :key="groupKey" v-loading="loadingGroup">
         <el-table-column label="名称" prop="name" width="180" />
         <el-table-column label="钉钉 Webhook">
           <template #default="{ row }">
@@ -45,7 +45,7 @@
           <el-button type="primary" size="small" @click="openCreate('skill')">新建对接部门</el-button>
         </div>
       </template>
-      <el-table :data="skillGroups" :key="skillKey" v-loading="loadingSkill" stripe>
+      <el-table :data="skillGroups" :key="skillKey" v-loading="loadingSkill">
         <el-table-column label="名称" prop="name" width="180" />
         <el-table-column label="钉钉 Webhook">
           <template #default="{ row }">
@@ -67,7 +67,7 @@
     </el-card>
 
     <!-- 新建/编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="480px" align-center :close-on-click-modal="false">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="480px" align-center append-to-body class="ticket-dark-dialog groups-dialog" :close-on-click-modal="false">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
         <el-form-item :label="formType === 'group' ? '客服组名称' : '对接部门名称'" prop="name">
           <el-input v-model="form.name" placeholder="如：技术组" />
@@ -181,7 +181,7 @@ async function onSubmit() {
 async function onRemove(type: 'group' | 'skill', row: GroupItem) {
   const label = type === 'group' ? '客服组' : '对接部门'
   try {
-    await ElMessageBox.confirm(`确定要删除${label}「${row.name}」吗？有用户或工单关联时无法删除。`, `删除${label}`, { type: 'warning' })
+    await ElMessageBox.confirm(`确定要删除${label}「${row.name}」吗？有用户或工单关联时无法删除。`, `删除${label}`, { type: 'warning', customClass: 'ticket-dark-dialog' })
   } catch { return }
   try {
     if (type === 'group') await groupApi.remove(row.id)
@@ -223,4 +223,30 @@ onMounted(() => {
 .section-hint { font-size: 12px; color: var(--color-text-tertiary); flex: 1; }
 .webhook { font-family: 'SF Mono', monospace; font-size: 12px; color: var(--color-text-secondary); word-break: break-all; }
 .muted { color: var(--color-text-tertiary); }
+.groups-view { min-width: 0; color: #eaf4ff; }
+.page-header { margin: 4px 0 20px; }
+.page-title { color: #f1f8ff; font-size: 28px; text-shadow: 0 0 17px #40aaff38; }
+.section-card { position: relative; overflow: hidden; margin-bottom: 16px; border: 1px solid #0d8cda; border-radius: 6px; background: #041b37; box-shadow: 0 0 19px #006fca4d; }
+.section-card::before, .section-card::after { content: ''; position: absolute; z-index: 2; width: 55px; height: 2px; background: #4bd5ff; box-shadow: 0 0 11px #4bd5ff; pointer-events: none; }
+.section-card::before { top: 0; left: 13px; }
+.section-card::after { bottom: 0; right: 13px; }
+.section-card :deep(.el-card__header) { padding: 18px 21px; border-bottom: 1px solid #1b6193; background: linear-gradient(180deg, #0a335c, #082847); }
+.section-card :deep(.el-card__body) { padding: 0; }
+.section-header { gap: 16px; }
+.section-title { color: #edf7ff; font-size: 18px; font-weight: 700; }
+.section-hint { color: #91b7d7; font-size: 12px; }
+.section-header :deep(.el-button) { min-width: 132px; height: 36px; font-weight: 600; }
+.section-card :deep(.el-table) { --el-table-bg-color: #041b37; --el-table-tr-bg-color: #041b37; --el-table-header-bg-color: #0a315a; --el-table-row-hover-bg-color: #0b345b; --el-table-border-color: #0c3c65; --el-table-text-color: #c4d8f0; --el-table-header-text-color: #c9e2fb; background: #041b37; }
+.section-card :deep(.el-table__header th.el-table__cell) { height: 46px; background: linear-gradient(180deg, #0c4278, #072c52); color: #c9e2fb; border-bottom-color: #1b6193; font-size: 12px; font-weight: 600; }
+.section-card :deep(.el-table__body td.el-table__cell) { height: 48px; border-bottom-color: #0c385f; color: #c4d8f0; }
+.section-card :deep(.el-table__body tr:nth-child(odd) > td.el-table__cell) { background: #031a34; }
+.section-card :deep(.el-table__body tr:nth-child(even) > td.el-table__cell) { background: #051f3c; }
+.section-card :deep(.el-table__body tr:hover > td.el-table__cell) { background: #0b345b; }
+.section-card :deep(.el-table__empty-block) { background: #041b37; }
+.section-card :deep(.el-table__empty-text) { color: #91afcb; }
+.section-card :deep(.el-button.is-text) { color: #76caff; }
+.section-card :deep(.el-button--danger.is-text) { color: #ffa8b9; }
+.webhook { color: #9fc4e3; }
+.muted { color: #91afcb; }
+@media (max-width: 700px) { .page-title { font-size: 24px; } .section-header { flex-wrap: wrap; } .section-hint { flex-basis: 100%; order: 3; } .section-header :deep(.el-button) { margin-left: auto; min-width: 0; } }
 </style>
