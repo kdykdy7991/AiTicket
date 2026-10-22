@@ -17,7 +17,7 @@
         <div v-if="!isOpportunity && !isInstantConsult" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
         <div v-if="!isOpportunity" class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
         <div v-if="!isOpportunity && !rootCategory?.create_selectable" class="field"><label for="subcategory" class="required">细分分类</label><select id="subcategory" v-model="form.subcategory" :disabled="!form.category" :class="{ invalid: errors.subcategory }"><option value="" disabled hidden>{{ form.category ? '请选择可提交的分类' : '请先选择一级分类' }}</option><option v-for="v in subcategoryOptions" :key="v.id" :value="v.label">{{ v.label }}</option></select><small v-if="errors.subcategory" class="error">{{ errors.subcategory }}</small></div>
-        <fieldset v-if="!isOpportunity && !isInstantConsult" class="field radio-field priority-field"><legend class="required">优先级</legend><div class="priority-options"><label v-for="v in priorities" :key="v" :class="{ chosen: form.priority === v }"><input v-model="form.priority" type="radio" :value="v" />{{ v }}</label></div><small v-if="errors.priority" class="error">{{ errors.priority }}</small></fieldset>
+        <fieldset v-if="!isOpportunity && !isInstantConsult && isAssurance" class="field radio-field priority-field"><legend class="required">优先级</legend><div class="priority-options"><label v-for="v in priorities" :key="v" :class="{ chosen: form.priority === v }"><input v-model="form.priority" type="radio" :value="v" />{{ v }}</label></div><small v-if="errors.priority" class="error">{{ errors.priority }}</small></fieldset>
         <div class="field full"><label for="description" class="required">{{ isInstantConsult ? '咨询内容' : '客户问题详情' }}</label><div class="textarea-wrap"><textarea id="description" v-model="form.description" maxlength="1000" rows="5" placeholder="请尽量记录客户原始描述" :class="{ invalid: errors.description }"></textarea><span>{{ form.description.length }}/1000</span></div><small v-if="errors.description" class="error">{{ errors.description }}</small></div>
         <div v-if="isInstantConsult" class="field full"><label for="instantAnswer" class="required">即时答复内容</label><div class="textarea-wrap"><textarea id="instantAnswer" v-model="form.instantAnswer" maxlength="4000" rows="5" placeholder="记录客服当场提供的答复" :class="{ invalid: errors.instantAnswer }"></textarea><span>{{ form.instantAnswer.length }}/4000</span></div><small v-if="errors.instantAnswer" class="error">{{ errors.instantAnswer }}</small></div>
       </div></TicketFormSection>
@@ -98,6 +98,8 @@ const selectedCategoryId = computed(() => rootCategory.value?.create_selectable
   ? rootCategory.value.id
   : subcategoryOptions.value.find(c => c.label === form.subcategory)?.id)
 const numberRequired = computed(() => form.category === '业务运营' || form.category === '业务保障')
+// 只有业务保障的问题才需要由受理人定义 P1~P4 优先级，其余分类统一按默认 P4 处理。
+const isAssurance = computed(() => form.category === '业务保障')
 const isOpportunity = computed(() => form.businessOpportunity === 'yes')
 const isInstantConsult = computed(() => !isOpportunity.value && selectedCategoryId.value === 1205)
 const isReconciliation = computed(() => !isOpportunity.value && selectedCategoryId.value === 2204)
@@ -106,10 +108,10 @@ const requiredFields = computed<(keyof TicketCreateDesignForm)[]>(() => {
   const fields: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'businessOpportunity', 'description']
   if (isOpportunity.value) return [...fields, 'contactPhone', 'salesUserId']
   if (isReconciliation.value) fields.push('salesUserId')
-  fields.push('category', 'priority')
+  fields.push('category')
   if (!rootCategory.value?.create_selectable) fields.push('subcategory')
   if (numberRequired.value) fields.push('satelliteNumber')
-  if (form.category === '业务保障') fields.push('faultTime', 'recurrence', 'faultLocation', 'batchFault')
+  if (isAssurance.value) fields.push('priority', 'faultTime', 'recurrence', 'faultLocation', 'batchFault')
   return fields
 })
 const completedRequired = computed(() => requiredFields.value.filter(key => {
@@ -166,6 +168,8 @@ onMounted(async () => {
 onUnmounted(() => { if (clockTimer !== undefined) window.clearInterval(clockTimer) })
 function onCategoryChange() {
   form.subcategory = ''
+  // 优先级只在业务保障下由受理人定义，切走分类时回到默认 P4
+  if (form.category !== '业务保障') form.priority = 'P4'
   for (const key of Object.keys(errors)) delete errors[key as keyof TicketCreateDesignForm]
 }
 function validate(): boolean {
@@ -192,7 +196,7 @@ function payload(isDraft: boolean) {
     customer_phone: form.callerPhone.trim(),
     customer_phone_type: form.callerPhone.startsWith('1') ? 'mobile' : 'landline',
     contact_phone: form.contactPhone.trim() || null, customer_email: null,
-    channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value || isInstantConsult.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
+    channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value || isInstantConsult.value || !isAssurance.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
     category_id: isOpportunity.value ? null : selectedCategoryId.value || null, description: form.description.trim(),
     skill_group_id: isOpportunity.value || isReconciliation.value ? salesGroupId.value : null,
     sales_owner_id: isOpportunity.value || isReconciliation.value ? form.salesUserId : null,
