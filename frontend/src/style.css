@@ -413,6 +413,7 @@ a {
 .sla-dialog .el-select__selected-item, .sla-dialog .el-input__inner { color: #e5f2ff; }
 .sla-dialog .el-select__wrapper.is-disabled { background: #09223d; }
 .sla-dialog .el-select__wrapper.is-disabled .el-select__selected-item { color: #9bbad5; }
+.sla-dialog .sla-hint { margin: 0 24px 18px; color: #8eafca; font-size: 12px; line-height: 1.6; }
 .sla-dialog .el-input-number__decrease, .sla-dialog .el-input-number__increase { border-color: #1b547f; background: #0a3154; color: #bdd9f0; }
 .knowledge-detail-drawer.el-drawer { background: #061b34; border-left: 1px solid #1688c8; box-shadow: -8px 0 28px #001125aa; }
 .asset-dialog .asset-preview { border-color: #1b547f; background: #061b34; }

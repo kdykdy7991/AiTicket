@@ -399,6 +399,18 @@
           </div>
         </div>
         <aside class="detail-sidebar">
+          <div class="sidebar-card sla-rounds-card">
+            <h3 class="timeline-section-title">解决时限<small>RESOLUTION SLA</small></h3>
+            <div class="sla-current-summary" :class="{ 'sla-round-overdue': slaCurrentOverdue }">{{ slaCurrentLabel }}</div>
+            <p v-if="slaCurrentRound?.status === 'running'" class="sla-current-deadline">本轮截止：{{ formatHeaderTime(slaCurrentRound.deadline_at) }}</p>
+            <p v-if="!ticket.sla_rounds?.length && !slaExempt" class="sla-current-deadline">暂无计时记录；存量工单可能创建于策略配置之前。</p>
+            <div v-for="round in ticket.sla_rounds" :key="round.sequence" class="sla-round-row">
+              <strong>第 {{ round.sequence }} 轮</strong>
+              <span :class="{ 'sla-round-overdue': roundOverdue(round) }">{{ roundLabel(round) }}</span>
+              <small>{{ formatHeaderTime(round.started_at) }} → {{ round.ended_at ? formatHeaderTime(round.ended_at) : '进行中' }}</small>
+              <small>截止：{{ formatHeaderTime(round.deadline_at) }}</small>
+            </div>
+          </div>
           <div class="sidebar-card flow-card">
             <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h4a6 6 0 0 1 6 5"/></svg>处理时间流<small>PROCESS TIMELINE</small></h3>
             <StateLogTimeline
@@ -497,6 +509,24 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
+type SlaRound = NonNullable<NonNullable<typeof ticket.value>['sla_rounds']>[number]
+const slaExempt = computed(() => ticket.value?.is_opportunity === true || (ticket.value as any)?.category_id === 1205)
+const slaCurrentRound = computed(() => ticket.value?.sla_rounds?.at(-1))
+const slaCurrentOverdue = computed(() => !!slaCurrentRound.value && roundOverdue(slaCurrentRound.value))
+const slaCurrentLabel = computed(() => {
+  if (slaExempt.value) return '不计 SLA'
+  const round = slaCurrentRound.value
+  if (!round) return '未计时'
+  return roundLabel(round)
+})
+function roundOverdue(round: SlaRound): boolean {
+  return round.breached || (round.status === 'running' && new Date(round.deadline_at).getTime() < Date.now())
+}
+function roundLabel(round: SlaRound): string {
+  if (round.status === 'cancelled') return '已撤销'
+  if (round.status === 'running') return roundOverdue(round) ? '已超时' : '计时中'
+  return roundOverdue(round) ? '超时返回' : '按时返回'
+}
 const headerChannel = computed(() => {
   const channel = (ticket.value as any)?.channel
   return ({ phone: '语音', web: '在线客服', internal: '内部转办', email: '邮件' } as Record<string, string>)[channel] || channel || '—'
@@ -1753,6 +1783,15 @@ async function confirmCancel() {
 .sales-submission-fields strong { background: #061a32; border-color: #1b4c73; color: #dcecff; }
 .submission-attachments a { color: #65c5ff; }
 .sidebar-card { padding: 19px; }
+.sla-rounds-card { margin-bottom: 16px; }
+.sla-current-summary { margin-top: 13px; color: #75d9ad; font-size: 15px; font-weight: 700; }
+.sla-current-summary.sla-round-overdue { color: #ff9caa; }
+.sla-current-deadline { margin: 7px 0 10px; color: #9cbdd9; font-size: 12px; line-height: 1.5; }
+.sla-round-row { display: grid; grid-template-columns: 1fr auto; gap: 5px 8px; padding: 11px 0; border-top: 1px solid #17466d; color: #dcecff; }
+.sla-round-row strong { font-size: 13px; }
+.sla-round-row span { color: #69d59b; font-size: 12px; }
+.sla-round-row .sla-round-overdue { color: #ff9caa; }
+.sla-round-row small { grid-column: 1 / -1; color: #93b5d2; font-size: 11px; }
 .flow-card { border-top-color: #2aa9e9; box-shadow: 0 0 15px #0574bd40; }
 .flow-card :deep(.marker-line) { background: #1a567e; }
 .flow-card :deep(.action-time),

@@ -86,10 +86,9 @@
       </template>
     </el-table-column>
     <!-- SLA：实测 need=66（"剩 23时59分" 12px tabular-nums）+ padding 32 + 余量 8 -->
-    <el-table-column label="SLA" width="106" align="center">
+    <el-table-column label="解决时限" width="132" align="center">
       <template #default="{ row }">
-        <span v-if="slaLabel(row)" class="sla-cell" :class="slaState(row)">{{ slaLabel(row) }}</span>
-        <span v-else class="muted">—</span>
+        <span class="sla-cell" :class="slaState(row)" :title="slaTitle(row)">{{ slaLabel(row) }}</span>
       </template>
     </el-table-column>
     <!-- 更新时间：实测 need=48（zh-cn 相对时间最长"3 个月前"）+ padding 32 + 余量 8 -->
@@ -121,6 +120,16 @@ function isTerminal(row: Ticket): boolean {
   return key === 'archived' || key === 'cancelled'
 }
 
+function isSlaExempt(row: Ticket): boolean {
+  return row.is_opportunity === true || (row as any).category_id === 1205
+}
+
+function slaTitle(row: Ticket): string {
+  if (isSlaExempt(row)) return '线索或即时办结工单不计解决时限'
+  if (!row.escalation_at) return '没有计时记录；存量工单可能创建于策略配置之前'
+  return `解决时限截止：${new Date(row.escalation_at).toLocaleString('zh-CN', { hour12: false })}`
+}
+
 /**
  * "处理人"列按状态选人：
  * - pending：dispatcher（对接人正在负责分派）
@@ -144,11 +153,10 @@ function resolveHandler(row: Ticket): any {
   return r.owner
 }
 function slaState(row: Ticket): 'danger' | 'warning' | 'normal' {
-  // 终态工单不标红（已闭环，超时仅作历史记录）
+  if (isSlaExempt(row) || !row.escalation_at) return 'normal'
+  // 已返回客服或结束的工单不参与当前倒计时。
+  if ((row as any).state_key === 'resolved') return 'normal'
   if (isTerminal(row)) return 'normal'
-  // 优先用后端 SLA 引擎标记的 breach（最准）
-  if (row.sla_breached) return 'danger'
-  if (!row.escalation_at) return 'normal'
   const now = Date.now()
   const target = new Date(row.escalation_at).getTime()
   if (target < now) return 'danger'
@@ -212,15 +220,12 @@ function badgeSummary(row: Ticket): string {
 
 /** SLA 列文本 */
 function slaLabel(row: Ticket): string {
-  const breached = row.sla_breached
-  // 终态工单：显示最终结论
-  if (isTerminal(row)) {
-    return breached ? '曾超时' : '达标'
-  }
-  // 进行中：已超时显示「已超时」
-  if (breached) return '已超时'
+  if (isSlaExempt(row)) return '不计 SLA'
   const deadline = row.escalation_at
-  if (!deadline) return ''
+  if (!deadline) return '未计时'
+  const state = (row as any).state_key
+  if (state === 'cancelled') return '已撤销'
+  if (state === 'resolved' || state === 'archived') return row.sla_breached ? '曾超时' : '按时返回'
   const remaining = new Date(deadline).getTime() - Date.now()
   if (remaining <= 0) return '已超时'
   return formatRemaining(remaining)

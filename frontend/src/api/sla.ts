@@ -2,16 +2,16 @@ import api from './index'
 
 export interface SLAPolicyItem {
   id: number
-  skill_group_id: number | null
-  skill_group_name: string | null
-  priority: string
+  category_id: number
+  category_name: string | null
+  variant: string
   solution_minutes: number
   created_at: string
 }
 
 export interface SLAPolicyPayload {
-  skill_group_id: number | null
-  priority: string
+  category_id: number
+  variant: string
   solution_minutes: number
 }
 

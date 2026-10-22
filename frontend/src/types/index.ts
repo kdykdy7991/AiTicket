@@ -275,6 +275,7 @@ export interface Article {
 }
 
 export interface TicketDetail extends Ticket {
+  sla_rounds?: Array<{ sequence: number; started_at: string; deadline_at: string; ended_at: string | null; status: string; breached: boolean }>
   /** 原始建单字段在详情适配器中保留，供草稿回填。 */
   customer_name?: string | null
   customer_company?: string | null

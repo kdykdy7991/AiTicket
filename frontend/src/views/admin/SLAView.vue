@@ -3,26 +3,26 @@
     <div class="page-header">
       <div>
         <h2 class="page-title">SLA 策略</h2>
+        <p class="page-subtitle">按一级分类配置解决时限：投诉三级、业务保障 P1～P4，其余分类单档；未配置的档位不计时。</p>
       </div>
       <el-button type="primary" @click="openCreate">新增策略</el-button>
     </div>
 
     <el-card shadow="never" class="list-card" v-loading="loading">
       <el-table :data="policies" :key="tableKey" row-key="id">
-        <el-table-column label="适用范围" width="160">
+        <el-table-column label="一级分类" width="190">
           <template #default="{ row }">
-            <el-tag v-if="!row.skill_group_id" size="small" type="info">全局默认</el-tag>
-            <span v-else>{{ row.skill_group_name }}</span>
+            <span>{{ row.category_name || `分类 #${row.category_id}` }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="优先级" width="200">
+        <el-table-column label="时限档位" width="200">
           <template #default="{ row }">
-            <span class="priority-dot" :style="{ background: priorityColor(row.priority) }" />
-            {{ priorityLabel(row.priority) }}
+            <span v-if="row.category_name === '业务保障'" class="priority-dot" :style="{ background: priorityColor(row.variant) }" />
+            {{ variantLabel(row.variant) }}
           </template>
         </el-table-column>
-        <el-table-column label="解决时限">
-          <template #default="{ row }">{{ formatMinutes(row.solution_minutes) }}</template>
+        <el-table-column label="解决时限（小时）">
+          <template #default="{ row }">{{ formatHours(row.solution_minutes) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
@@ -35,21 +35,21 @@
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑策略' : '新增策略'" width="500px" align-center append-to-body class="ticket-dark-dialog sla-dialog" :close-on-click-modal="false">
       <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
-        <el-form-item label="适用范围" prop="skill_group_id">
-          <el-select v-model="form.skill_group_id" popper-class="ticket-dark-select-popper" style="width: 100%" :disabled="editing" placeholder="全局默认（不选）">
-            <el-option label="全局默认" :value="null" />
-            <el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id" />
+        <el-form-item label="一级分类" prop="category_id">
+          <el-select v-model="form.category_id" popper-class="ticket-dark-select-popper" style="width: 100%" :disabled="editing" placeholder="请选择一级分类" @change="onCategoryChange">
+            <el-option v-for="category in rootCategories" :key="category.id" :label="category.name" :value="category.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="优先级" prop="priority">
-          <el-select v-model="form.priority" popper-class="ticket-dark-select-popper" style="width: 100%" :disabled="editing">
-            <el-option v-for="p in priorities" :key="p.value" :label="p.label" :value="p.value" />
+        <el-form-item label="时限档位" prop="variant">
+          <el-select v-model="form.variant" popper-class="ticket-dark-select-popper" style="width: 100%" :disabled="editing" placeholder="请选择档位">
+            <el-option v-for="option in variantOptions" :key="option.value" :label="option.label" :value="option.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="解决时限(分钟)" prop="solution_minutes">
-          <el-input-number v-model="form.solution_minutes" :min="1" :max="43200" style="width: 100%" />
+        <el-form-item label="解决时限(小时)" prop="solution_hours">
+          <el-input-number v-model="form.solution_hours" :min="0.02" :max="720" :step="0.5" :precision="2" style="width: 100%" />
         </el-form-item>
       </el-form>
+      <p class="sla-hint">从正式建单开始；最终处理结果返回客服时结束。客服退回后开启新一轮。线索与即时办结不计 SLA。</p>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="onSubmit">保存</el-button>
@@ -59,16 +59,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { slaApi, type SLAPolicyItem, type SLAPolicyPayload } from '@/api/sla'
 import { metaApi } from '@/api/overviews'
-import type { Group } from '@/types'
+import type { TicketCategory } from '@/types'
 
 const loading = ref(false)
 const saving = ref(false)
 const policies = ref<SLAPolicyItem[]>([])
-const skillGroups = ref<Group[]>([])
+const rootCategories = ref<TicketCategory[]>([])
 const tableKey = ref(0)
 
 const dialogVisible = ref(false)
@@ -87,22 +87,26 @@ const PRIORITY_COLOR: Record<string, string> = {
 }
 function priorityLabel(v: string) { return priorities.find(p => p.value === v)?.label || v }
 function priorityColor(v: string) { return PRIORITY_COLOR[v] || '#909399' }
+function variantLabel(v: string) { return v === 'default' ? '单档' : priorityLabel(v) === v ? `${v}投诉` : priorityLabel(v) }
 
 const form = reactive({
-  skill_group_id: null as number | null,
-  priority: 'p4_enterprise',
-  solution_minutes: 480,
+  category_id: null as number | null,
+  variant: '',
+  solution_hours: 8,
 })
 const rules: FormRules = {
-  priority: [{ required: true, message: '请选择优先级', trigger: 'change' }],
-  solution_minutes: [{ required: true, message: '请输入', trigger: 'blur' }],
+  category_id: [{ required: true, message: '请选择一级分类', trigger: 'change' }],
+  variant: [{ required: true, message: '请选择时限档位', trigger: 'change' }],
+  solution_hours: [{ required: true, message: '请输入', trigger: 'blur' }],
 }
+const selectedCategory = computed(() => rootCategories.value.find(category => category.id === form.category_id))
+const variantOptions = computed(() => selectedCategory.value?.name === '业务保障' ? priorities
+  : ['投诉', '服务投诉', '投诉类'].includes(selectedCategory.value?.name || '')
+    ? [{ value: '一般', label: '一般投诉' }, { value: '重要', label: '重要投诉' }, { value: '重大', label: '重大投诉' }]
+    : [{ value: 'default', label: '单档' }])
+function onCategoryChange() { form.variant = variantOptions.value[0]?.value || '' }
 
-function formatMinutes(m: number): string {
-  if (m < 60) return `${m} 分钟`
-  if (m < 1440) return `${(m / 60).toFixed(m % 60 ? 1 : 0)} 小时`
-  return `${(m / 1440).toFixed(m % 1440 ? 1 : 0)} 天`
-}
+function formatHours(minutes: number): string { return Number((minutes / 60).toFixed(2)).toString() }
 
 async function load() {
   loading.value = true
@@ -118,17 +122,17 @@ async function load() {
 function openCreate() {
   editing.value = false
   editingId.value = null
-  form.skill_group_id = null
-  form.priority = 'p4_enterprise'
-  form.solution_minutes = 480
+  form.category_id = null
+  form.variant = ''
+  form.solution_hours = 8
   dialogVisible.value = true
 }
 function openEdit(row: SLAPolicyItem) {
   editing.value = true
   editingId.value = row.id
-  form.skill_group_id = row.skill_group_id
-  form.priority = row.priority
-  form.solution_minutes = row.solution_minutes
+  form.category_id = row.category_id
+  form.variant = row.variant
+  form.solution_hours = row.solution_minutes / 60
   dialogVisible.value = true
 }
 
@@ -138,9 +142,9 @@ async function onSubmit() {
   saving.value = true
   try {
     const payload: SLAPolicyPayload = {
-      skill_group_id: form.skill_group_id,
-      priority: form.priority,
-      solution_minutes: form.solution_minutes,
+      category_id: form.category_id!,
+      variant: form.variant,
+      solution_minutes: Math.round(form.solution_hours * 60),
     }
     if (editing.value && editingId.value) {
       await slaApi.update(editingId.value, payload)
@@ -148,14 +152,12 @@ async function onSubmit() {
       // 本地立即更新对应行（不依赖 load，避免缓存返回旧数据）
       const idx = policies.value.findIndex(p => p.id === editingId.value)
       if (idx >= 0) {
-        const sgName = payload.skill_group_id
-          ? skillGroups.value.find(g => g.id === payload.skill_group_id)?.name || null
-          : null
+        const categoryName = rootCategories.value.find(category => category.id === payload.category_id)?.name || null
         policies.value[idx] = {
           ...policies.value[idx],
-          skill_group_id: payload.skill_group_id,
-          skill_group_name: sgName,
-          priority: payload.priority,
+          category_id: payload.category_id,
+          category_name: categoryName,
+          variant: payload.variant,
           solution_minutes: payload.solution_minutes,
         }
         tableKey.value++
@@ -174,7 +176,7 @@ async function onSubmit() {
 
 async function onRemove(row: SLAPolicyItem) {
   try {
-    await ElMessageBox.confirm('确定删除该 SLA 策略吗？删除后对应工单将使用全局默认时限。', '删除策略', { type: 'warning', customClass: 'ticket-dark-dialog' })
+    await ElMessageBox.confirm('确定删除该解决时限策略吗？删除后新建及新一轮工单将不再匹配此档位；已有轮次保持原截止时间。', '删除策略', { type: 'warning', customClass: 'ticket-dark-dialog' })
   } catch { return }
   await slaApi.remove(row.id)
   ElMessage.success('已删除')
@@ -184,7 +186,7 @@ async function onRemove(row: SLAPolicyItem) {
 }
 
 onMounted(async () => {
-  skillGroups.value = await metaApi.getSkillGroups()
+  rootCategories.value = (await metaApi.getCategories()).filter(category => category.parent_id == null)
   await load()
 })
 </script>
