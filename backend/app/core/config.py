@@ -12,7 +12,7 @@ _DEFAULT_UPLOAD_DIR = str(_BACKEND_DIR / "uploads")
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "Skdy Ticket System"
+    APP_NAME: str = "智慧客服工单系统"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
 

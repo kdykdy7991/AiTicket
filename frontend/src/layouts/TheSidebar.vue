@@ -1,5 +1,5 @@
 <template>
-  <el-aside :width="collapsed ? '68px' : '240px'" class="sidebar">
+  <el-aside :width="collapsed ? '68px' : '240px'" class="sidebar" :class="{ 'is-collapsed': collapsed }">
     <div class="sidebar-logo" :class="{ collapsed }">
       <div class="logo-mark">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -11,7 +11,7 @@
         </svg>
       </div>
       <Transition name="fade">
-        <span v-show="!collapsed" class="logo-text">Skdy Ticket</span>
+        <span v-show="!collapsed" class="logo-text">智慧客服工单系统</span>
       </Transition>
     </div>
 
@@ -91,7 +91,7 @@ const iconKnowledge = '<svg width="18" height="18" viewBox="0 0 24 24" fill="non
 const mainMenu = computed(() => {
   const items = [
     { path: '/tickets', label: '工单', icon: iconTickets },
-    { path: '/visits', label: '来访记录（非工单）', icon: iconVisits },
+    { path: '/visits', label: '来访记录', icon: iconVisits },
   ]
   // 统计报表 / 我的草稿仅客服和管理员可见
   if (authStore.isAgent) {
@@ -268,4 +268,19 @@ function isActive(path: string): boolean {
 .fade-leave-active { transition: opacity var(--duration-fast) var(--ease-out); }
 .fade-enter-from,
 .fade-leave-to { opacity: 0; }
+:global(.ticket-dark-theme .sidebar) { background: radial-gradient(circle at 20% 110%, #073e76 0, transparent 29%), linear-gradient(180deg, #031a35, #011127 72%); border-right: 1px solid #0c6eaf; box-shadow: inset -6px 0 18px #0059b32b; position: relative; }
+:global(.ticket-dark-theme .sidebar::before) { content: ''; position: absolute; left: -105px; bottom: -141px; width: 360px; height: 360px; border-radius: 50%; background: #0878d7; opacity: .16; filter: blur(35px); pointer-events: none; }
+:global(.ticket-dark-theme .sidebar::after) { content: ''; position: absolute; left: -112px; bottom: -128px; width: 360px; height: 360px; background: url('../assets/sidebar-globe.svg') center / contain no-repeat; opacity: .88; filter: drop-shadow(0 0 12px #008dff55); pointer-events: none; }
+:global(.ticket-dark-theme .sidebar.is-collapsed::before), :global(.ticket-dark-theme .sidebar.is-collapsed::after) { display: none; }
+:global(.ticket-dark-theme .sidebar-logo) { height: 66px; padding: 0 18px; border-bottom-color: #15517d; position: relative; z-index: 1; }
+:global(.ticket-dark-theme .logo-mark) { background: linear-gradient(145deg, #178de7, #064cb5); border-radius: 6px; box-shadow: 0 0 14px #087dec70; }
+:global(.ticket-dark-theme .logo-text) { color: #eef6ff; font-size: 17px; letter-spacing: .01em; }
+:global(.ticket-dark-theme .sidebar-nav) { padding-top: 15px; position: relative; z-index: 1; }
+:global(.ticket-dark-theme .nav-item) { color: #aac5e4; border: 1px solid transparent; border-radius: 4px; }
+:global(.ticket-dark-theme .nav-item:hover) { background: #0a3157; color: #f2f8ff; }
+:global(.ticket-dark-theme .nav-item.active) { color: #fff; border-color: #168ce3; background: linear-gradient(90deg, #073667, #0c3a6c); box-shadow: inset 0 0 12px #087aff50, 0 0 7px #078be57a; }
+:global(.ticket-dark-theme .nav-item.active .nav-icon) { color: #cceaff; filter: none; }
+:global(.ticket-dark-theme .nav-active-indicator) { display: none; }
+:global(.ticket-dark-theme .nav-section-label) { color: #87a9cc; opacity: 1; border-top: 1px solid #14466c; margin: 12px 12px 0; padding-left: 0; }
+:global(.ticket-dark-theme .sidebar-footer) { border-top-color: #14466c; position: relative; z-index: 1; }
 </style>

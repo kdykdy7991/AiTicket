@@ -1,10 +1,8 @@
 <template>
   <header class="topbar">
-    <div class="topbar-left">
-      <!-- 顶部搜索已移除 -->
-    </div>
+    <div class="topbar-left" />
     <div class="topbar-right">
-      <el-dropdown @command="onCommand" trigger="click">
+      <el-dropdown @command="onCommand" trigger="click" :popper-class="route.name === 'TicketList' || route.name === 'TicketDetail' ? 'ticket-dark-user-dropdown' : ''">
         <button class="user-trigger">
           <span class="user-avatar-circle">
             {{ authStore.displayName.charAt(0) }}
@@ -36,10 +34,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ChangePasswordDialog from '@/components/ChangePasswordDialog.vue'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 
 const changePasswordVisible = ref(false)
@@ -110,4 +110,9 @@ async function onCommand(cmd: string) {
 .chevron-icon {
   color: var(--color-text-tertiary);
 }
+:global(.ticket-dark-theme .topbar) { height: 66px; background: linear-gradient(180deg, #071d39, #031126); border-bottom: 1px solid #12609b; box-shadow: 0 2px 16px #0879da42; position: relative; }
+:global(.ticket-dark-theme .topbar::after) { content: ''; position: absolute; left: 0; bottom: -1px; width: 34%; height: 2px; background: linear-gradient(90deg, transparent, #26baff, transparent); box-shadow: 0 0 12px #009df5; pointer-events: none; }
+:global(.ticket-dark-theme .user-trigger) { color: #e8f3ff; border-radius: 4px; }
+:global(.ticket-dark-theme .user-trigger:hover) { background: #0d345a; }
+:global(.ticket-dark-theme .user-avatar-circle) { background: linear-gradient(145deg, #4278ed, #174abf); }
 </style>

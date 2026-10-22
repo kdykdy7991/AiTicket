@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 420" fill="none">
+  <defs>
+    <radialGradient id="ocean" cx="0" cy="0" r="1" gradientTransform="translate(180 204) rotate(70) scale(206)">
+      <stop stop-color="#0B5AA5" stop-opacity=".48"/>
+      <stop offset=".62" stop-color="#06366E" stop-opacity=".4"/>
+      <stop offset="1" stop-color="#01162F" stop-opacity=".12"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="46" y1="93" x2="307" y2="359" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2FB5FF" stop-opacity=".22"/>
+      <stop offset=".48" stop-color="#3CC1FF"/>
+      <stop offset="1" stop-color="#0A68D0" stop-opacity=".34"/>
+    </linearGradient>
+    <pattern id="dots" width="9" height="9" patternUnits="userSpaceOnUse"><circle cx="4.5" cy="4.5" r="1.1" fill="#42BAFF" opacity=".52"/></pattern>
+    <clipPath id="disc"><circle cx="210" cy="210" r="171"/></clipPath>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <circle cx="210" cy="210" r="171" fill="url(#ocean)"/>
+  <g clip-path="url(#disc)" stroke="#177FCB" stroke-width=".8" opacity=".42">
+    <ellipse cx="210" cy="210" rx="70" ry="171"/>
+    <ellipse cx="210" cy="210" rx="128" ry="171"/>
+    <path d="M39 210h342M53 143h314M53 277h314M85 91h250M85 329h250"/>
+    <ellipse cx="210" cy="210" rx="171" ry="77"/>
+    <ellipse cx="210" cy="210" rx="171" ry="134"/>
+  </g>
+  <g clip-path="url(#disc)" fill="url(#dots)" opacity=".75">
+    <path d="m68 126 28-17 22 5 17-13 23 8 10 17 29 8 15 18-8 15-28 8-17 26-21 5-7 27-20 10-12-17-3-32-22-18-10-24z"/>
+    <path d="m158 226 33-13 22 10 10 27-12 22-4 28-18 40-18-11-6-32-14-20z"/>
+    <path d="m234 115 26-17 31 8 23-5 30 20 14 29-9 23-30-7-20 13-26-4-15 22-28-7-11-25z"/>
+    <path d="m267 213 27-8 26 15 7 27-15 24-13 42-24 8-13-28 9-30-16-25z"/>
+  </g>
+  <circle cx="210" cy="210" r="171" stroke="#36B7FF" stroke-width="9" opacity=".48" filter="url(#glow)"/>
+  <circle cx="210" cy="210" r="171" stroke="url(#rim)" stroke-width="1.5"/>
+  <path d="M40 201c48-45 105-70 170-70 70 0 130 27 173 78" stroke="#43C7FF" stroke-width="1.2" opacity=".52"/>
+  <g fill="#65D4FF"><circle cx="92" cy="112" r="2.2"/><circle cx="130" cy="235" r="2"/><circle cx="279" cy="136" r="2.5"/><circle cx="329" cy="245" r="2"/><circle cx="205" cy="305" r="1.8"/></g>
+  <g stroke="#238BD3" opacity=".4"><path d="m92 112 38 123 75 70 124-60-50-109-187-24"/><path d="m130 235 149-99"/></g>
+</svg>

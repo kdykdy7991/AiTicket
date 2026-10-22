@@ -1,8 +1,8 @@
 <template>
-  <el-container class="default-layout">
+  <el-container class="default-layout" :class="{ 'ticket-dark-theme': route.name === 'TicketList' || route.name === 'TicketDetail' || route.name === 'TicketCreate' || route.name === 'TicketCreateDesign' || route.name === 'TicketDrafts' || route.name === 'VisitRecords' || route.name === 'Report' || route.name === 'OpportunityAnalysis' || route.name === 'AdminUsers' || route.name === 'AdminGroups' || route.name === 'AdminSLA' || route.name === 'KnowledgeBase', 'ticket-detail-theme': route.name === 'TicketDetail', 'ticket-create-theme': route.name === 'TicketCreate' || route.name === 'TicketCreateDesign' }">
     <TheSidebar />
     <el-container direction="vertical">
-      <TheTopbar v-if="route.name !== 'KnowledgeBase'" />
+      <TheTopbar />
       <el-main class="main-content">
         <div class="content-wrapper" :class="{ 'content-wrapper--assistant': route.name === 'AgentAssistant', 'content-wrapper--knowledge': route.name === 'KnowledgeBase', 'content-wrapper--ticket-create': route.name === 'TicketCreate' || route.name === 'TicketCreateDesign' }">
           <slot />
@@ -51,6 +51,17 @@ const route = useRoute()
   margin-inline: auto;
   padding: 24px clamp(16px, 2.5vw, 36px);
 }
+.ticket-dark-theme .main-content {
+  background: #020d20;
+  border-left: 1px solid #0b65a7;
+}
+.ticket-dark-theme .content-wrapper {
+  max-width: none;
+  padding: 16px clamp(16px, 1.7vw, 30px) 24px;
+}
+.ticket-detail-theme .content-wrapper { max-width: 1600px; }
+.ticket-create-theme .content-wrapper--ticket-create { max-width: 1600px; padding: 18px clamp(16px, 1.7vw, 30px) 30px; }
+.ticket-dark-theme .content-wrapper--knowledge { padding: 0; }
 
 @keyframes page-in {
   from { opacity: 0; transform: translateY(6px); }
