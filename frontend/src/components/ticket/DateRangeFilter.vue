@@ -5,7 +5,7 @@
     placement="bottom-end"
     :width="292"
     :show-arrow="true"
-    popper-class="date-range-popover"
+    popper-class="date-range-popover ticket-list-date-popper"
   >
     <template #reference>
       <button

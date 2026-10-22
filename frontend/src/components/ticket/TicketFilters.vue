@@ -3,6 +3,7 @@
     <div class="filter-items">
       <el-select
         v-model="local.category_l2_id"
+        popper-class="ticket-list-select-popper"
         placeholder="二级分类"
         clearable
         filterable
@@ -18,6 +19,7 @@
       </el-select>
       <el-select
         v-model="local.priority_id"
+        popper-class="ticket-list-select-popper"
         placeholder="优先级"
         clearable
         @change="emit('update:modelValue', local)"
@@ -27,6 +29,7 @@
       </el-select>
       <el-select
         v-model="local.creator_id"
+        popper-class="ticket-list-select-popper"
         placeholder="创建人"
         clearable
         @change="emit('update:modelValue', local)"
@@ -134,6 +137,25 @@ onMounted(async () => {
   padding: 14px 16px;
   margin-bottom: 16px;
 }
+:global(.ticket-dark-theme .filters-bar) {
+  position: relative;
+  background: linear-gradient(180deg, #082d56, #051d3c);
+  border: 1px solid #0b82d0;
+  border-radius: 5px;
+  padding: 11px 13px;
+  box-shadow: inset 0 1px #4ac3ff55, 0 0 13px #007fc739;
+  margin-bottom: 11px;
+}
+:global(.ticket-dark-theme .filters-bar::before) { content: ''; position: absolute; top: -2px; left: 14px; width: 76px; height: 2px; background: #4cd3ff; box-shadow: 0 0 10px #4cd3ff; }
+:global(.ticket-dark-theme .filter-select) { width: 170px; }
+:global(.ticket-dark-theme .filter-search) { flex: 1; min-width: 180px; width: auto; }
+:global(.ticket-dark-theme .filter-select .el-select__wrapper),
+:global(.ticket-dark-theme .filter-search .el-input__wrapper) { background: #061f3d; border: 1px solid #195984; border-radius: 4px; height: 39px; box-shadow: none; }
+:global(.ticket-dark-theme .filter-select .el-select__wrapper:hover),
+:global(.ticket-dark-theme .filter-search .el-input__wrapper:hover) { border-color: #2f9ad7; }
+:global(.ticket-dark-theme .dr-trigger) { height: 39px; min-width: 154px; justify-content: space-between; background: #061f3d; border-color: #195984; color: #bfd5ed; }
+:global(.ticket-dark-theme .dr-trigger.is-active) { color: #86cfff; border-color: #328cca; }
+@media (max-width: 1000px) { :global(.ticket-dark-theme .filter-search) { flex-basis: 260px; } }
 
 .filter-items {
   display: flex;

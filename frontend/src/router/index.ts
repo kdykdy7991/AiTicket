@@ -49,7 +49,7 @@ const routes: RouteRecordRaw[] = [
     path: '/visits',
     name: 'VisitRecords',
     component: () => import('@/views/VisitRecordsView.vue'),
-    meta: { title: '来访记录（非工单）' },
+    meta: { title: '来访记录' },
   },
   {
     path: '/tickets/new',

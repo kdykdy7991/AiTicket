@@ -58,6 +58,7 @@
       title="导出工单"
       width="680px"
       align-center
+      class="ticket-list-export-dialog"
     >
       <div class="export-dialog">
         <div class="export-summary">
@@ -408,4 +409,50 @@ async function onExport() {
   gap: 4px 16px;
   padding-left: 24px;
 }
+
+/* 工单列表：深蓝指挥中心视觉。 */
+.ticket-list-view { min-height: 100%; }
+.page-header { align-items: center; margin-bottom: 19px; }
+.page-title { font-size: 27px; letter-spacing: .02em; color: #edf7ff; text-shadow: 0 0 16px #40aaff3b; }
+.header-actions { gap: 16px; }
+.export-btn, .create-btn { height: 40px; border-radius: 4px; }
+.export-btn { background: #041b36; border-color: #1778bd; color: #e7f4ff; }
+.export-btn:hover { background: #0b3159; border-color: #3ba8eb; color: #fff; }
+.create-btn { min-width: 150px; }
+.quick-tabs { gap: 8px; margin-bottom: 14px; flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.quick-tab { flex: none; min-height: 35px; padding: 5px 13px; border-radius: 4px; border-color: #15436c; background: #061c39; color: #c5d8ee; }
+.quick-tab:hover { border-color: #2d90d0; color: #eff8ff; }
+.quick-tab.active { background: linear-gradient(180deg, #0a6ac6, #084ba7); border-color: #278cdb; box-shadow: 0 0 11px #075fc56b, inset 0 1px #80c9ff50; }
+.quick-tab .tab-count { background: #ffffff18; }
+.list-card { border-color: #0d8cda; border-radius: 6px; background: #041b37; box-shadow: 0 0 19px #006fca4d; overflow: hidden; position: relative; }
+.list-card::before, .list-card::after { content: ''; position: absolute; z-index: 2; width: 55px; height: 2px; background: #4bd5ff; box-shadow: 0 0 11px #4bd5ff; pointer-events: none; }
+.list-card::before { top: 0; left: 13px; }
+.list-card::after { bottom: 0; right: 13px; }
+.list-card :deep(.el-table) { background: #041b37; }
+.list-card :deep(.el-table__header th.el-table__cell) { height: 46px; background: linear-gradient(180deg, #0c4278, #072c52); color: #c9e2fb; border-bottom-color: #1b6193; font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; }
+.list-card :deep(.el-table__body td.el-table__cell) { height: 48px; border-bottom-color: #0c385f; color: #c4d8f0; }
+.list-card :deep(.el-table__body tr:nth-child(odd)) { background: #031a34; }
+.list-card :deep(.el-table__body tr:nth-child(even)) { background: #051f3c; }
+.list-card :deep(.el-table__body tr:hover > td.el-table__cell) { background: #0b345b; }
+.list-card :deep(.el-table__empty-block) { background: #041b37; color: #98b7d6; }
+.list-card :deep(.number-cell) { color: #b6d6f8; }
+.list-card :deep(.title-badge) { border-radius: 4px; border: 1px solid transparent; }
+.list-card :deep(.badge-urge), .list-card :deep(.badge-sla) { background: #481c36; border-color: #9a345b; color: #ff9cb1; }
+.list-card :deep(.badge-returned), .list-card :deep(.badge-dup) { background: #453216; border-color: #97701d; color: #ffd47a; }
+.list-card :deep(.badge-addition) { background: #112e69; border-color: #174dbe; color: #85b7ff; }
+.list-card :deep(.badge-more) { background: #143657; color: #bed4ea; }
+.list-card :deep(.state-tag) { border: 1px solid currentColor; padding: 4px 10px; }
+.list-card :deep(.state-new) { background: #0a2960; color: #78adff; }
+.list-card :deep(.state-open) { background: #423111; color: #ffc54f; }
+.list-card :deep(.state-pending) { background: #142e4d; color: #c3d8ee; }
+.list-card :deep(.state-closed) { background: #06463e; color: #27e2b7; }
+.list-card :deep(.state-merged) { background: #263052; color: #cac5ee; }
+.list-card :deep(.priority-label) { color: #c4d8f0; }
+.list-card :deep(.sla-cell.danger) { color: #ff7e99; }
+.list-card :deep(.sla-cell.warning) { color: #ffc75f; }
+.list-card :deep(.row-sla-warning) { background: linear-gradient(90deg, #4b371d66, #041b37) !important; }
+.list-card :deep(.row-sla-danger) { background: linear-gradient(90deg, #64243b70, #041b37) !important; }
+.list-card :deep(.row-sla-danger .number-cell) { color: #ff9cb1; }
+.pagination-wrapper { border-top-color: #0c3d66; padding: 12px 18px; }
+@media (max-width: 900px) { .page-title { font-size: 23px; } .header-actions { gap: 8px; } .create-btn { min-width: 0; } }
 </style>

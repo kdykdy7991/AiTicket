@@ -16,6 +16,12 @@
             <el-button v-if="canCancel" type="danger" size="small" class="header-action-btn" @click="openCancelDialog">撤销</el-button>
           </div>
         </div>
+        <div class="header-facts">
+          <div><span>受理时间</span><strong>{{ formatHeaderTime((ticket as any).created_at) }}</strong></div>
+          <div><span>受理班组</span><strong>{{ (ticket as any).creator_group_name || (ticket as any).creator_group || '—' }}</strong></div>
+          <div><span>受理人</span><strong>{{ (ticket as any).creator_name || '—' }}</strong></div>
+          <div><span>受理渠道</span><strong>{{ headerChannel }}</strong></div>
+        </div>
       </div>
 
       <div class="detail-body">
@@ -35,7 +41,7 @@
                   </div>
                 </template>
                 <div v-for="article in card.articles" :key="`article-${article.id}`" class="sales-submission-opinion">
-                  <span>{{ articleLabel(article.type) }}<template v-if="article.origin_by?.firstname"> · {{ article.origin_by.firstname }}</template></span>
+                  <span><span :class="{ 'reminder-title': article.type === 'reminder' }">{{ articleLabel(article.type) }}</span><template v-if="article.origin_by?.firstname"> · {{ article.origin_by.firstname }}</template></span>
                   <strong v-if="article.body">{{ article.body }}</strong>
                   <strong v-if="article.append_reason">补充原因：{{ article.append_reason }}</strong>
                   <strong v-if="article.attachments?.length" class="submission-attachments"><a v-for="attachment in article.attachments" :key="attachment.id" :href="attachment.url" target="_blank" rel="noopener noreferrer">{{ attachment.original_filename }}</a></strong>
@@ -68,16 +74,16 @@
                 show-word-limit
               />
               <div class="resubmit-selects">
-                <el-select v-model="resubmitCategoryL1Id" placeholder="选择一级分类" @change="onResubmitL1Change">
+                <el-select popper-class="ticket-dark-select-popper" v-model="resubmitCategoryL1Id" placeholder="选择一级分类" @change="onResubmitL1Change">
                   <el-option v-for="c in resubmitCategoriesL1" :key="c.id" :label="c.name" :value="c.id" />
                 </el-select>
-                <el-select v-if="!resubmitL1Selectable" v-model="resubmitCategoryL2Id" placeholder="选择二级分类" :disabled="!resubmitCategoryL1Id" filterable @change="onResubmitCategoryChange">
+                <el-select popper-class="ticket-dark-select-popper" v-if="!resubmitL1Selectable" v-model="resubmitCategoryL2Id" placeholder="选择二级分类" :disabled="!resubmitCategoryL1Id" filterable @change="onResubmitCategoryChange">
                   <el-option v-for="c in resubmitCategoriesL2" :key="c.id" :label="c.label" :value="c.id" />
                 </el-select>
               </div>
               <p v-if="resubmitRoutingHint" class="dispatch-card-hint">{{ resubmitRoutingHint }}</p>
               <div class="resubmit-selects">
-                <el-select
+                <el-select popper-class="ticket-dark-select-popper"
                   v-model="resubmitSkillGroupId"
                   placeholder="选择对接部门"
                   :loading="skillGroupsLoading"
@@ -91,7 +97,7 @@
                     :value="g.id"
                   />
                 </el-select>
-                <el-select
+                <el-select popper-class="ticket-dark-select-popper"
                   v-model="resubmitDispatcherId"
                   placeholder="选择部门对接人"
                   :loading="dispatchersLoading"
@@ -147,7 +153,7 @@
                 :step="1"
                 step-strictly
               />
-              <el-select
+              <el-select popper-class="ticket-dark-select-popper"
                 v-else-if="field.field_type === 'select'"
                 v-model="closureValues[field.field_key]"
                 :placeholder="`请选择${field.label}`"
@@ -281,7 +287,7 @@
           <div v-if="canRefine && currentForm" class="refine-card">
             <div class="refine-card-title">{{ currentForm.name }}</div>
             <p class="refine-card-hint">选择下一层问题分类，填写核查信息后一起提交；责任部门由系统确定。</p>
-            <el-select v-model="triageTargetCategoryId" placeholder="选择下一层问题分类" @change="loadTriageForm">
+            <el-select popper-class="ticket-dark-select-popper" v-model="triageTargetCategoryId" placeholder="选择下一层问题分类" @change="loadTriageForm">
               <el-option v-for="option in refineOptions" :key="option.id" :label="option.name" :value="option.id" />
             </el-select>
             <div v-if="triageTargetCategoryId" class="triage-field">
@@ -290,7 +296,7 @@
             </div>
             <div v-for="field in currentForm.fields.filter((item: any) => item.visible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="field.required"> *</span></label>
-              <el-select v-if="field.field_type === 'select'" v-model="triageValues[field.field_key]" clearable>
+              <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="triageValues[field.field_key]" clearable>
                 <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
               </el-select>
               <el-input v-else v-model="triageValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? 3 : undefined" />
@@ -321,7 +327,7 @@
             <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成线索处理并归档。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
-              <el-select v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable
+              <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable
                          :disabled="field.field_key === 'finance_person' && !processingValues.finance_company"
                          @change="field.field_key === 'finance_company' && (processingValues.finance_person = '')">
                 <el-option v-for="option in processingOptions(field)" :key="option" :label="option" :value="option" />
@@ -343,7 +349,7 @@
             <p class="refine-card-hint">提交本表单会完成反馈并按现有流程流转。</p>
             <div v-for="field in phoneFeedbackForm.fields.filter((item: any) => item.visible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="field.required"> *</span></label>
-              <el-select v-if="field.field_type === 'select'" v-model="phoneFeedbackValues[field.field_key]" clearable>
+              <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="phoneFeedbackValues[field.field_key]" clearable>
                 <el-option v-for="option in field.options" :key="option" :label="field.option_labels?.[option] || option" :value="option" />
               </el-select>
               <el-input v-else v-model="phoneFeedbackValues[field.field_key]" type="textarea" :rows="3" />
@@ -355,7 +361,7 @@
           <div v-if="canDispatch" class="dispatch-card">
             <div class="dispatch-card-title">{{ isAssuranceAssignment ? '指派售后人员' : '指派处理人' }}</div>
             <div class="dispatch-card-body">
-              <el-select
+              <el-select popper-class="ticket-dark-select-popper"
                 v-model="dispatchOwnerId"
                 :placeholder="isAssuranceAssignment ? '选择售后人员' : '选择处理人'"
                 class="dispatch-select"
@@ -394,7 +400,7 @@
         </div>
         <aside class="detail-sidebar">
           <div class="sidebar-card flow-card">
-            <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h4a6 6 0 0 1 6 5"/></svg>处理时间流</h3>
+            <h3 class="timeline-section-title"><svg class="section-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10M8 5h4a6 6 0 0 1 6 5"/></svg>处理时间流<small>PROCESS TIMELINE</small></h3>
             <StateLogTimeline
               :logs="ticket.state_logs || []"
               :current-state="(ticket as any).state_key"
@@ -408,7 +414,7 @@
       </div>
 
       <!-- 退回弹窗 -->
-      <el-dialog v-model="returnDialogVisible" :title="isResuming ? '恢复处理' : '退回工单'" width="420px" top="15vh" :close-on-click-modal="false">
+      <el-dialog class="ticket-dark-dialog" v-model="returnDialogVisible" :title="isResuming ? '恢复处理' : '退回工单'" width="420px" top="15vh" append-to-body :close-on-click-modal="false">
         <p class="dialog-hint">{{ isResuming ? '恢复后由当前处理人继续办理。请填写恢复说明：' : '退回后工单将返回上一办理节点，分类、部门和处理人同步回退。请填写退回原因：' }}</p>
         <el-input v-model="returnReason" type="textarea" :rows="3" :placeholder="isResuming ? '请填写恢复说明' : '请填写退回原因'" maxlength="500" show-word-limit />
         <template #footer>
@@ -418,7 +424,7 @@
       </el-dialog>
 
       <!-- 撤销弹窗 -->
-      <el-dialog v-model="cancelDialogVisible" title="撤销工单" width="420px" top="15vh" :close-on-click-modal="false">
+      <el-dialog class="ticket-dark-dialog" v-model="cancelDialogVisible" title="撤销工单" width="420px" top="15vh" append-to-body :close-on-click-modal="false">
         <p class="dialog-hint">撤销后工单状态将变更为「已撤销」，工单闭环。请填写撤销原因：</p>
         <el-input v-model="cancelReason" type="textarea" :rows="3" placeholder="请填写撤销原因" maxlength="500" show-word-limit />
         <template #footer>
@@ -431,14 +437,14 @@
     </template>
   </div>
       <!-- 暂缓处理：动作表单（暂缓原因 * / 预计恢复时间 *） -->
-      <el-dialog v-model="holdDialogVisible" title="暂缓处理" width="520px">
+      <el-dialog class="ticket-dark-dialog" v-model="holdDialogVisible" title="暂缓处理" width="520px" append-to-body>
         <el-form label-position="top">
           <el-form-item label="暂缓原因" required>
             <el-input v-model="holdReasonInput" type="textarea" :rows="3" maxlength="2000"
                       show-word-limit placeholder="请填写暂缓原因" />
           </el-form-item>
           <el-form-item label="预计恢复时间" required>
-            <el-date-picker
+            <el-date-picker popper-class="ticket-dark-select-popper"
               v-model="holdUntilInput"
               type="datetime"
               value-format="YYYY-MM-DDTHH:mm:ss"
@@ -456,7 +462,7 @@
       </el-dialog>
 
       <!-- 恢复处理：reason 必填（现有状态机行为） -->
-      <el-dialog v-model="resumeDialogVisible" title="恢复处理" width="480px">
+      <el-dialog class="ticket-dark-dialog" v-model="resumeDialogVisible" title="恢复处理" width="480px" append-to-body>
         <el-form label-position="top">
           <el-form-item label="恢复原因" required>
             <el-input v-model="resumeReasonInput" type="textarea" :rows="3" maxlength="2000"
@@ -473,6 +479,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import dayjs from 'dayjs'
 import { useRoute, useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
 import { metaApi } from '@/api/overviews'
@@ -490,6 +497,13 @@ const router = useRouter()
 const ticketStore = useTicketStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
+const headerChannel = computed(() => {
+  const channel = (ticket.value as any)?.channel
+  return ({ phone: '语音', web: '在线客服', internal: '内部转办', email: '邮件' } as Record<string, string>)[channel] || channel || '—'
+})
+function formatHeaderTime(value?: string | null): string {
+  return value && dayjs(value).isValid() ? dayjs(value).format('YYYY/MM/DD HH:mm:ss') : '—'
+}
 function articleLabel(type?: string): string {
   return ({ reply: '处理说明', note: '普通回复', addition: '补充信息', reminder: '催办', return: '退回补充' } as Record<string, string>)[type || ''] || '沟通记录'
 }
@@ -562,9 +576,10 @@ const timelineCards = computed(() => {
   return logs
     .sort((a: any, b: any) => new Date(a.entered_at).getTime() - new Date(b.entered_at).getTime())
     .flatMap((log: any) => {
-      if (log.action_type === 'create') return []
       const nodeSubmissions = submissions.filter((entry: any) => entry.state_log_id === log.id)
       const articles = (articlePlacement.value.get(log.id) || []).filter((entry: any) => !linkedArticleIds.has(entry.id))
+      // 建单节点通常由工单信息卡展示；有催办或补充时仍需显示沟通记录。
+      if (log.action_type === 'create' && !articles.length) return []
       const showLegacyClosure = closureLogId.value === log.id && !nodeSubmissions.some((entry: any) => entry.node_type === 'closure')
         && Boolean(t.is_callbacked || t.callback_details || t.archive_notes || t.satisfaction)
       const showLegacyResult = legacyResultLog?.id === log.id && !submissions.some((entry: any) => entry.node_type === 'processing')
@@ -1488,6 +1503,7 @@ async function confirmCancel() {
 .sales-submission-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .sales-submission-fields > div { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .sales-submission-fields span { color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.sales-submission-fields .reminder-title { color: #b91c1c; }
 .sales-submission-fields strong {
   padding: 9px 11px;
   min-height: 36px;
@@ -1705,4 +1721,173 @@ async function confirmCancel() {
   align-items: center;
   justify-content: center;
 }
+
+/* 深蓝指挥中心：详情页保持表单和长文本的阅读优先级。 */
+.ticket-detail-view { min-height: 100%; }
+.detail-header { margin-bottom: 18px; padding-bottom: 16px; border-bottom: 1px solid #164f7b; position: relative; }
+.detail-header::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 95px; height: 2px; background: linear-gradient(90deg, #3dbafa, transparent); box-shadow: 0 0 9px #3dbafa; }
+.back-btn { color: #a9c9e8; margin-bottom: 11px; }
+.back-btn:hover { color: #72c8ff; }
+.ticket-number { color: #edf7ff; font-size: 25px; text-shadow: 0 0 17px #40aaff38; }
+.header-meta { margin-bottom: 0; flex-wrap: wrap; }
+.header-action-btn { height: 36px; border-radius: 4px; font-size: 13px; }
+.ticket-detail-view :deep(.state-tag) { border: 1px solid currentColor; padding: 5px 11px; }
+.ticket-detail-view :deep(.state-new) { background: #0a2960; color: #78adff; }
+.ticket-detail-view :deep(.state-open) { background: #423111; color: #ffc54f; }
+.ticket-detail-view :deep(.state-pending) { background: #142e4d; color: #c3d8ee; }
+.ticket-detail-view :deep(.state-closed) { background: #06463e; color: #27e2b7; }
+.detail-body { gap: 18px; }
+.detail-main { gap: 15px; }
+.ticket-content-flow { gap: 14px; }
+.ticket-content-flow :deep(.form-section),
+.sales-submission-card,
+.sidebar-card,
+.timeline-card { background: #051d39; border: 1px solid #176496; border-radius: 6px; box-shadow: 0 0 12px #0064ae30; }
+.ticket-content-flow :deep(.form-section) { padding: 19px 22px 21px; }
+.ticket-content-flow :deep(.section-heading) { font-size: 16px; padding-bottom: 12px; border-bottom: 1px solid #17466d; }
+.ticket-content-flow :deep(.section-icon) { color: #5bbffc; }
+.ticket-content-flow :deep(.field > strong) { background: #061a32; border-color: #1b4c73; min-height: 39px; }
+.ticket-content-flow :deep(.field.description-field > strong) { min-height: 100px; }
+.sales-submission-title,
+.timeline-section-title { color: #edf7ff; }
+.sales-submission-title { padding-bottom: 11px; border-bottom: 1px solid #17466d; }
+.sales-submission-fields strong { background: #061a32; border-color: #1b4c73; color: #dcecff; }
+.sales-submission-fields .reminder-title { color: #ff8ca5; }
+.submission-attachments a { color: #65c5ff; }
+.sidebar-card { padding: 19px; }
+.flow-card { border-top-color: #2aa9e9; box-shadow: 0 0 15px #0574bd40; }
+.flow-card :deep(.marker-line) { background: #1a567e; }
+.flow-card :deep(.is-reminder .action-name) { color: #ff8ca5; }
+.flow-card :deep(.is-reminder .marker-dot) { background: #ff6f90; }
+.flow-card :deep(.action-time),
+.flow-card :deep(.action-operator) { color: #91b3d2; }
+.refine-card,
+.dispatch-card,
+.resubmit-card { background: #06213e; border: 1px solid #1688d0; border-radius: 6px; box-shadow: 0 0 13px #0878c942; }
+.archive-card { background: #06213a; border: 1px solid #168e87; border-radius: 6px; box-shadow: 0 0 12px #119b8c3d; }
+.refine-card-title,
+.dispatch-card-title,
+.resubmit-card-title,
+.archive-card-title { color: #e7f4ff; font-size: 14px; text-transform: none; letter-spacing: 0; }
+.refine-option { background: #082847; border-color: #1a5b88; border-radius: 4px; color: #e4f2ff; }
+.refine-option:hover:not(:disabled), .refine-option:focus-visible { background: #0c3760; border-color: #39a6e5; }
+.terminal-notice { background: #09233e; border-color: #1a547b; color: #a9c4df; }
+.archive-readonly { color: #d7eaff; }
+.dissatisfied-hint { color: #ffc76e; }
+.ticket-detail-view :deep(.el-textarea__inner) { background: #061b34; color: #e5f2ff; border: 1px solid #1b547f; box-shadow: none; }
+.ticket-detail-view :deep(.el-textarea__inner:focus) { border-color: #37a7e7; box-shadow: 0 0 0 2px #2188d140; }
+@media (max-width: 900px) { .detail-body { flex-direction: column; } .detail-sidebar { width: auto; position: static; max-height: none; } }
+/* 详情页采用参考稿的卡片节奏、摘要行和高亮时间轴。 */
+.detail-header { margin-bottom: 20px; padding: 0; border: 0; }
+.detail-header::after { display: none; }
+.back-btn { margin-bottom: 10px; color: #c8e3fa; }
+.ticket-number { font-family: var(--font-sans); font-size: 32px; letter-spacing: .01em; }
+.header-meta { min-height: 50px; gap: 22px; }
+.header-actions { gap: 16px; }
+.header-action-btn { min-width: 138px; height: 44px; font-size: 14px; font-weight: 650; }
+.header-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 0; margin-top: 8px; color: #dcefff; }
+.header-facts > div { display: flex; align-items: center; gap: 16px; padding: 0 28px; min-height: 24px; border-right: 1px solid #23618e; font-size: 13px; }
+.header-facts > div:first-child { padding-left: 0; }
+.header-facts > div:last-child { border-right: 0; }
+.header-facts span { color: #9ac3e3; }
+.header-facts strong { color: #f3f8ff; font-weight: 500; white-space: nowrap; }
+.detail-body { gap: 16px; align-items: flex-start; }
+.detail-sidebar { width: min(416px, 31%); max-height: calc(100vh - 80px); }
+.ticket-content-flow :deep(.form-section) { padding: 20px 27px 22px; margin-bottom: 14px; border-color: #14649c; border-radius: 9px; background: linear-gradient(110deg, #082646, #061d39 78%); }
+.ticket-content-flow :deep(.section-heading) { position: relative; margin-bottom: 10px; padding-bottom: 15px; border-color: #17527d; font-size: 19px; }
+.ticket-content-flow :deep(.section-heading::after) { content: ''; position: absolute; left: 0; bottom: -2px; width: 48px; height: 3px; border-radius: 3px; background: #159df5; box-shadow: 0 0 12px #189cff; }
+.ticket-content-flow :deep(.section-icon), .section-title-icon { width: 23px; height: 23px; color: #62bfff; filter: drop-shadow(0 0 5px #168eef); }
+.ticket-content-flow :deep(.section-eyebrow) { color: #2c9be9; }
+.flow-card { min-height: 730px; padding: 21px 26px; border-radius: 9px; background: linear-gradient(135deg, #082849, #061e39 75%); }
+.timeline-section-title { position: relative; display: flex; align-items: center; margin: 0 0 24px; padding-bottom: 16px; border-bottom: 1px solid #17527d; font-size: 19px; }
+.timeline-section-title::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 48px; height: 3px; border-radius: 3px; background: #159df5; box-shadow: 0 0 12px #189cff; }
+.timeline-section-title small { margin-left: auto; color: #2c9be9; font-size: 10px; font-weight: 500; letter-spacing: .08em; white-space: nowrap; }
+.flow-card :deep(.timeline-item) { min-height: 76px; padding-bottom: 20px; gap: 16px; }
+.flow-card :deep(.timeline-marker) { width: 16px; }
+.flow-card :deep(.marker-dot) { width: 14px; height: 14px; margin-top: 4px; border: 2px solid #2d9ef2; background: #54b5ff; box-shadow: 0 0 0 3px #07518d, 0 0 12px #159cff; }
+.flow-card :deep(.is-first .marker-dot) { border-color: #6afb9b; background: #42df7b; box-shadow: 0 0 0 3px #116443, 0 0 13px #50e67f; }
+.flow-card :deep(.is-current .marker-dot) { width: 18px; height: 18px; margin-left: -2px; border-color: #58c1ff; background: #228bff; box-shadow: 0 0 0 4px #094783, 0 0 15px #219dff; }
+.flow-card :deep(.marker-line) { width: 2px; background: linear-gradient(#2eaafa, #176996); }
+.flow-card :deep(.timeline-head) { align-items: flex-start; flex-wrap: nowrap; }
+.flow-card :deep(.action-name) { color: #f2f8ff; font-size: 15px; line-height: 1.5; }
+.flow-card :deep(.action-time) { flex: none; text-align: right; color: #a8cae8; line-height: 1.5; }
+.flow-card :deep(.action-operator) { margin-top: 4px; color: #9bbddd; font-size: 13px; }
+.flow-card :deep(.current-tag) { border: 1px solid #1371b4; border-radius: 5px; background: #093a68; color: #4db5ff; padding: 3px 7px; }
+@media (max-width: 1100px) { .header-facts > div { padding: 0 14px; } .detail-sidebar { width: 34%; } .timeline-section-title small { display: none; } }
+@media (max-width: 900px) { .detail-sidebar { width: auto; max-height: none; } .flow-card { min-height: 0; } }
+@media (max-width: 600px) { .ticket-number { font-size: 24px; } .header-actions { width: 100%; margin-left: 0; } .header-action-btn { min-width: 0; flex: 1; } .header-facts > div { width: 50%; padding: 6px 10px 6px 0; border: 0; gap: 6px; flex-wrap: wrap; } .ticket-content-flow :deep(.section-eyebrow) { display: none; } }
+/* 流程操作与记录统一使用详情卡片的视觉层级。 */
+.resubmit-card, .refine-card, .dispatch-card, .archive-card, .sales-submission-card, .terminal-notice {
+  padding: 21px 27px 23px;
+  border: 1px solid #176496;
+  border-radius: 9px;
+  background: linear-gradient(110deg, #082646, #061d39 78%);
+  box-shadow: 0 0 12px #0064ae30;
+}
+.archive-card { border-color: #177b91; }
+.resubmit-card-title, .refine-card-title, .dispatch-card-title, .archive-card-title, .sales-submission-title {
+  position: relative;
+  margin: 0 0 18px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid #17527d;
+  color: #edf7ff;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.resubmit-card-title::after, .refine-card-title::after, .dispatch-card-title::after, .archive-card-title::after, .sales-submission-title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  width: 48px;
+  height: 3px;
+  border-radius: 3px;
+  background: #159df5;
+  box-shadow: 0 0 12px #189cff;
+}
+.archive-card-title::after { background: #21c6bd; box-shadow: 0 0 12px #21c6bd; }
+.refine-card-hint, .dispatch-card-hint { margin: 0 0 18px; color: #99b9d6; font-size: 13px; line-height: 1.6; }
+.dispatch-card-hint { margin: 15px 0 0; }
+.triage-field { margin: 18px 0; }
+.triage-field label, .triage-field-label, .reason-label { color: #bdd9f0; font-size: 13px; font-weight: 600; }
+.archive-readonly { margin: 8px 0 0; padding: 10px 12px; border: 1px solid #20577f; border-radius: 4px; background: #092843; }
+.resubmit-form, .archive-form { gap: 16px; }
+.resubmit-selects { gap: 14px; }
+.archive-actions, .resubmit-actions { gap: 10px; padding-top: 10px; border-top: 1px solid #17466d; }
+.dispatch-card-body { gap: 14px; }
+.sales-submission-fields { gap: 12px 18px; }
+.sales-submission-fields > div { padding-bottom: 10px; border-bottom: 1px solid #17466d; }
+.sales-submission-fields strong { min-height: 0; padding: 2px 0; border: 0; background: transparent; font-size: 14px; }
+.ticket-detail-view :deep(.el-input__wrapper), .ticket-detail-view :deep(.el-select__wrapper), .ticket-detail-view :deep(.el-input-number .el-input__wrapper) {
+  min-height: 40px;
+  border: 1px solid #1b547f;
+  border-radius: 4px;
+  background: #071e3a;
+  box-shadow: none;
+}
+.ticket-detail-view :deep(.el-input__wrapper:focus-within), .ticket-detail-view :deep(.el-select__wrapper.is-focused) { border-color: #37a7e7; box-shadow: 0 0 0 2px #2188d140; }
+.ticket-detail-view :deep(.el-input__inner), .ticket-detail-view :deep(.el-select__selected-item), .ticket-detail-view :deep(.el-radio__label) { color: #e5f2ff; }
+.ticket-detail-view :deep(.el-radio__input.is-checked .el-radio__inner) { border-color: #289ce8; background: #147bd0; }
+.ticket-detail-view :deep(.el-radio__input.is-checked + .el-radio__label) { color: #8dd4ff; }
+.ticket-detail-view :deep(.el-button) { min-height: 38px; border-radius: 4px; font-weight: 600; }
+.ticket-detail-view :deep(.el-button--primary) { --el-button-bg-color: #086ac9; --el-button-border-color: #168cea; --el-button-hover-bg-color: #0b7fe4; --el-button-hover-border-color: #3eb2ff; }
+.ticket-detail-view :deep(.el-button--success) { --el-button-bg-color: #087c82; --el-button-border-color: #19a8a7; --el-button-hover-bg-color: #09979a; --el-button-hover-border-color: #35c7c0; }
+.ticket-detail-view :deep(.el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--danger)) { --el-button-bg-color: #082745; --el-button-border-color: #22618e; --el-button-text-color: #d1e9fb; --el-button-hover-bg-color: #0d395d; --el-button-hover-border-color: #3aa6ec; }
+.ticket-detail-view :deep(input[type='file']) { max-width: 100%; color: #bcd8ed; }
+.ticket-detail-view :deep(input[type='file']::file-selector-button) { margin-right: 12px; padding: 8px 14px; border: 1px solid #2b7db4; border-radius: 4px; background: #09375e; color: #e2f3ff; cursor: pointer; }
+.ticket-detail-view :deep(.reply-editor) { border: 1px solid #176496; border-radius: 9px; background: linear-gradient(110deg, #082646, #061d39 78%); box-shadow: 0 0 12px #0064ae30; }
+.ticket-detail-view :deep(.reply-tab-bar) { padding: 0 19px; border-color: #17527d; }
+.ticket-detail-view :deep(.tab-btn) { padding: 17px 16px; color: #9abbd9; font-size: 14px; }
+.ticket-detail-view :deep(.tab-btn:hover), .ticket-detail-view :deep(.tab-btn.active) { color: #eaf6ff; }
+.ticket-detail-view :deep(.tab-btn.active) { border-bottom-color: #20a3f7; text-shadow: 0 0 10px #3aaaff66; }
+.ticket-detail-view :deep(.reply-input-area) { margin: 18px 26px 0; padding: 0 12px; border: 1px solid #1b547f; border-radius: 4px; background: #061b34; }
+.ticket-detail-view :deep(.reply-input-area.addition), .ticket-detail-view :deep(.reply-input-area.reminder) { background: #08233e; }
+.ticket-detail-view :deep(.reply-input-area .el-textarea__inner) { border: 0; background: transparent; }
+.ticket-detail-view :deep(.reply-input-area:focus-within) { border-color: #37a7e7; box-shadow: 0 0 0 2px #2188d140; }
+.ticket-detail-view :deep(.reply-actions) { padding: 18px 26px 22px; }
+.ticket-detail-view :deep(.attachment-area), .ticket-detail-view :deep(.addition-reason) { padding-left: 26px; padding-right: 26px; }
+.ticket-detail-view :deep(.attachment-hint), .ticket-detail-view :deep(.addition-hint), .ticket-detail-view :deep(.disabled-hint) { color: #9bbbd7; }
+@media (max-width: 700px) { .resubmit-card, .refine-card, .dispatch-card, .archive-card, .sales-submission-card { padding: 17px; } .resubmit-selects { grid-template-columns: 1fr; } .dispatch-card-body { flex-wrap: wrap; } .dispatch-select { min-width: 100%; } .ticket-detail-view :deep(.reply-input-area) { margin: 14px 16px 0; } .ticket-detail-view :deep(.reply-actions) { padding: 16px; } }
 </style>

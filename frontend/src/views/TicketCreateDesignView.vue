@@ -1,18 +1,18 @@
 <template>
   <main class="page">
-    <nav class="crumb"><router-link to="/tickets">工单管理</router-link><span>›</span><strong>创建工单</strong></nav>
-    <h1>创建工单</h1>
+    <nav class="crumb"><router-link to="/tickets">工单管理</router-link><span>›</span><strong>{{ draftId ? '编辑草稿' : '创建工单' }}</strong></nav>
+    <h1>{{ draftId ? '编辑草稿' : '创建工单' }}</h1>
     <form id="ticket-create-form" novalidate @submit.prevent="submitTicket">
       <div class="create-layout"><div class="form-main">
-      <TicketFormSection title="工单信息" icon="MessageBox"><div class="grid intake-grid"><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div><fieldset v-if="!isInstantConsult" class="field radio-field"><legend class="required">是否为线索工单</legend><div class="radio-options"><label><input v-model="form.businessOpportunity" type="radio" value="yes" /> 是</label><label><input v-model="form.businessOpportunity" type="radio" value="no" /> 否</label></div><small v-if="errors.businessOpportunity" class="error">{{ errors.businessOpportunity }}</small></fieldset></div></TicketFormSection>
-      <TicketFormSection title="客户信息" icon="User"><div class="grid customer-grid">
+      <TicketFormSection title="工单信息" icon="MessageBox" eyebrow="TICKET INFORMATION"><div class="grid intake-grid"><div class="field"><label for="channel" class="required">受理渠道</label><select id="channel" v-model="form.channel" :class="{ invalid: errors.channel }"><option v-for="v in channels" :key="v">{{ v }}</option></select><small v-if="errors.channel" class="error">{{ errors.channel }}</small></div><fieldset v-if="!isInstantConsult" class="field radio-field"><legend class="required">是否为线索工单</legend><div class="radio-options"><label><input v-model="form.businessOpportunity" type="radio" value="yes" /> 是</label><label><input v-model="form.businessOpportunity" type="radio" value="no" /> 否</label></div><small v-if="errors.businessOpportunity" class="error">{{ errors.businessOpportunity }}</small></fieldset></div></TicketFormSection>
+      <TicketFormSection title="客户信息" icon="User" eyebrow="CUSTOMER INFORMATION"><div class="grid customer-grid">
         <div class="field"><label for="customerName" :class="{ required: !isInstantConsult }">客户名称</label><input id="customerName" v-model.trim="form.customerName" placeholder="请输入客户名称" :class="{ invalid: errors.customerName }" /><small v-if="errors.customerName" class="error">{{ errors.customerName }}</small></div>
         <div class="field"><label for="companyName" :class="{ required: !isInstantConsult }">单位全称</label><input id="companyName" v-model.trim="form.companyName" placeholder="请输入单位全称" :class="{ invalid: errors.companyName }" /><small v-if="errors.companyName" class="error">{{ errors.companyName }}</small></div>
         <div class="field"><label for="industry" :class="{ required: !isInstantConsult }">行业</label><select id="industry" v-model="form.industry" :class="{ invalid: errors.industry }"><option value="" :disabled="!isInstantConsult" hidden>请选择行业</option><option v-for="v in industries" :key="v">{{ v }}</option></select><small v-if="errors.industry" class="error">{{ errors.industry }}</small></div>
         <div class="field"><label for="callerPhone" class="required">来电号码</label><input id="callerPhone" v-model.trim="form.callerPhone" inputmode="tel" placeholder="请输入来电号码" :class="{ invalid: errors.callerPhone }" /><small v-if="errors.callerPhone" class="error">{{ errors.callerPhone }}</small></div>
         <div class="field"><label for="contactPhone" :class="{ required: isOpportunity }">联系号码</label><input id="contactPhone" v-model.trim="form.contactPhone" inputmode="tel" placeholder="请输入联系号码" :class="{ invalid: errors.contactPhone }" /><small v-if="!isOpportunity" class="help">联系方式与来电号码不同时补充</small><small v-if="errors.contactPhone" class="error">{{ errors.contactPhone }}</small></div>
       </div></TicketFormSection>
-      <TicketFormSection title="工单内容" icon="Document"><div class="grid content-grid">
+      <TicketFormSection title="工单内容" icon="Document" eyebrow="TICKET CONTENT"><div class="grid content-grid">
         <div v-if="isOpportunity || isReconciliation" class="field"><label for="salesUser" class="required">销售人员</label><select id="salesUser" v-model.number="form.salesUserId" :class="{ invalid: errors.salesUserId }"><option :value="null" disabled>请选择销售人员</option><option v-for="person in salesUsers" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="errors.salesUserId" class="error">{{ errors.salesUserId }}</small></div>
         <div v-if="!isOpportunity && !isInstantConsult" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
         <div v-if="!isOpportunity" class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
@@ -21,13 +21,13 @@
         <div class="field full"><label for="description" class="required">{{ isInstantConsult ? '咨询内容' : '客户问题详情' }}</label><div class="textarea-wrap"><textarea id="description" v-model="form.description" maxlength="1000" rows="5" placeholder="请尽量记录客户原始描述" :class="{ invalid: errors.description }"></textarea><span>{{ form.description.length }}/1000</span></div><small v-if="errors.description" class="error">{{ errors.description }}</small></div>
         <div v-if="isInstantConsult" class="field full"><label for="instantAnswer" class="required">即时答复内容</label><div class="textarea-wrap"><textarea id="instantAnswer" v-model="form.instantAnswer" maxlength="4000" rows="5" placeholder="记录客服当场提供的答复" :class="{ invalid: errors.instantAnswer }"></textarea><span>{{ form.instantAnswer.length }}/4000</span></div><small v-if="errors.instantAnswer" class="error">{{ errors.instantAnswer }}</small></div>
       </div></TicketFormSection>
-      <TicketFormSection v-if="!isOpportunity && form.category === '业务保障'" title="故障信息" icon="Tools" hint="（一级分类为“业务保障”时需填写）"><div class="grid fault-grid">
+      <TicketFormSection v-if="!isOpportunity && form.category === '业务保障'" title="故障信息" icon="Tools" hint="（一级分类为“业务保障”时需填写）" eyebrow="FAULT INFORMATION"><div class="grid fault-grid">
         <div class="field"><label for="faultTime" class="required">故障发生时间</label><input id="faultTime" v-model="form.faultTime" type="datetime-local" :class="{ invalid: errors.faultTime }" /><small v-if="errors.faultTime" class="error">{{ errors.faultTime }}</small></div>
         <div class="field"><label for="recurrence" class="required">故障复现规律</label><select id="recurrence" v-model="form.recurrence" :class="{ invalid: errors.recurrence }"><option v-for="v in recurrenceOptions" :key="v">{{ v }}</option></select><small v-if="errors.recurrence" class="error">{{ errors.recurrence }}</small></div>
         <div class="field"><label for="faultLocation" class="required">故障发生地理位置</label><input id="faultLocation" v-model.trim="form.faultLocation" placeholder="经纬度或文字地址" :class="{ invalid: errors.faultLocation }" /><small class="help">优先经纬度，也可填写文字地址</small><small v-if="errors.faultLocation" class="error">{{ errors.faultLocation }}</small></div>
         <fieldset class="field radio-field"><legend class="required">是否批量故障</legend><div class="radio-options"><label><input v-model="form.batchFault" type="radio" value="yes" /> 是</label><label><input v-model="form.batchFault" type="radio" value="no" /> 否</label></div><small v-if="errors.batchFault" class="error">{{ errors.batchFault }}</small></fieldset>
       </div></TicketFormSection>
-      </div><aside class="form-sidebar" aria-label="系统记录"><section class="record-card"><h2><span class="record-icon"><Setting /></span>系统记录<span class="readonly-badge">只读</span></h2><dl><div v-for="item in systemInfo" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section></aside></div>
+      </div><aside class="form-sidebar" aria-label="系统记录"><section class="record-card"><h2><span class="record-icon"><Setting /></span>系统记录<small class="record-eyebrow">SYSTEM RECORD</small><span class="readonly-badge">只读</span></h2><dl><div v-for="item in systemInfo" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section></aside></div>
     </form>
     <Teleport to="body">
       <div class="form-actions" :style="{ left: uiStore.sidebarCollapsed ? '68px' : '240px' }">
@@ -316,4 +316,64 @@ async function submitTicket() {
 .record-card dl{margin:0;padding:4px 18px 12px}.record-card dl>div{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px dashed var(--color-border-light)}.record-card dl>div:last-child{border-bottom:0}.record-card dt{flex:none;color:var(--color-text-tertiary);font-size:12px}.record-card dd{margin:0;min-width:0;color:var(--color-text-primary);font-size:12px;font-weight:600;text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
 @container (max-width:980px){.create-layout{grid-template-columns:minmax(0,1fr)}.form-sidebar{position:static;grid-row:1}.record-card dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 22px}.record-card dl>div:nth-last-child(-n+2){border-bottom:0}}
 @container (max-width:580px){.record-card dl{grid-template-columns:1fr}.record-card dl>div:nth-last-child(2){border-bottom:1px dashed var(--color-border-light)}.intake-grid{grid-template-columns:1fr}}
+</style>
+<style scoped>
+/* 新建工单与列表、详情页共用指挥中心配色。 */
+.page { padding: 0 0 115px; color: #eaf4ff; }
+.crumb { gap: 10px; color: #8fb8d9; }
+.crumb a { color: #8fb8d9; text-decoration: none; }
+.crumb a:hover { color: #67c6ff; }
+.crumb strong { color: #cce4f8; }
+.page h1 { margin: 10px 0 20px; color: #f0f8ff; font-size: 28px; text-shadow: 0 0 17px #40aaff38; }
+.create-layout { grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; }
+.form-sidebar { top: 18px; }
+.grid { column-gap: 18px; row-gap: 20px; }
+.content-grid, .fault-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.intake-grid { grid-template-columns: minmax(0, 320px) minmax(0, 320px); }
+.field > label, .radio-field legend { color: #bdd9f0; font-size: 13px; }
+.field input:not([type=radio]), .field select, .field textarea {
+  min-height: 42px;
+  border: 1px solid #1b547f;
+  border-radius: 4px;
+  background-color: #061b34;
+  color: #eaf4ff;
+}
+.field select { color-scheme: dark; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238ac7ec' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
+.field input[type='datetime-local'] { color-scheme: dark; }
+.field input::placeholder, .field textarea::placeholder { color: #789dbe; }
+.field input:not([type=radio]):not(.readonly):hover, .field select:not(:disabled):hover, .field textarea:hover { border-color: #318fc9; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: #37a7e7; box-shadow: 0 0 0 2px #2188d140; }
+.field select:disabled { background-color: #08223c; color: #7295b5; }
+.help { color: #8faecc; }
+.error, .required::after { color: #ff8290; }
+.radio-options label, .priority-options label { border: 1px solid #20577f; border-radius: 4px; background: #082541; color: #cde3f5; }
+.radio-options label:hover, .priority-options label:hover { border-color: #318fc9; }
+.radio-options label:has(input:checked), .priority-options label.chosen { border-color: #2798e5; background: #0a3a65; color: #eaf7ff; box-shadow: inset 0 0 9px #087aff38; }
+.radio-field input, .priority-options input { accent-color: #168cea; }
+.textarea-wrap span { color: #89acca; }
+.record-card { border: 1px solid #176496; border-radius: 9px; background: linear-gradient(145deg, #082849, #061e39 75%); box-shadow: 0 0 12px #0064ae30; }
+.record-card h2 { position: relative; padding: 20px 20px 17px; border-color: #17527d; color: #edf7ff; font-size: 18px; }
+.record-card h2::after { content: ''; position: absolute; left: 20px; bottom: -2px; width: 48px; height: 3px; border-radius: 3px; background: #159df5; box-shadow: 0 0 12px #189cff; }
+.record-icon { width: 24px; height: 24px; background: #0a3a67; color: #69c5ff; }
+.record-eyebrow { margin-left: auto; color: #2c9be9; font-size: 10px; font-weight: 500; letter-spacing: .08em; white-space: nowrap; }
+.readonly-badge { margin-left: 0; border-color: #24618a; border-radius: 4px; color: #94b9d7; }
+.record-card dl { padding: 6px 20px 15px; }
+.record-card dl > div { padding: 14px 0; border-bottom: 1px solid #17466d; }
+.record-card dt { color: #94b9d7; }
+.record-card dd { color: #e8f5ff; font-weight: 500; }
+.form-actions { border-top: 1px solid #1b6195; background: #061a33; box-shadow: 0 -6px 25px #00112599; }
+.progress-ring { background: conic-gradient(#149aed var(--progress), #16466c 0); }
+.progress-ring::before { background: #061a33; }
+.progress-ring span, .progress-copy { color: #9ebfdb; }
+.progress-copy strong { color: #eaf4ff; }
+.form-actions button { height: 40px; border: 1px solid #22618e; border-radius: 4px; background: #082745; color: #d1e9fb; font-weight: 600; }
+.form-actions button:hover { border-color: #3aa6ec; background: #0d395d; color: #eef8ff; }
+.form-actions .secondary { border-color: #2789ca; color: #a9dcff; }
+.form-actions .primary { border-color: #168cea; background: linear-gradient(180deg, #0b74d5, #074eae); color: #fff; box-shadow: 0 0 12px #075dc662; }
+.form-actions .primary:hover { border-color: #39a2eb; background: linear-gradient(180deg, #1083e6, #075fc6); }
+.form-actions button:focus-visible, .radio-options label:focus-within, .priority-options label:focus-within { outline: 2px solid #5dc5ff; }
+@container (max-width: 1100px) { .content-grid, .fault-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 980px) { .create-layout { grid-template-columns: minmax(0, 1fr); } .intake-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container (max-width: 580px) { .intake-grid, .content-grid, .fault-grid { grid-template-columns: minmax(0, 1fr); } .record-eyebrow { display: none; } }
+@media (max-width: 700px) { .page { padding-bottom: 130px; } .form-actions { gap: 8px; } }
 </style>

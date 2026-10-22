@@ -1,7 +1,7 @@
 <template>
   <div class="visits-page">
     <div class="page-head">
-      <div><h1>来访记录（非工单）</h1></div>
+      <div><h1>来访记录</h1></div>
       <div class="head-actions">
         <el-button @click="exportCsv">导出汇总</el-button>
         <el-button v-if="canEdit" type="primary" @click="openCreate">新增来访记录</el-button>
@@ -10,7 +10,7 @@
 
     <div class="filters">
       <el-input v-model="keyword" clearable placeholder="搜索号码、姓名或分类" @keyup.enter="load(1)" @clear="load(1)" />
-      <el-select v-model="channel" placeholder="全部渠道" clearable @change="load(1)">
+      <el-select v-model="channel" popper-class="ticket-dark-select-popper" placeholder="全部渠道" clearable @change="load(1)">
         <el-option label="400客服热线" value="400客服热线" />
         <el-option label="在线客服" value="在线客服" />
       </el-select>
@@ -18,7 +18,7 @@
     </div>
 
     <div class="table-card">
-      <el-table v-loading="loading" :data="records" stripe>
+      <el-table v-loading="loading" :data="records">
         <el-table-column prop="contact_at" label="联系时间" min-width="155">
           <template #default="{ row }">{{ formatTime(row.contact_at) }}</template>
         </el-table-column>
@@ -40,7 +40,7 @@
       <div class="pager"><el-pagination v-model:current-page="page" :page-size="20" :total="total" layout="total, prev, pager, next" @current-change="load" /></div>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="selected?.id ? (editing ? '编辑来访记录' : '来访记录详情') : '新增来访记录'" width="820px" class="visit-dialog" destroy-on-close>
+    <el-dialog v-model="dialogVisible" :title="selected?.id ? (editing ? '编辑来访记录' : '来访记录详情') : '新增来访记录'" width="820px" append-to-body class="visit-dialog ticket-dark-dialog" destroy-on-close>
       <div v-if="selected?.source_sheet" class="source-note">原始来源：{{ selected.source_sheet }} · 第 {{ selected.source_row }} 行</div>
       <div v-if="!editing && selected" class="detail-grid">
         <div v-for="item in detailItems" :key="item.label" :class="{ wide: item.wide }">
@@ -49,7 +49,7 @@
       </div>
       <el-form v-else label-position="top" class="visit-form">
         <el-form-item label="联系时间" required><el-input v-model="form.contact_at" type="datetime-local" :disabled="!editing" /></el-form-item>
-        <el-form-item label="渠道" required><el-select v-model="form.channel" :disabled="!editing"><el-option label="400客服热线" value="400客服热线" /><el-option label="在线客服" value="在线客服" /></el-select></el-form-item>
+        <el-form-item label="渠道" required><el-select v-model="form.channel" popper-class="ticket-dark-select-popper" :disabled="!editing"><el-option label="400客服热线" value="400客服热线" /><el-option label="在线客服" value="在线客服" /></el-select></el-form-item>
         <el-form-item label="联系号码"><el-input v-model="form.contact_number" :disabled="!editing" /></el-form-item>
         <el-form-item label="姓名"><el-input v-model="form.customer_name" :disabled="!editing" /></el-form-item>
         <el-form-item label="接待客服"><el-input v-model="form.service_agent" :disabled="!editing" /></el-form-item>
@@ -194,5 +194,42 @@ onMounted(() => load(1))
 </script>
 
 <style scoped>
-.visits-page{padding:24px;min-width:0;background:#f6f8fb;min-height:100%;color:#17243b}.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:20px}.head-actions{display:flex;gap:8px}.page-head h1{font-size:25px;margin:0 0 5px}.filters{display:flex;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid #e7ecf3;border-radius:10px;padding:14px;margin-bottom:14px}.filters .el-input{width:260px}.filters .el-select{width:180px}.table-card{background:#fff;border:1px solid #e7ecf3;border-radius:10px;padding:10px 14px}.pager{display:flex;justify-content:flex-end;padding:15px 3px 4px}.source-note{font-size:12px;color:#718098;background:#f4f7fb;padding:9px 12px;border-radius:6px;margin-bottom:14px}.visit-form,.detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px;max-height:65vh;overflow:auto;padding-right:5px}.visit-form :deep(.el-form-item){min-width:0}.visit-form .wide,.detail-grid .wide{grid-column:1/-1}.visit-form :deep(.el-select){width:100%}.detail-grid{gap:14px 18px}.detail-grid>div{padding:10px 12px;background:#f7f9fc;border-radius:6px;min-width:0}.detail-grid span{font-size:12px;color:#8793a4}.detail-grid p{margin:5px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px}@media(max-width:760px){.visits-page{padding:14px}.visit-form,.detail-grid{grid-template-columns:1fr}}
+.visits-page { min-width: 0; min-height: 100%; padding: 4px 0 24px; color: #eaf4ff; }
+.page-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 20px; }
+.page-head h1 { margin: 0; color: #f1f8ff; font-size: 28px; font-weight: 700; text-shadow: 0 0 17px #40aaff38; }
+.head-actions { display: flex; gap: 12px; }
+.head-actions :deep(.el-button) { min-width: 118px; height: 40px; font-weight: 600; }
+.filters { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 13px; padding: 12px 14px; border: 1px solid #176496; border-radius: 6px; background: #06213e; box-shadow: 0 0 12px #0064ae2b; }
+.filters .el-input { width: min(320px, 100%); }
+.filters .el-select { width: 180px; }
+.filters :deep(.el-input__wrapper), .filters :deep(.el-select__wrapper) { min-height: 38px; }
+.filters :deep(.el-button) { min-width: 88px; height: 38px; border-color: #2b82bb; background: #092c4e; color: #d9eeff; }
+.filters :deep(.el-button:hover) { border-color: #50bbf7; background: #0d406b; color: #fff; }
+.table-card { position: relative; overflow: hidden; border: 1px solid #0d8cda; border-radius: 6px; background: #041b37; box-shadow: 0 0 19px #006fca4d; }
+.table-card::before, .table-card::after { content: ''; position: absolute; z-index: 2; width: 55px; height: 2px; background: #4bd5ff; box-shadow: 0 0 11px #4bd5ff; pointer-events: none; }
+.table-card::before { top: 0; left: 13px; }
+.table-card::after { bottom: 0; right: 13px; }
+.table-card :deep(.el-table) { --el-table-bg-color: #041b37; --el-table-tr-bg-color: #041b37; --el-table-header-bg-color: #0a315a; --el-table-row-hover-bg-color: #0b345b; --el-table-border-color: #0c3c65; --el-table-text-color: #c4d8f0; --el-table-header-text-color: #c9e2fb; --el-fill-color-lighter: #051f3c; background: #041b37; }
+.table-card :deep(.el-table__header th.el-table__cell) { height: 46px; background: linear-gradient(180deg, #0c4278, #072c52); color: #c9e2fb; border-bottom-color: #1b6193; font-size: 12px; font-weight: 600; }
+.table-card :deep(.el-table__body td.el-table__cell) { height: 48px; border-bottom-color: #0c385f; color: #c4d8f0; }
+.table-card :deep(.el-table__body tr:nth-child(odd) > td.el-table__cell) { background: #031a34; }
+.table-card :deep(.el-table__body tr:nth-child(even) > td.el-table__cell) { background: #051f3c; }
+.table-card :deep(.el-table__body tr:hover > td.el-table__cell) { background: #0b345b; }
+.table-card :deep(.el-table__empty-block) { min-height: 150px; background: #041b37; }
+.table-card :deep(.el-table__empty-text) { color: #8daecb; }
+.table-card :deep(.el-button.is-link) { color: #72caff; font-weight: 600; }
+.table-card :deep(.el-button.is-link:hover) { color: #b7e6ff; }
+.pager { display: flex; justify-content: flex-end; padding: 15px 18px; border-top: 1px solid #16476e; }
+.pager :deep(.el-pagination) { color: #9bbbd7; }
+.source-note { margin-bottom: 16px; padding: 10px 12px; border: 1px solid #1b547f; border-radius: 4px; background: #092843; color: #9ec2de; font-size: 12px; }
+.visit-form, .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; max-height: 65vh; overflow: auto; padding-right: 5px; }
+.visit-form :deep(.el-form-item) { min-width: 0; }
+.visit-form .wide, .detail-grid .wide { grid-column: 1 / -1; }
+.visit-form :deep(.el-select) { width: 100%; }
+.detail-grid { gap: 0 18px; }
+.detail-grid > div { min-width: 0; padding: 12px 2px; border-bottom: 1px solid #17466d; }
+.detail-grid span { color: #90b5d3; font-size: 12px; }
+.detail-grid p { margin: 5px 0 0; color: #e9f5ff; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .page-head { align-items: flex-start; } .head-actions { flex-wrap: wrap; justify-content: flex-end; } .visit-form, .detail-grid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .page-head { flex-direction: column; } .page-head h1 { font-size: 24px; } .head-actions { width: 100%; justify-content: flex-start; } .head-actions :deep(.el-button) { flex: 1; min-width: 0; margin-left: 0; } .filters .el-input, .filters .el-select { width: 100%; } }
 </style>
