@@ -5,7 +5,7 @@
         <h1 class="page-title">线索工单分析</h1>
       </div>
       <div class="header-actions">
-        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD"
+        <el-date-picker v-model="dateRange" type="daterange" popper-class="ticket-list-date-popper" value-format="YYYY-MM-DD"
           format="YYYY-MM-DD" range-separator="→" start-placeholder="开始日期"
           end-placeholder="结束日期" :clearable="false" class="date-picker" @change="onFilterChange" />
         <el-button type="primary" :icon="Download" :disabled="!report" @click="exportCsv">导出</el-button>
@@ -197,16 +197,16 @@ const ratingLegend = computed(() => ({
 }))
 
 const judgmentItems = computed(() => [
-  { label: '有效线索', count: kpi.value.valid ?? 0, color: '#27a780' },
-  { label: '非有效线索', count: Math.max(0, (kpi.value.judged ?? 0) - (kpi.value.valid ?? 0)), color: '#a5b2c9' },
-  { label: '待判断', count: Math.max(0, (kpi.value.total ?? 0) - (kpi.value.judged ?? 0)), color: '#e9edf4' },
+  { label: '有效线索', count: kpi.value.valid ?? 0, color: '#35d2ad' },
+  { label: '非有效线索', count: Math.max(0, (kpi.value.judged ?? 0) - (kpi.value.valid ?? 0)), color: '#249fe6' },
+  { label: '待判断', count: Math.max(0, (kpi.value.total ?? 0) - (kpi.value.judged ?? 0)), color: '#21496e' },
 ])
 const judgmentStyle = computed(() => {
   const total = kpi.value.total || 0
-  if (!total) return { background: '#e9edf4' }
+  if (!total) return { background: '#21496e' }
   const valid = (kpi.value.valid || 0) / total * 100
   const judged = (kpi.value.judged || 0) / total * 100
-  return { background: 'conic-gradient(#75c290 0% ' + valid + '%, #d98856 ' + valid + '% ' + judged + '%, #e9edf4 ' + judged + '% 100%)' }
+  return { background: 'conic-gradient(#35d2ad 0% ' + valid + '%, #249fe6 ' + valid + '% ' + judged + '%, #21496e ' + judged + '% 100%)' }
 })
 function ratioWidth(value: number, total: number) {
   return Math.min(100, Math.max(0, total ? value / total * 100 : 0)) + '%'
@@ -381,46 +381,46 @@ function renderTrend() {
   if (!trendChart) trendChart = echarts.init(trendEl.value)
   const days = trendData.value
   trendChart.setOption({
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', backgroundColor: '#082441', borderColor: '#2587c2', textStyle: { color: '#e9f6ff' } },
     legend: {
       type: 'scroll',
       data: ['线索工单', '已完成销售判断', '有效线索'],
       top: 0, right: 0, icon: 'circle',
-      textStyle: { fontSize: 12, color: '#4B5563' },
+      textStyle: { fontSize: 12, color: '#aacbe5' },
     },
     grid: { left: 40, right: 20, top: 40, bottom: 30 },
     xAxis: {
       type: 'category',
       data: days.map((d: any) => d.date.slice(5)),
-      axisLine: { lineStyle: { color: '#E5E7EB' } },
-      axisLabel: { color: '#9CA3AF', fontSize: 11 },
+      axisLine: { lineStyle: { color: '#24577d' } },
+      axisLabel: { color: '#96b8d6', fontSize: 11 },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      splitLine: { lineStyle: { color: '#F3F4F6' } },
-      axisLabel: { color: '#9CA3AF', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#17466d' } },
+      axisLabel: { color: '#96b8d6', fontSize: 11 },
     },
     series: [
       {
         name: '线索工单', type: 'line', smooth: true,
         data: days.map((d: any) => d.created),
-        itemStyle: { color: '#24a35a' },
+        itemStyle: { color: '#28b4ff' },
         lineStyle: { width: 2 },
-        areaStyle: { color: '#24a35a', opacity: 0.10 },
+        areaStyle: { color: '#28b4ff', opacity: 0.13 },
         symbol: 'circle', symbolSize: 6,
       },
       {
         name: '已完成销售判断', type: 'line', smooth: true,
         data: days.map((d: any) => d.judged),
-        itemStyle: { color: '#f07d25' },
+        itemStyle: { color: '#8b9cff' },
         lineStyle: { width: 2 },
         symbol: 'circle', symbolSize: 6,
       },
       {
         name: '有效线索', type: 'line', smooth: true,
         data: days.map((d: any) => d.valid),
-        itemStyle: { color: '#94add1' },
+        itemStyle: { color: '#35d2ad' },
         lineStyle: { width: 2 },
         symbol: 'circle', symbolSize: 6,
       },
@@ -434,19 +434,19 @@ function renderRating() {
   const dist = ratingDistribution.value
   const stars = ['1', '2', '3', '4', '5']
   ratingChart.setOption({
-    tooltip: { trigger: 'axis', formatter: (params: any) => `${params[0].name}：${params[0].value} 单` },
+    tooltip: { trigger: 'axis', formatter: (params: any) => `${params[0].name}：${params[0].value} 单`, backgroundColor: '#082441', borderColor: '#2587c2', textStyle: { color: '#e9f6ff' } },
     grid: { left: 36, right: 12, top: 20, bottom: 28 },
     xAxis: {
       type: 'category',
       data: stars.map(s => `${s} 级`),
-      axisLine: { lineStyle: { color: '#E5E7EB' } },
-      axisLabel: { color: '#9CA3AF', fontSize: 11 },
+      axisLine: { lineStyle: { color: '#24577d' } },
+      axisLabel: { color: '#96b8d6', fontSize: 11 },
     },
     yAxis: {
       type: 'value',
       minInterval: 1,
-      splitLine: { lineStyle: { color: '#F3F4F6' } },
-      axisLabel: { color: '#9CA3AF', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#17466d' } },
+      axisLabel: { color: '#96b8d6', fontSize: 11 },
     },
     series: [{
       type: 'bar',
@@ -454,8 +454,8 @@ function renderRating() {
       barWidth: 34,
       itemStyle: {
         color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: '#f5b99d' },
-          { offset: 1, color: '#d98856' },
+          { offset: 0, color: '#3bc5ff' },
+          { offset: 1, color: '#1269c3' },
         ]),
         borderRadius: [4, 4, 0, 0],
       },
@@ -634,4 +634,80 @@ onBeforeUnmount(() => {
 @media(max-width:1300px) { .page-header { display: block; }.header-actions { justify-content: flex-start; max-width: none; margin-top: 15px; }.kpi-grid { grid-template-columns: repeat(3, minmax(0,1fr)); } }
 @media(max-width:1000px) { .dual-grid { grid-template-columns: minmax(0, 1fr); } }
 @media(max-width:640px) { .opportunity-view { padding: 14px; }.kpi-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }.kpi-card { padding: 13px; }.panel { padding: 16px; }.page-title { font-size: 21px; }.rating-summary { gap: 8px; }.judgment-body { padding: 12px 0; }.source-head em { display: block; text-align: right; margin-top: 3px; } }
+</style>
+<style scoped>
+/* 与工单统计页一致的指挥中心视觉。 */
+.opportunity-view { padding: 4px 0 28px; background: transparent; color: #eaf4ff; }
+.page-header { align-items: center; margin-bottom: 20px; }
+.page-title { margin: 0; color: #f1f8ff; font-size: 28px; text-shadow: 0 0 17px #40aaff38; }
+.header-actions { gap: 10px; }
+.header-actions :deep(.date-picker) { width: 260px; height: 40px; border: 1px solid #1b547f; border-radius: 4px; background: #061f3d; box-shadow: none; }
+.header-actions :deep(.date-picker:hover), .header-actions :deep(.date-picker.is-active) { border-color: #37a7e7; }
+.header-actions :deep(.el-range-input), .header-actions :deep(.el-range-separator) { color: #d9ebfa; }
+.header-actions :deep(.el-button) { min-width: 82px; height: 40px; font-weight: 600; }
+.kpi-grid { gap: 13px; margin-bottom: 15px; }
+.kpi-card, .kpi-card.mint, .kpi-card.blue, .kpi-card.green, .kpi-card.orange, .kpi-card.sky { min-height: 122px; padding: 18px; border: 1px solid #176496; border-radius: 7px; background: linear-gradient(135deg, #082b4d, #061d39 78%); box-shadow: 0 0 12px #0064ae2b; }
+.kpi-icon { width: 42px; height: 42px; border: 1px solid #1d86b9; border-radius: 7px; background: #0a3f65; color: #63caff; box-shadow: 0 0 10px #0982c650; }
+.blue .kpi-icon, .sky .kpi-icon { border-color: #287cc9; background: #0a3569; color: #8fc5ff; }
+.green .kpi-icon { border-color: #178b88; background: #083f52; color: #53dcc6; }
+.orange .kpi-icon { border-color: #a46c27; background: #493517; color: #ffc875; }
+.kpi-label { color: #9fc3df; font-size: 12px; }
+.kpi-value { margin: 6px 0 3px; color: #f1f8ff; font-size: 29px; }
+.kpi-unit { color: #91b4d1; }
+.kpi-delta.up-good { color: #62dfbe; }
+.kpi-delta.up-bad { color: #ff9cad; }
+.kpi-delta.neutral { color: #8fb1ce; }
+.panel { position: relative; overflow: hidden; padding: 19px 21px 21px; border: 1px solid #176496; border-radius: 8px; background: linear-gradient(135deg, #082646, #061d39 78%); box-shadow: 0 0 12px #0064ae30; }
+.panel-header { position: relative; min-height: 34px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #17527d; }
+.panel-header::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 48px; height: 3px; border-radius: 3px; background: #159df5; box-shadow: 0 0 12px #189cff; }
+.panel-title { color: #edf7ff; font-size: 18px; }
+.panel-caption { color: #8fb5d2; font-size: 11px; }
+.panel-link { color: #68c8ff; }
+.panel-link:hover { color: #b7e8ff; }
+.panel-header :deep(.el-radio-button__inner) { border-color: #23618a; background: #082745; color: #b7d4ec; box-shadow: none; }
+.panel-header :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) { border-color: #168cea; background: #086ac9; color: #fff; box-shadow: none; }
+.source-head strong, .industry-row strong { color: #e7f4ff; }
+.source-head span, .source-foot, .chart-key { color: #91b5d2; }
+.source-head b { color: #e7f4ff; }
+.source-track, .industry-track { background: #0c385d; }
+.source-total { background: #2088cd; }
+.source-valid { background: #35d2ad; }
+.rate-pill { border: 1px solid #147b85; border-radius: 4px; background: #0a3b53; color: #69e1cd; }
+.key-total { background: #2088cd; }.key-valid { background: #35d2ad; }
+.rank-index { border: 1px solid #24618a; border-radius: 4px; background: #0a3459; color: #86caff; }
+.industry-track > div { background: linear-gradient(90deg, #1269c3, #3bc5ff); }
+.industry-rate strong { color: #8fd4ff; }.industry-rate span { color: #91b5d2; }
+.rating-summary > div { border: 1px solid #1c537b; border-radius: 5px; background: #092b4c; }
+.rating-summary span, .rating-summary small { color: #91b5d2; }
+.rating-summary strong { color: #edf7ff; }
+.judgment-donut > div { background: #071f3c; }
+.judgment-donut strong { color: #edf7ff; }.judgment-donut span { color: #91b5d2; }
+.judgment-legend span, .judgment-legend small { color: #91b5d2; }
+.judgment-legend strong { color: #eaf6ff; }
+.sales-card { border: 1px solid #1a5e8c; border-radius: 6px; background: #082847; }
+.sales-avatar { background: #0a3970; color: #a1d6ff; }
+.sales-head strong, .sales-metrics strong { color: #edf7ff; }
+.sales-head div > span, .sales-metrics span, .sales-progress-label { color: #91b5d2; }
+.sales-metrics > div { border-right-color: #19517a; }
+.sales-progress { background: #0c385d; }.sales-progress > div { background: #35d2ad; }
+.sales-progress-label strong { color: #8de4d1; }
+.panel:has(.data-table) { padding-bottom: 0; }
+.panel:has(.data-table) .table-scroll { margin: 0 -21px; }
+.data-table { color: #c4d8f0; font-size: 12px; }
+.data-table th { height: 42px; padding: 9px 12px; background: linear-gradient(180deg, #0c4278, #072c52); color: #c9e2fb; }
+.data-table td { padding: 9px 12px; border-bottom: 1px solid #0c385f; color: #c4d8f0; }
+.data-table tbody tr:nth-child(odd) { background: #031a34; }
+.data-table tbody tr:nth-child(even) { background: #051f3c; }
+.data-table tbody tr:hover { background: #0b345b; }
+.ticket-link { color: #8dcaff; }.ticket-link:hover { color: #c5eaff; }
+.muted, .data-table .empty { color: #91afcb; }
+.state-tag { border: 1px solid currentColor; border-radius: 4px; }
+.is-open { background: #423111; color: #ffc54f; }
+.is-pending { background: #0a2960; color: #78adff; }
+.is-done { background: #06463e; color: #27e2b7; }
+.is-cancelled { background: #26364a; color: #a9bed3; }
+.valid-yes { color: #54e2bc; }.valid-no { color: #9eb6cf; }.rating-stars { color: #ffd47a; }
+.opportunity-view :deep(.el-empty__description p) { color: #9bbbd7; }
+@media (max-width: 640px) { .opportunity-view { padding: 0 0 24px; } .page-title { font-size: 24px; } .panel { padding: 16px; } .panel:has(.data-table) .table-scroll { margin: 0 -16px; } }
+@media (max-width: 480px) { .kpi-grid { grid-template-columns: 1fr; } .header-actions :deep(.date-picker) { width: 100%; } .header-actions :deep(.el-button) { flex: 1; } }
 </style>

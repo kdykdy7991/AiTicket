@@ -5,7 +5,7 @@
         <h1>工单统计</h1>
       </div>
       <div class="head-actions">
-        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD"
+        <el-date-picker v-model="dateRange" type="daterange" popper-class="ticket-list-date-popper" value-format="YYYY-MM-DD"
           format="YYYY-MM-DD" range-separator="→" start-placeholder="开始日期"
           end-placeholder="结束日期" :clearable="false" @change="loadReport" />
         <el-button @click="selectThisMonth">本月</el-button>
@@ -55,7 +55,7 @@
           <section class="panel">
             <div class="panel-head">
               <h2>细分分类分布</h2>
-              <el-select v-model="categoryFilter" class="category-filter">
+              <el-select v-model="categoryFilter" class="category-filter" popper-class="ticket-dark-select-popper">
                 <el-option label="全部一级分类" value="" />
                 <el-option v-for="row in categories" :key="row.name" :label="row.name" :value="row.name" />
               </el-select>
@@ -64,7 +64,7 @@
               <div v-for="(row, index) in subcategories.slice(0, 8)" :key="row.root + row.name" class="rank-row">
                 <span class="rank-index">{{ index + 1 }}</span>
                 <span class="rank-name" :title="row.root + ' / ' + row.name">{{ row.name }}</span>
-                <div class="rank-track"><div class="rank-fill" :style="{ width: barWidth(row.count, subcategories), background: index === 0 ? '#e48756' : '#f5b99d' }"></div></div>
+                <div class="rank-track"><div class="rank-fill" :style="{ width: barWidth(row.count, subcategories), background: index === 0 ? '#22b9ff' : '#1769c9' }"></div></div>
                 <strong>{{ row.count }}</strong><span class="rank-pct">{{ percentOf(row.count) }}</span>
               </div>
             </div>
@@ -76,7 +76,7 @@
               <div v-for="(row, index) in topProblems" :key="row.root + row.name" class="rank-row">
                 <span class="rank-index">{{ index + 1 }}</span>
                 <span class="rank-name" :title="row.root + ' / ' + row.name">{{ row.name }}</span>
-                <div class="rank-track"><div class="rank-fill" :style="{ width: barWidth(row.count, topProblems), background: '#bd8e7b' }"></div></div>
+                <div class="rank-track"><div class="rank-fill" :style="{ width: barWidth(row.count, topProblems), background: '#20a7de' }"></div></div>
                 <strong>{{ row.count }}</strong>
               </div>
             </div>
@@ -110,7 +110,7 @@
             </div>
           </section>
         </div>
-        <p class="metric-note">统计口径：不含草稿；工单总量包含线索，非线索工单量单独列示。闭环率与超时率以所选周期内创建的工单为分母；满意/认可率仅统计已记录相应结果的工单。</p>
+        <p class="metric-note">统计口径：不含草稿；工单总量包含线索，线索量单独列示。闭环率与超时率以所选周期内创建的工单为分母；满意/认可率仅统计已记录相应结果的工单。</p>
       </template>
       <el-empty v-else-if="!loading" description="暂无统计数据" />
     </div>
@@ -147,8 +147,9 @@ const trendEl = ref<HTMLElement>()
 const donutEl = ref<HTMLElement>()
 let trendChart: echarts.ECharts | null = null
 let donutChart: echarts.ECharts | null = null
+let chartResizeObserver: ResizeObserver | null = null
 let requestNumber = 0
-const colors = ['#d98856', '#ffb354', '#75c290', '#94add1', '#9e8bc2', '#76b8c2']
+const colors = ['#1f9df2', '#30c8d3', '#37c987', '#f0b44e', '#8d8aff', '#ee7bac']
 
 const metrics = computed(() => report.value?.metrics ?? {})
 const categories = computed(() => report.value?.by_category ?? [])
@@ -171,7 +172,7 @@ function comparison(key: string, percentagePoint = false): string {
 
 const kpis = computed(() => [
   { label: '工单总量', value: formatNumber(metrics.value.total), foot: comparison('total'), tone: 'mint', icon: Document },
-  { label: '非线索工单量', value: formatNumber(metrics.value.service_count), foot: `线索工单 ${formatNumber(metrics.value.opportunity_count)} 件`, tone: 'blue', icon: DataLine },
+  { label: '线索量', value: formatNumber(metrics.value.opportunity_count), foot: comparison('opportunity_count'), tone: 'blue', icon: DataLine },
   { label: '闭环率', value: rate(metrics.value.closure_rate), foot: comparison('closure_rate', true), tone: 'green', icon: CircleCheck },
   { label: '超时率', value: rate(metrics.value.overdue_rate), foot: comparison('overdue_rate', true), tone: 'orange', icon: Clock },
   { label: '客户满意/认可率', value: rate(metrics.value.satisfaction_rate), foot: `已评价 ${formatNumber(metrics.value.rated_count)} 件`, tone: 'sky', icon: CircleCheck },
@@ -205,14 +206,17 @@ async function loadReport() {
 
 function renderCharts() {
   if (!report.value) return
+  chartResizeObserver ??= new ResizeObserver(resizeCharts)
   if (trendEl.value) {
+    chartResizeObserver.observe(trendEl.value)
     trendChart ??= echarts.init(trendEl.value)
     trendChart.setOption({
-      color: ['#24a35a', '#f07d25'], animationDuration: 350,
-      tooltip: { trigger: 'axis' }, legend: { top: 2, right: 6, data: ['新增工单', '闭环工单'] },
+      color: ['#28b4ff', '#33d6b2'], animationDuration: 350,
+      tooltip: { trigger: 'axis', backgroundColor: '#082441', borderColor: '#2587c2', textStyle: { color: '#e9f6ff' } },
+      legend: { top: 2, right: 6, textStyle: { color: '#aacbe5' }, data: ['新增工单', '闭环工单'] },
       grid: { left: 42, right: 20, top: 48, bottom: 34 },
-      xAxis: { type: 'category', boundaryGap: false, data: report.value.trend.map(d => d.date.slice(5)), axisLine: { lineStyle: { color: '#e7ebf2' } }, axisLabel: { color: '#7685a0' } },
-      yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#eef1f5' } }, axisLabel: { color: '#7685a0' } },
+      xAxis: { type: 'category', boundaryGap: false, data: report.value.trend.map(d => d.date.slice(5)), axisLine: { lineStyle: { color: '#24577d' } }, axisLabel: { color: '#96b8d6' } },
+      yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#17466d' } }, axisLabel: { color: '#96b8d6' } },
       series: [
         { name: '新增工单', type: 'line', smooth: true, showSymbol: false, areaStyle: { opacity: .10 }, data: report.value.trend.map(d => d.new) },
         { name: '闭环工单', type: 'line', smooth: true, showSymbol: false, areaStyle: { opacity: .08 }, data: report.value.trend.map(d => d.closed) },
@@ -220,11 +224,12 @@ function renderCharts() {
     }, true)
   }
   if (donutEl.value) {
+    chartResizeObserver.observe(donutEl.value)
     donutChart ??= echarts.init(donutEl.value)
     donutChart.setOption({
-      color: colors, tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+      color: colors, tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)', backgroundColor: '#082441', borderColor: '#2587c2', textStyle: { color: '#e9f6ff' } },
       series: [{ type: 'pie', radius: ['61%', '83%'], center: ['50%', '50%'], label: { show: false },
-        data: categories.value.length ? categories.value.map(c => ({ name: c.name, value: c.count })) : [{ name: '暂无数据', value: 1, itemStyle: { color: '#edf0f4' } }] }],
+        data: categories.value.length ? categories.value.map(c => ({ name: c.name, value: c.count })) : [{ name: '暂无数据', value: 1, itemStyle: { color: '#18466c' } }] }],
     }, true)
   }
 }
@@ -269,6 +274,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCharts)
+  chartResizeObserver?.disconnect()
   trendChart?.dispose()
   donutChart?.dispose()
 })
@@ -276,4 +282,69 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .service-report{padding:20px 24px 26px;background:#f6f8fb;min-height:100%;color:#111a2d}.page-head{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;margin-bottom:20px}.page-head h1{font-size:25px;margin:0 0 5px;font-weight:750;letter-spacing:.2px}.page-head p{margin:0;color:#718098;font-size:14px}.head-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.head-actions :deep(.el-date-editor){width:252px}.report-body{min-height:400px}.kpi-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin-bottom:17px}.kpi-card{display:flex;gap:15px;min-height:112px;padding:18px 16px;border:1px solid #eef0f4;border-radius:8px;background:#fff}.kpi-card.mint{background:linear-gradient(115deg,#f0f9f5,#fff)}.kpi-card.blue{background:linear-gradient(115deg,#f0f6fb,#fff)}.kpi-card.green{background:linear-gradient(115deg,#f0f9f4,#fff)}.kpi-card.orange{background:linear-gradient(115deg,#fff6f0,#fff)}.kpi-card.sky{background:linear-gradient(115deg,#f0f6fd,#fff)}.kpi-icon{display:grid;place-items:center;flex:none;width:42px;height:42px;border-radius:50%;background:#e5f5eb;color:#158456;font-size:23px}.blue .kpi-icon,.sky .kpi-icon{background:#e6f0fd;color:#1665bd}.orange .kpi-icon{background:#fff0e5;color:#cd641a}.kpi-text{min-width:0}.kpi-label{font-size:13px;font-weight:650;white-space:nowrap}.kpi-value{font-size:29px;line-height:1.3;font-weight:760;margin:7px 0 4px;white-space:nowrap}.kpi-foot{font-size:11px;color:#74829a;white-space:nowrap}.chart-grid,.ranking-grid,.bottom-grid{display:grid;gap:14px;margin-bottom:14px}.chart-grid{grid-template-columns:1.55fr 1fr}.ranking-grid{grid-template-columns:1.3fr 1fr}.bottom-grid{grid-template-columns:1fr 1.1fr}.panel{min-width:0;background:#fff;border:1px solid #e6ebf2;border-radius:8px;padding:17px 19px}.panel-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}.panel-head h2{font-size:17px;margin:0;font-weight:700}.panel-head>span{font-size:12px;color:#8390a5}.trend-chart{height:230px}.category-body{display:flex;align-items:center;gap:8px;min-height:230px}.donut-wrap{position:relative;width:47%;min-width:175px}.donut-chart{height:212px;width:100%}.donut-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none}.donut-center strong{font-size:22px}.donut-center span{font-size:11px;color:#8490a3}.category-legend{flex:1;min-width:0}.legend-row{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:12px}.legend-row i{width:10px;height:10px;border-radius:50%;flex:none}.legend-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.legend-percent{color:#647591}.legend-row strong{font-weight:600;width:36px;text-align:right}.category-filter{width:145px}.rank-list{display:grid;gap:11px;padding:3px 0}.rank-row{display:grid;grid-template-columns:22px minmax(90px,122px) minmax(60px,1fr) 40px 48px;gap:10px;align-items:center;font-size:12px}.top-list .rank-row{grid-template-columns:22px minmax(90px,122px) minmax(60px,1fr) 40px}.rank-index{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;background:#f2f4f7;color:#334155}.rank-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.rank-track{height:13px;border-radius:3px;background:#f3f4f6;overflow:hidden}.rank-fill{height:100%;border-radius:3px}.rank-row strong{text-align:right;font-weight:600}.rank-pct{text-align:right;color:#8a97aa}.attention-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.attention-item{display:grid;grid-template-columns:26px 1fr;align-items:center;gap:7px;padding:14px 12px;border-radius:6px;background:#fff7f2}.attention-item .el-icon{font-size:23px;color:#ed741b}.attention-item span{font-size:12px;font-weight:650}.attention-item strong{grid-column:2;font-size:25px;line-height:1.2}.attention-item.amber{background:#fff8f3}.attention-item.red{background:#fff5f3}.attention-item.red .el-icon{color:#d94343}.table-scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap}th{text-align:left;color:#8390a5;background:#f6f8fb;font-weight:600}td,th{padding:8px 7px;border-bottom:1px solid #edf0f4}tbody tr{cursor:pointer}tbody tr:hover{background:#f6f9ff}.ticket-number{color:#486182}.reason{color:#bd6227}.age{color:#d44d34;font-weight:700}.empty{text-align:center;color:#94a0b2;padding:32px 4px}.metric-note{font-size:11px;color:#8a96a7;margin:0 2px 8px}@media(max-width:1300px){.kpi-grid{grid-template-columns:repeat(3,1fr)}.chart-grid,.ranking-grid,.bottom-grid{grid-template-columns:1fr}}@media(max-width:760px){.service-report{padding:14px}.page-head{display:block}.head-actions{margin-top:15px}.kpi-grid{grid-template-columns:repeat(2,1fr)}.kpi-card{padding:13px}.category-body{display:block}.donut-wrap{margin:auto}.attention-grid{grid-template-columns:1fr}.rank-row{grid-template-columns:22px 95px 1fr 30px 42px}}
+</style>
+<style scoped>
+/* 工单统计：深蓝指挥中心样式。 */
+.service-report { min-width: 0; min-height: 100%; padding: 4px 0 28px; background: transparent; color: #eaf4ff; }
+.page-head { align-items: center; margin-bottom: 20px; }
+.page-head h1 { margin: 0; color: #f1f8ff; font-size: 28px; text-shadow: 0 0 17px #40aaff38; }
+.head-actions { gap: 10px; }
+.head-actions :deep(.el-date-editor) { width: 260px; height: 40px; border: 1px solid #1b547f; border-radius: 4px; background: #061f3d; box-shadow: none; }
+.head-actions :deep(.el-date-editor:hover), .head-actions :deep(.el-date-editor.is-active) { border-color: #37a7e7; }
+.head-actions :deep(.el-range-input), .head-actions :deep(.el-range-separator) { color: #d9ebfa; }
+.head-actions :deep(.el-button) { height: 40px; min-width: 82px; font-weight: 600; }
+.head-actions :deep(.el-button:not(.el-button--primary)) { border-color: #2b82bb; background: #092c4e; color: #d9eeff; }
+.head-actions :deep(.el-button:not(.el-button--primary):hover) { border-color: #50bbf7; background: #0d406b; }
+.report-body { min-height: 400px; }
+.kpi-grid { gap: 13px; margin-bottom: 15px; }
+.kpi-card, .kpi-card.mint, .kpi-card.blue, .kpi-card.green, .kpi-card.orange, .kpi-card.sky { min-height: 122px; padding: 18px; border: 1px solid #176496; border-radius: 7px; background: linear-gradient(135deg, #082b4d, #061d39 78%); box-shadow: 0 0 12px #0064ae2b; }
+.kpi-icon { width: 42px; height: 42px; border: 1px solid #1d86b9; border-radius: 7px; background: #0a3f65; color: #63caff; box-shadow: 0 0 10px #0982c650; }
+.blue .kpi-icon, .sky .kpi-icon { border-color: #287cc9; background: #0a3569; color: #8fc5ff; }
+.green .kpi-icon { border-color: #178b88; background: #083f52; color: #53dcc6; }
+.orange .kpi-icon { border-color: #a46c27; background: #493517; color: #ffc875; }
+.kpi-label { color: #9fc3df; font-size: 12px; }
+.kpi-value { margin: 6px 0 3px; color: #f1f8ff; font-size: 29px; font-variant-numeric: tabular-nums; }
+.kpi-foot { color: #8fb1ce; font-size: 11px; white-space: normal; line-height: 1.4; }
+.chart-grid, .ranking-grid, .bottom-grid { gap: 14px; margin-bottom: 14px; }
+.panel { position: relative; overflow: hidden; padding: 19px 21px 21px; border: 1px solid #176496; border-radius: 8px; background: linear-gradient(135deg, #082646, #061d39 78%); box-shadow: 0 0 12px #0064ae30; }
+.panel-head { position: relative; min-height: 34px; margin-bottom: 16px; padding-bottom: 14px; border-bottom: 1px solid #17527d; }
+.panel-head::after { content: ''; position: absolute; left: 0; bottom: -2px; width: 48px; height: 3px; border-radius: 3px; background: #159df5; box-shadow: 0 0 12px #189cff; }
+.panel-head h2 { color: #edf7ff; font-size: 18px; }
+.panel-head > span { color: #8fb5d2; font-size: 11px; }
+.category-filter { width: 150px; }
+.category-filter :deep(.el-select__wrapper) { min-height: 34px; border: 1px solid #1b547f; border-radius: 4px; background: #061f3d; box-shadow: none; }
+.category-filter :deep(.el-select__selected-item) { color: #d9ebfa; }
+.donut-center strong { color: #f0f8ff; }
+.donut-center span { color: #8fb5d2; }
+.legend-row { color: #d9eafa; border-bottom: 1px solid #133d62; }
+.legend-percent { color: #8fb5d2; }
+.legend-row strong { color: #e7f4ff; }
+.rank-list { gap: 13px; }
+.rank-row { color: #d2e6f7; }
+.rank-index { border: 1px solid #24618a; border-radius: 4px; background: #0a3459; color: #86caff; }
+.rank-track { background: #0c385d; }
+.rank-pct { color: #8fb5d2; }
+.attention-item, .attention-item.amber, .attention-item.red { border: 1px solid #775633; border-radius: 5px; background: #322a21; color: #f2d5b7; }
+.attention-item.amber { border-color: #80652c; background: #342d1e; }
+.attention-item.red { border-color: #844154; background: #352432; color: #f6c7d1; }
+.attention-item .el-icon { color: #ffbb64; }
+.attention-item.red .el-icon { color: #ff8fa8; }
+.attention-item strong { color: #fff4e6; }
+.abnormal-panel { padding-bottom: 0; }
+.table-scroll { margin: 0 -21px; }
+table { color: #c4d8f0; font-size: 12px; }
+th { height: 42px; background: linear-gradient(180deg, #0c4278, #072c52); color: #c9e2fb; font-weight: 600; }
+td, th { padding: 9px 12px; border-bottom: 1px solid #0c385f; }
+tbody tr:nth-child(odd) { background: #031a34; }
+tbody tr:nth-child(even) { background: #051f3c; }
+tbody tr:hover { background: #0b345b; }
+.ticket-number { color: #8dcaff; }
+.reason { color: #ffd08c; }
+.age { color: #ff9cb1; }
+.empty, .metric-note { color: #91afcb; }
+.metric-note { margin-top: 4px; line-height: 1.6; }
+.service-report :deep(.el-empty__description p) { color: #9bbbd7; }
+@media (max-width: 1300px) { .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .service-report { padding: 0 0 24px; } .page-head h1 { font-size: 24px; } .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .panel { padding: 16px; } .table-scroll { margin: 0 -16px; } }
+@media (max-width: 480px) { .kpi-grid { grid-template-columns: 1fr; } .head-actions :deep(.el-date-editor) { width: 100%; } .head-actions :deep(.el-button) { flex: 1; } }
 </style>
