@@ -9,7 +9,7 @@
           <line x1="16" y1="17" x2="8" y2="17"/>
         </svg>
       </div>
-      <h1 class="brand-title">Skdy Ticket</h1>
+      <h1 class="brand-title">智慧客服工单系统</h1>
       <p class="brand-subtitle">登录到您的工作台</p>
     </div>
 
@@ -48,6 +48,11 @@ const loading = ref(false)
 const casdoorEnabled = ref(false)
 
 onMounted(async () => {
+  const notice = sessionStorage.getItem('auth_notice')
+  if (notice) {
+    sessionStorage.removeItem('auth_notice')
+    ElMessage.warning(notice)
+  }
   try { casdoorEnabled.value = (await authApi.casdoorConfig()).enabled } catch { /* Casdoor unavailable */ }
 })
 
