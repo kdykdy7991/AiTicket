@@ -27,4 +27,11 @@ onBeforeUnmount(() => observer?.disconnect())
 
 <style scoped>
 .document-card{min-width:0;width:100%;display:flex;flex-direction:column;text-align:left;border:1px solid #e9eae6;border-radius:11px;padding:20px;background:#fff;cursor:pointer;color:#1d2530;box-shadow:0 3px 16px rgba(26,34,29,.025);transition:border-color .18s,box-shadow .18s}.document-card:hover,.document-card:focus-visible{border-color:#a8ad83;box-shadow:0 9px 25px rgba(48,55,40,.1);outline:none}.card-copy{display:flex;flex:1;flex-direction:column;min-height:154px;padding:15px 1px 0}.card-copy h3{margin:0;font-size:15px;line-height:1.45;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.card-summary{margin:6px 0 10px;color:#788294;font-size:13px;line-height:1.55;min-height:40px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}.card-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:auto}.card-tags span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:3px 9px;border-radius:5px;background:#f0f1e9;color:#5e654e;font-size:11px}.card-meta{display:flex;gap:12px;justify-content:space-between;margin-top:auto;padding-top:13px;color:#7b8491;font-size:12px}.card-tags+.card-meta{margin-top:0}.card-meta span:first-child{font-weight:700;color:#5c6978}
+.document-card { border: 1px solid #176496; border-radius: 8px; background: linear-gradient(135deg, #082646, #061d39 78%); color: #eaf4ff; box-shadow: 0 0 12px #0064ae30; }
+.document-card:hover, .document-card:focus-visible { border-color: #42b7f4; box-shadow: 0 0 19px #0a8ee566; outline: none; }
+.card-copy h3 { color: #f0f8ff; }
+.card-summary { color: #a3bfd8; }
+.card-tags span { border: 1px solid #1b6193; border-radius: 4px; background: #0a3156; color: #8fd0ff; }
+.card-meta { border-top: 1px solid #17466d; color: #8fb1ce; }
+.card-meta span:first-child { color: #a8d8fb; }
 </style>

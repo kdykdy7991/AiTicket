@@ -3,7 +3,8 @@
     :model-value="visible"
     width="760px"
     align-center
-    class="asset-dialog"
+    append-to-body
+    class="asset-dialog ticket-dark-dialog"
     :show-close="true"
     @update:model-value="emit('close')"
   >
