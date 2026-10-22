@@ -204,7 +204,7 @@ dispatch_chain 里重要/重大两条不配 steps，由投诉流程按等级走 
 | 表 B department_member | `skill_groups` + `user_skill_groups`（部门-人-是否对接人）✅ 结构接近 | 演进：加 effective_from/to，department_code 作为松耦合代称 |
 | 分诊动作 | 不存在 | 新增：细化分类 + 重新派单（仅判断人可执行） |
 | 链快照 | 不存在 | ticket 新增 `dispatch_chain_snapshot` |
-| 投诉升级 | `complaint_escalation_policies`（SLA 倍数 + required_role） | 扩展 escalation_chain 字段 |
+| 投诉升级 | `complaint_escalation_policies`（升级路由） | 解决时限由独立 SLA 策略配置 |
 | 回访双分支 | reopen 循环已有；"收集不满意原因"无字段 | 补 `unsatisfied_reason` 类字段 |
 | 复盘总结（第⑦阶段） | 无对应状态/动作 | 后续阶段设计（不在本表范围） |
 
@@ -235,7 +235,7 @@ dispatch_chain 里重要/重大两条不配 steps，由投诉流程按等级走 
 | 分类树单表、不限层级 | `ticket_categories` 自引用（`app/models/category.py`），V2 seed 最深 4 级 |
 | 即时办结通道（建单即归档、留痕） | `is_instant_resolve` → `instant_resolve` 一跳 archived——套餐查询直接复用 |
 | 分类→规则自动预填 | `resolve_rule` 父链继承已实现（方向对，载体要换成链） |
-| 投诉三级 SLA 分级 | `complaint_escalation_policies` 已建表 |
+| 投诉三级 SLA 分级 | 在 SLA 策略中按一般、重要、重大分别配置解决时限 |
 | 部门-人-是否对接人 | `skill_groups` + `user_skill_groups`（结构接近表 B） |
 
 ### 8.2 差距清单
@@ -247,7 +247,7 @@ dispatch_chain 里重要/重大两条不配 steps，由投诉流程按等级走 
 | 3 | 分诊动作（判断人细化分类一级 → 按新链派单） | 状态机 17 条边**没有此动作** | **核心缺口**：售后/星座大系统负责人无法"判到下一级并触发派单" | 状态机改造 |
 | 4 | 链快照（建单时展开，规则改动不影响在途单） | 不存在 | 规则变更会波及在途工单 | 随 #1 一并做 |
 | 5 | 建单只判到一级（业务保障二级留空） | 建单**必选一级+二级**（ticket_business_flow §3.4） | 表单与校验需放宽 | 表单/校验调整 |
-| 6 | 重要/重大投诉 escalation_chain | policy 只有 SLA 倍数 + required_role | 无升级链字段 | 扩展字段 |
+| 6 | 重要/重大投诉 escalation_chain | 升级路由与 SLA 时限分离 | 无升级链字段 | 扩展字段 |
 | 7 | 值班组（一般投诉承接部门） | 不存在 | 无 | 随 seed 建立 |
 | 8 | 套餐查询=直接办结 | 普通分类（seed `2202`），走完整开单 | 改为建单预置 instant_resolve | 小改 |
 | 9 | 回访双分支：收集不满意原因 | 有 satisfaction/reopen，无不满意原因字段 | 补字段 | 小改 |

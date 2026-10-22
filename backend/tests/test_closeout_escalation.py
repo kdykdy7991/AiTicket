@@ -36,17 +36,17 @@ async def closeout_env(client):
         now = datetime.now(timezone.utc)
         s.add_all([
             ComplaintEscalationPolicy(
-                complaint_level="一般", sla_resolution_multiplier=1.0,
+                complaint_level="一般",
                 required_role="agent", escalation_chain=None,
                 note="默认 一般", created_at=now, updated_at=now,
             ),
             ComplaintEscalationPolicy(
-                complaint_level="重要", sla_resolution_multiplier=0.75,
+                complaint_level="重要",
                 required_role="manager", escalation_chain=LEADER_CHAIN,
                 note="默认 重要", created_at=now, updated_at=now,
             ),
             ComplaintEscalationPolicy(
-                complaint_level="重大", sla_resolution_multiplier=0.5,
+                complaint_level="重大",
                 required_role="admin", escalation_chain=CRITICAL_CHAIN,
                 note="默认 重大", created_at=now, updated_at=now,
             ),

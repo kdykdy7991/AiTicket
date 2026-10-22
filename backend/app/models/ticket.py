@@ -148,6 +148,7 @@ class Ticket(Base):
     # relationships
     articles = relationship("Article", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
     state_logs = relationship("TicketStateLog", back_populates="ticket", lazy="noload", cascade="all, delete-orphan")
+    sla_rounds = relationship("SLARound", lazy="selectin", order_by="SLARound.sequence", cascade="all, delete-orphan")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
     creator = relationship("User", foreign_keys=[creator_id], lazy="selectin")
     dispatcher = relationship("User", foreign_keys=[dispatcher_id], lazy="selectin")

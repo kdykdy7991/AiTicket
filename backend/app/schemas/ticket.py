@@ -93,6 +93,7 @@ class TicketBrief(BaseModel):
     priority: str
     channel: str
     customer_type: str
+    is_opportunity: bool | None = None
     customer_name: str | None = None
     customer_phone: str
     customer_phone_type: str | None = None
@@ -168,6 +169,7 @@ class NodeContextOut(BaseModel):
 
 
 class TicketDetail(TicketBrief):
+    sla_rounds: list[dict] = []
     node_context: NodeContextOut | None = None
     current_form: dict | None = None
     description: str

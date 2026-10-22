@@ -2,8 +2,7 @@
 
 Verify:
 - complaint_level on TicketCreate / TicketUpdate / TicketDetail
-- _calculate_sla_deadline applies multiplier from ComplaintEscalationPolicy
-- default policies seeded by migration
+- complaint-specific SLA durations are matched directly by category and level
 - historical tickets with NULL complaint_level still load normally
 """
 
@@ -14,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.complaint import ComplaintEscalationPolicy
+from app.models.category import TicketCategory
 from app.models.sla import SLAPolicy
 from app.models.user import User
 
@@ -22,23 +22,22 @@ from app.models.user import User
 async def cr_env(client):
     c, dispatcher_id, engine = client
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    # Ensure default SLA policy exists so deadline != null.
+    # The three complaint levels have independent resolution limits.
     async with factory() as s:
-        existing_sla = (await s.execute(
-            select(SLAPolicy).where(
-                SLAPolicy.priority == "p3_normal",
-                SLAPolicy.skill_group_id == None,
-            )
-        )).scalar_one_or_none()
-        if not existing_sla:
-            s.add(SLAPolicy(
-                priority="p3_normal",
-                skill_group_id=None,
-                solution_minutes=240,
-                first_response_minutes=30,
-                created_at=datetime.now(timezone.utc),
-                updated_at=datetime.now(timezone.utc),
-            ))
+        root = TicketCategory(name="服务投诉", level=1)
+        s.add(root)
+        await s.flush()
+        leaves = {}
+        for level in ("一般", "重要", "重大"):
+            leaf = TicketCategory(name=f"{level}投诉", parent_id=root.id, level=2)
+            s.add(leaf)
+            await s.flush()
+            leaves[level] = leaf.id
+        s.add_all([
+            SLAPolicy(category_id=root.id, variant="一般", solution_minutes=240),
+            SLAPolicy(category_id=root.id, variant="重要", solution_minutes=180),
+            SLAPolicy(category_id=root.id, variant="重大", solution_minutes=120),
+        ])
         # Re-seed complaint_escalation_policies after per-test TRUNCATE.
         from app.models.complaint import ComplaintEscalationPolicy
         existing = (await s.execute(
@@ -50,37 +49,36 @@ async def cr_env(client):
             now = datetime.now(timezone.utc)
             s.add_all([
                 ComplaintEscalationPolicy(
-                    complaint_level="一般", sla_resolution_multiplier=1.0,
+                    complaint_level="一般",
                     required_role="agent", note="默认 一般", created_at=now, updated_at=now,
                 ),
                 ComplaintEscalationPolicy(
-                    complaint_level="重要", sla_resolution_multiplier=0.75,
+                    complaint_level="重要",
                     required_role="manager", note="默认 重要", created_at=now, updated_at=now,
                 ),
                 ComplaintEscalationPolicy(
-                    complaint_level="重大", sla_resolution_multiplier=0.5,
+                    complaint_level="重大",
                     required_role="admin", note="默认 重大", created_at=now, updated_at=now,
                 ),
             ])
         await s.commit()
-    return {"client": c, "engine": engine, "dispatcher_id": dispatcher_id}
+    return {"client": c, "engine": engine, "dispatcher_id": dispatcher_id, "leaves": leaves}
 
 
 async def test_default_policies_seeded(cr_env):
-    """Migration 默认播种了 一般/重要/重大 三档策略。"""
+    """投诉三级时限独立配置。"""
     factory = async_sessionmaker(cr_env["engine"], class_=AsyncSession, expire_on_commit=False)
     async with factory() as s:
-        rows = (await s.execute(select(ComplaintEscalationPolicy))).scalars().all()
-    levels = {r.complaint_level for r in rows}
+        rows = (await s.execute(select(SLAPolicy))).scalars().all()
+    levels = {r.variant for r in rows}
     assert "一般" in levels
     assert "重要" in levels
     assert "重大" in levels
 
 
 async def test_create_with_complaint_level_major_gets_shortened_sla(cr_env):
-    """重大投诉 SLA 应被乘以 0.5（截断为一半）。"""
+    """重大投诉直接匹配 120 分钟档。"""
     c = cr_env["client"]
-    # 重大：multiplier=0.5
     r = await c.post("/api/v1/tickets", json={
         "description": "重大投诉",
         "priority": "p3_normal",
@@ -88,12 +86,13 @@ async def test_create_with_complaint_level_major_gets_shortened_sla(cr_env):
         "customer_type": "personal",
         "customer_phone": "13900004001",
         "dispatcher_id": cr_env["dispatcher_id"],
+        "category_id": cr_env["leaves"]["重大"],
         "complaint_level": "重大",
     })
     assert r.status_code == 201, r.text
     data = r.json()["data"]
     assert data["complaint_level"] == "重大"
-    # SLA should be set to (240 * 0.5) = 120 minutes from now.
+    # SLA is the directly configured 120 minutes.
     from datetime import datetime, timezone
     deadline = datetime.fromisoformat(data["solution_deadline"].replace("Z", "+00:00"))
     delta_min = (deadline - datetime.now(timezone.utc)).total_seconds() / 60
@@ -102,7 +101,7 @@ async def test_create_with_complaint_level_major_gets_shortened_sla(cr_env):
 
 
 async def test_create_with_complaint_level_general_keeps_full_sla(cr_env):
-    """一般投诉 multiplier=1.0, SLA 不变。"""
+    """一般投诉匹配独立的 240 分钟档。"""
     c = cr_env["client"]
     r = await c.post("/api/v1/tickets", json={
         "description": "一般投诉",
@@ -111,6 +110,7 @@ async def test_create_with_complaint_level_general_keeps_full_sla(cr_env):
         "customer_type": "personal",
         "customer_phone": "13900004002",
         "dispatcher_id": cr_env["dispatcher_id"],
+        "category_id": cr_env["leaves"]["一般"],
         "complaint_level": "一般",
     })
     assert r.status_code == 201, r.text

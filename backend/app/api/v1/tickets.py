@@ -24,7 +24,7 @@ from app.models.group import Group
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
-from app.models.sla import SLAPolicy
+from app.services.sla import start_round, replace_running_deadline, root_category
 from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
 from app.models.node_form import FormDefinition, TicketNodeSubmission
 from app.models.user import User
@@ -158,6 +158,7 @@ def _ticket_to_brief(
         id=t.id, number=t.number, state=t.state,
         priority=t.priority, channel=t.channel, customer_type=t.customer_type,
         customer_name=t.customer_name, customer_phone=t.customer_phone, customer_phone_type=t.customer_phone_type, contact_phone=t.contact_phone,
+        is_opportunity=t.is_opportunity,
         skill_group_id=t.skill_group_id,
         skill_group_name=t.skill_group.name if t.skill_group else None,
         handler_skill_group_id=t.handler_skill_group_id,
@@ -225,12 +226,16 @@ def _ticket_to_detail(
         refine_denied_reason=refine_denied_reason,
         node_context=node_context,
         current_form=current_form,
+        sla_rounds=[{
+            "sequence": round_.sequence, "started_at": round_.started_at,
+            "deadline_at": round_.deadline_at, "ended_at": round_.ended_at,
+            "status": round_.status, "breached": round_.breached,
+        } for round_ in t.sla_rounds],
         description=t.description,
         customer_company=t.customer_company,
         industry=t.industry,
         customer_email=t.customer_email,
         satellite_number=t.satellite_number,
-        is_opportunity=t.is_opportunity,
         expected_result=t.expected_result,
         fault_occurred_at=t.fault_occurred_at,
         fault_recurrence=t.fault_recurrence,
@@ -273,45 +278,6 @@ def _ticket_to_detail(
         dispatch_chain_steps=t.dispatch_chain_steps,
         dispatch_step_index=t.dispatch_step_index,
     )
-
-
-async def _calculate_sla_deadline(
-    db: AsyncSession, priority: str, skill_group_id: int | None,
-    complaint_level: str | None = None,
-) -> datetime | None:
-    """Look up SLA policy and compute solution deadline.
-
-    Phase 8: 当 complaint_level 设置时（如 '重大'/'重要'），按 policy.sla_resolution_multiplier
-    缩短 SLA 截止时间，使重大事件获得更短的处置窗口。
-    """
-    # Try group+priority first, then global
-    minutes = None
-    for sg_id in [skill_group_id, None]:
-        result = await db.execute(
-            select(SLAPolicy).where(
-                SLAPolicy.skill_group_id == sg_id,
-                SLAPolicy.priority == priority,
-            )
-        )
-        policy = result.scalar_one_or_none()
-        if policy:
-            minutes = policy.solution_minutes
-            break
-    if minutes is None:
-        return None
-
-    # Complaint-level multiplier (Phase 8)
-    if complaint_level:
-        from app.models.complaint import ComplaintEscalationPolicy
-        cp = await db.execute(
-            select(ComplaintEscalationPolicy).where(
-                ComplaintEscalationPolicy.complaint_level == complaint_level
-            )
-        )
-        cp_row = cp.scalar_one_or_none()
-        if cp_row and cp_row.sla_resolution_multiplier:
-            minutes = int(minutes * cp_row.sla_resolution_multiplier)
-    return datetime.now(timezone.utc) + timedelta(minutes=minutes)
 
 
 async def _is_dispatcher_anywhere(db: AsyncSession, user_id: int) -> bool:
@@ -772,10 +738,9 @@ async def submit_draft(
         seq = int(max_number.split("-")[-1]) + 1
     ticket.number = f"{today}-{seq:04d}"
 
-    ticket.solution_deadline = None if is_instant_consult else await _calculate_sla_deadline(db, ticket.priority, ticket.skill_group_id)
-
     ticket.is_draft = False
     await db.flush()
+    await start_round(db, ticket, is_instant=is_instant_consult)
 
     # 初始状态落库（None → pending）：与建单共用执行入口
     await apply_initial_state(db, ticket, to_state="archived" if is_instant_consult else "pending", operator=user)
@@ -1502,6 +1467,8 @@ async def create_ticket(
                 {"一般投诉": "一般", "重要投诉": "重要", "重大投诉": "重大"}.get(lineage.l2.name)
                 if not body.is_opportunity and root_id == 2101 and lineage and lineage.l2 else None
             )
+            if root_id != 2301:
+                body.priority = "p4_enterprise"
             if body.is_opportunity or root_id != 2301:
                 body.fault_occurred_at = None
                 body.fault_recurrence = None
@@ -1609,7 +1576,7 @@ async def create_ticket(
         number = f"{today}-{seq:04d}"
 
         # Calculate SLA deadline
-        solution_deadline = None if is_instant_consult else await _calculate_sla_deadline(db, body.priority, body.skill_group_id, body.complaint_level)
+        solution_deadline = None
 
         # Check duplicates
         dup_result = await db.execute(
@@ -1674,6 +1641,7 @@ async def create_ticket(
 
     # 初始状态日志：仅正式工单记录（None → pending），草稿不写日志
     if not body.is_draft:
+        await start_round(db, ticket, is_instant=is_instant_consult)
         await apply_initial_state(db, ticket, to_state="archived" if is_instant_consult else "pending",
                                   operator=user, body=body)
         if is_instant_consult:
@@ -1832,9 +1800,7 @@ async def update_ticket(
         body.skill_group_id = skill_group_id
         body.handler_skill_group_id = ticket.handler_skill_group_id
         body.dispatcher_id = dispatcher_id
-        ticket.solution_deadline = await _calculate_sla_deadline(
-            db, body.priority or ticket.priority, skill_group_id, ticket.complaint_level,
-        )
+        # 分类变化沿用当前计时轮次的起点，稍后统一按新规则更新截止时间。
         db.expire(ticket, ["category", "skill_group", "handler_skill_group", "dispatcher", "first_owner"])
 
     # State transition — 唯一执行入口：校验/权限/reason/前置校验/副作用/Flow Log 收口
@@ -1846,6 +1812,14 @@ async def update_ticket(
         raise HTTPException(
             422, detail="已在暂缓中；如需调整预计恢复时间，请先恢复处理再重新暂缓")
 
+    if body.priority is not None:
+        sla_root = await root_category(db, ticket.category_id)
+        ticket.priority = body.priority if sla_root and sla_root.name == "业务保障" else "p4_enterprise"
+    if body.complaint_level is not None:
+        ticket.complaint_level = body.complaint_level
+    if ticket.solved_at is None and (is_resubmit or body.priority is not None or body.complaint_level is not None):
+        await replace_running_deadline(db, ticket)
+
     if body.state is not None and body.state != ticket.state:
         await apply_transition(
             db, ticket,
@@ -1856,12 +1830,6 @@ async def update_ticket(
             dispatcher_id=body.dispatcher_id,
             hold_until=body.hold_until,
         )
-    if body.priority is not None:
-        ticket.priority = body.priority
-        # Recalculate SLA deadline (creation → resolved)
-        if ticket.solved_at is None:
-            ticket.solution_deadline = await _calculate_sla_deadline(db, body.priority, ticket.skill_group_id, ticket.complaint_level)
-
     if body.owner_id is not None:
         ticket.owner_id = body.owner_id
     if body.group_id is not None:
@@ -1877,10 +1845,6 @@ async def update_ticket(
         ticket.root_cause = body.root_cause
     if body.solution is not None:
         ticket.solution = body.solution
-    # Phase 8: complaint routing
-    if body.complaint_level is not None:
-        ticket.complaint_level = body.complaint_level
-
     await db.flush()
 
     # Reload with relationships
@@ -1930,7 +1894,8 @@ async def batch_update_tickets(
         # 先应用非 state 字段（owner/dsp/group/skill_group/priority），这样流转快照
         # 写入时 ticket 已携带新值
         if body.updates.priority is not None:
-            ticket.priority = body.updates.priority
+            sla_root = await root_category(db, ticket.category_id)
+            ticket.priority = body.updates.priority if sla_root and sla_root.name == "业务保障" else "p4_enterprise"
         if body.updates.group_id is not None:
             ticket.group_id = body.updates.group_id
         if body.updates.skill_group_id is not None:
@@ -1941,6 +1906,8 @@ async def batch_update_tickets(
             ticket.owner_id = body.updates.owner_id
         if body.updates.dispatcher_id is not None:
             ticket.dispatcher_id = body.updates.dispatcher_id
+        if body.updates.priority is not None and ticket.solved_at is None:
+            await replace_running_deadline(db, ticket)
         if (body.updates.state is not None
                 and body.updates.state == ticket.state
                 and ticket.state == "on_hold"):

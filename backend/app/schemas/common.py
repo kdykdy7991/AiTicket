@@ -193,16 +193,16 @@ class RegionCreate(BaseModel):
 # ── SLA Policy ────────────────────────────────────────────
 
 class SLAPolicyCreate(BaseModel):
-    skill_group_id: int | None = None
-    priority: str
-    solution_minutes: int = Field(..., gt=0)
+    category_id: int
+    variant: str
+    solution_minutes: int = Field(..., gt=0, le=43200)
 
 
 class SLAPolicyOut(BaseModel):
     id: int
-    skill_group_id: int | None = None
-    skill_group_name: str | None = None
-    priority: str
+    category_id: int
+    category_name: str | None = None
+    variant: str
     solution_minutes: int
     created_at: datetime
 

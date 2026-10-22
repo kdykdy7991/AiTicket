@@ -4,7 +4,7 @@ from app.models.group import Group, SkillGroup, UserSkillGroup
 from app.models.user import User
 from app.models.category import TicketCategory, Region
 from app.models.ticket import Ticket, Article, TicketStateLog
-from app.models.sla import SLAPolicy
+from app.models.sla import SLAPolicy, SLARound
 from app.models.notification import DingtalkNotification
 from app.models.audit import AuditLog
 from app.models.routing import CategoryRoutingRule
@@ -19,6 +19,7 @@ __all__ = [
     "TicketCategory", "Region",
     "Ticket", "Article", "TicketStateLog",
     "SLAPolicy",
+    "SLARound",
     "DingtalkNotification",
     "AuditLog",
     "CategoryRoutingRule",

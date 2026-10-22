@@ -755,13 +755,10 @@ async def list_sla_policies(db: AsyncSession = Depends(get_db), user: User = Dep
     policies = result.scalars().all()
     data = []
     for p in policies:
-        sg_name = None
-        if p.skill_group_id:
-            r = await db.execute(select(SkillGroup.name).where(SkillGroup.id == p.skill_group_id))
-            sg_name = r.scalar_one_or_none()
+        category_name = await db.scalar(select(TicketCategory.name).where(TicketCategory.id == p.category_id))
         data.append({
-            "id": p.id, "skill_group_id": p.skill_group_id, "skill_group_name": sg_name,
-            "priority": p.priority,
+            "id": p.id, "category_id": p.category_id, "category_name": category_name,
+            "variant": p.variant,
             "solution_minutes": p.solution_minutes, "created_at": p.created_at.isoformat(),
         })
     return {"data": data}
@@ -773,19 +770,21 @@ async def create_sla_policy(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role("admin")),
 ):
-    """新增 SLA 策略。skill_group_id+priority 唯一，已存在则报错。"""
+    """新增分类及档位的解决时限策略。"""
+    from app.services.sla import valid_variant
+    category = await db.get(TicketCategory, body.category_id)
+    if category is None or category.parent_id is not None or not valid_variant(category.name, body.variant):
+        raise HTTPException(422, detail="请选择一级分类对应的有效时限档位")
     existing = await db.execute(
         select(SLAPolicy).where(
-            SLAPolicy.skill_group_id == body.skill_group_id,
-            SLAPolicy.priority == body.priority,
+            SLAPolicy.category_id == body.category_id,
+            SLAPolicy.variant == body.variant,
         )
     )
     if existing.scalar_one_or_none():
-        label = f"对接部门{body.skill_group_id}+" if body.skill_group_id else "全局默认+"
-        raise HTTPException(409, detail=f"{label}{body.priority} 的策略已存在，请直接编辑")
+        raise HTTPException(409, detail="该分类及档位的策略已存在，请直接编辑")
     p = SLAPolicy(
-        skill_group_id=body.skill_group_id, priority=body.priority,
-        first_response_minutes=0,  # 已废弃，保留字段兼容旧数据
+        category_id=body.category_id, variant=body.variant,
         solution_minutes=body.solution_minutes,
     )
     db.add(p)
@@ -804,8 +803,18 @@ async def update_sla_policy(
     p = result.scalar_one_or_none()
     if not p:
         raise NotFoundError("SLA策略", policy_id)
-    p.skill_group_id = body.skill_group_id
-    p.priority = body.priority
+    from app.services.sla import valid_variant
+    category = await db.get(TicketCategory, body.category_id)
+    if category is None or category.parent_id is not None or not valid_variant(category.name, body.variant):
+        raise HTTPException(422, detail="请选择一级分类对应的有效时限档位")
+    duplicate = await db.scalar(select(SLAPolicy.id).where(
+        SLAPolicy.category_id == body.category_id, SLAPolicy.variant == body.variant,
+        SLAPolicy.id != policy_id,
+    ))
+    if duplicate is not None:
+        raise HTTPException(409, detail="该分类及档位的策略已存在")
+    p.category_id = body.category_id
+    p.variant = body.variant
     p.solution_minutes = body.solution_minutes
     await db.flush()
     return {"data": {"id": p.id}}
@@ -873,17 +882,22 @@ async def dashboard_stats(
     pending = (await db.execute(scoped(Ticket.state == "pending"))).scalar() or 0
     open_count = (await db.execute(scoped(Ticket.state == "open"))).scalar() or 0
     overdue = (await db.execute(scoped(
-        Ticket.sla_solution_breached == True, Ticket.state.notin_(["archived", "cancelled"])
+        Ticket.sla_solution_breached == True, Ticket.state.notin_(["archived", "cancelled"]),
+        Ticket.solution_deadline.is_not(None), Ticket.is_opportunity.is_not(True),
     ))).scalar() or 0
     today_created = (await db.execute(scoped(func.date(Ticket.created_at) == today))).scalar() or 0
     today_resolved = (await db.execute(scoped(
         Ticket.state == "resolved", func.date(Ticket.solved_at) == today
     ))).scalar() or 0
 
-    # SLA breach rate：按已结案工单（archived/cancelled）统计
-    total_closed = (await db.execute(scoped(Ticket.state.in_(["archived", "cancelled"])))).scalar() or 0
+    # 已归档且实际适用解决时限的工单；撤销与线索不纳入分母。
+    total_closed = (await db.execute(scoped(
+        Ticket.state == "archived", Ticket.solution_deadline.is_not(None),
+        Ticket.is_opportunity.is_not(True),
+    ))).scalar() or 0
     total_breached = (await db.execute(scoped(
-        Ticket.state.in_(["archived", "cancelled"]),
+        Ticket.state == "archived", Ticket.solution_deadline.is_not(None),
+        Ticket.is_opportunity.is_not(True),
         Ticket.sla_solution_breached == True
     ))).scalar() or 0
     breach_rate = round(total_breached / total_closed, 4) if total_closed else 0.0
@@ -998,13 +1012,18 @@ async def report_stats(
     ]
 
     # 5. 超时率
+    sla_base = [*base, Ticket.solution_deadline.is_not(None),
+                Ticket.is_opportunity.is_not(True), Ticket.state != "cancelled"]
+    sla_total = (await db.execute(
+        select(func.count()).select_from(Ticket).where(*sla_base)
+    )).scalar() or 0
     breached = (await db.execute(
         select(func.count()).select_from(Ticket).where(
-            *base,
+            *sla_base,
             Ticket.sla_solution_breached == True
         )
     )).scalar() or 0
-    sla_breach_rate = round(breached / new_count, 4) if new_count else 0.0
+    sla_breach_rate = round(breached / sla_total, 4) if sla_total else 0.0
 
     # 6. 按完整分类路径归到一级、二级；工单可能挂在树中的任意层级。
     lineage = await build_lineage_index(db)
@@ -1093,10 +1112,15 @@ async def report_stats(
             Ticket.callback_required == True, Ticket.is_callbacked == False,
         )
     )).scalar() or 0
-    prev_breached = (await db.execute(
-        select(func.count()).select_from(Ticket).where(*prev_base, Ticket.sla_solution_breached == True)
+    prev_sla_base = [*prev_base, Ticket.solution_deadline.is_not(None),
+                     Ticket.is_opportunity.is_not(True), Ticket.state != "cancelled"]
+    prev_sla_total = (await db.execute(
+        select(func.count()).select_from(Ticket).where(*prev_sla_base)
     )).scalar() or 0
-    prev_sla_rate = round(prev_breached / prev_new, 4) if prev_new else 0.0
+    prev_breached = (await db.execute(
+        select(func.count()).select_from(Ticket).where(*prev_sla_base, Ticket.sla_solution_breached == True)
+    )).scalar() or 0
+    prev_sla_rate = round(prev_breached / prev_sla_total, 4) if prev_sla_total else 0.0
 
     prev_sat_rows = (await db.execute(
         select(Ticket.satisfaction, func.count(Ticket.id))
@@ -1124,7 +1148,7 @@ async def report_stats(
             func.count(Ticket.id).label("total"),
             func.sum(case((Ticket.sla_solution_breached == True, 1), else_=0)).label("breached"),
         )
-        .where(*base)
+        .where(*sla_base)
         .group_by("d").order_by("d")
     )).all()
     sla_daily_map = {str(r[0]): round((r[2] or 0) / r[1], 4) if r[1] else 0.0 for r in sla_daily_rows}
@@ -1246,7 +1270,9 @@ async def trend_stats(
     # 按天分组：当日超时工单数（sla_solution_breached == True 且 created_at 落在当天）
     overdue_rows = (await db.execute(
         select(func.date(Ticket.created_at).label("d"), func.count(Ticket.id))
-        .where(*base, Ticket.sla_solution_breached == True)
+        .where(*base, Ticket.sla_solution_breached == True,
+               Ticket.solution_deadline.is_not(None), Ticket.is_opportunity.is_not(True),
+               Ticket.state != "cancelled")
         .group_by("d").order_by("d")
     )).all()
     overdue_map = {str(r[0]): r[1] for r in overdue_rows}
@@ -1333,14 +1359,17 @@ async def service_analysis_stats(
         rated = [satisfaction(ticket) for ticket in tickets]
         rated = [value for value in rated if value is not None]
         count = len(tickets)
+        sla_tickets = [ticket for ticket in tickets if ticket.solution_deadline is not None
+                       and ticket.is_opportunity is not True and ticket.state != "cancelled"]
+        overdue_count = sum(is_overdue(ticket) for ticket in sla_tickets)
         return {
             "total": count,
             "service_count": sum(ticket.is_opportunity is not True for ticket in tickets),
             "opportunity_count": sum(ticket.is_opportunity is True for ticket in tickets),
             "closed_count": sum(is_closed(ticket) for ticket in tickets),
             "closure_rate": round(sum(is_closed(ticket) for ticket in tickets) / count, 4) if count else 0,
-            "overdue_count": sum(is_overdue(ticket) for ticket in tickets),
-            "overdue_rate": round(sum(is_overdue(ticket) for ticket in tickets) / count, 4) if count else 0,
+            "overdue_count": overdue_count,
+            "overdue_rate": round(overdue_count / len(sla_tickets), 4) if sla_tickets else 0,
             "satisfied_count": sum(value is True for value in rated),
             "rated_count": len(rated),
             "satisfaction_rate": round(sum(value is True for value in rated) / len(rated), 4) if rated else None,

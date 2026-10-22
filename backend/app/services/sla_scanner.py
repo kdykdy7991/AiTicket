@@ -21,6 +21,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.database import async_session
 from app.models.ticket import Ticket, TicketStateLog
+from app.models.sla import SLARound
 
 logger = logging.getLogger("sla_scanner")
 
@@ -52,6 +53,13 @@ async def scan_sla_breaches() -> dict:
             .values(sla_solution_breached=True)
         )
         sol_count = sol_result.rowcount or 0
+
+        await db.execute(
+            update(SLARound)
+            .where(SLARound.status == "running", SLARound.deadline_at < now,
+                   SLARound.breached == False)
+            .values(breached=True)
+        )
 
         await db.commit()
 

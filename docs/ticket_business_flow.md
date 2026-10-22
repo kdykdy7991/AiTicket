@@ -68,7 +68,7 @@
 
 ### 3.2 判断 2：`is_instant_resolve = true` → 即时办结咨询
 
-- 仍然生成 `number`（YYYYMMDD-XXXX 日计数）和 SLA 截止时间，保留完整审计。
+- 仍然生成 `number`（YYYYMMDD-XXXX 日计数），但不生成 SLA 截止时间；保留完整审计。
 - 构造期直接写入：`resolved=True`、`solved_at=now`、`resolution`（默认"即时办结咨询"）、`callback_required=False`（免回访）、`is_callbacked=True`。
 - `closed_at` / `closed_duration_minutes` **不在构造期维护**，由 `apply_initial_state` 统一计算（终态副作用的唯一所有者）。
 - 状态流转：`apply_initial_state(None → archived)`，reason = "即时办结咨询"，Action = `instant_resolve`。
@@ -80,7 +80,7 @@
 
 1. **路由规则自动匹配**（若给了 `category_id`）：`resolve_rule` 按分类路由规则补齐留空的对接部门 / 对接人字段（**body 显式值优先**）；不匹配只产生 warning，不拦截。注意：**处理人不在建单时分配**，留给"分派"步骤。
 2. **生成工单号**：`YYYYMMDD-XXXX`，当日自增计数。
-3. **计算 SLA**：按优先级 / 部门 / 投诉等级算出 `solution_deadline`。
+3. **计算解决时限**：按一级分类及其档位匹配策略，创建第一轮计时记录和 `solution_deadline`；线索工单不计 SLA。详见 [解决时限规则](sla-resolution-rules.md)。
 4. **重复工单检查**（仅提示，不拦截）：同 `customer_phone`、状态 ∈ {pending, open, resolved, on_hold}、非草稿的工单（若给了分类则再按分类过滤）→ 返回 `duplicate_tickets` warning。
 5. **部门对接人必填**：`dispatcher_id` 为空 → **422「建单时必须指定部门对接人」**。
 6. **写初始状态**：`apply_initial_state(None → pending)`，Action = `create`，Flow Log 记录创建人/对接人快照。
@@ -137,7 +137,7 @@
 
 - **暂缓** `open → on_hold`：**处理人**专属、**原因必填**（缺 reason → 400），可附带 `hold_until`（暂缓截止时间，ISO 格式）。处理人保持不变。
 - **恢复** `on_hold → open`：**处理人**专属、**原因必填**。
-- 暂缓期间 SLA 截止时间暂不调整（SLA 策略未定，属已知非目标）。
+- 暂缓期间继续计入解决时限，截止时间不顺延。
 
 ### 5.2 沟通记录（不改变状态的分支动作）
 
@@ -171,7 +171,7 @@
 |---|---|
 | 权限 | **当前处理人**（owner）专属，否则 403「只有当前处理人可执行此操作」 |
 | 原因 | 不必填 |
-| 副作用 | `solved_at=now`、`resolved=True`；若已超过 `solution_deadline` → `sla_solution_breached=True` |
+| 副作用 | `solved_at=now`、`resolved=True`；最后处理节点返回客服时结束当前 SLA 轮次，超时则记录该轮及工单超时 |
 | Flow Log | Action = `resolve`，记录上一状态停留时长与人员快照 |
 
 进入 `resolved` 后，工单回到**客服侧**：等待回访、可能被退回、最终归档。
@@ -301,7 +301,7 @@ open ⇄ on_hold（hold：处理人需原因；resume：处理人需原因，同
 on_hold → resolved（处理人确认，可直接办结） ；on_hold → cancelled（创建者撤销）
 ```
 
-- 处理人不变、SLA 暂不因暂缓调整；
+- 处理人不变，暂缓期间解决时限继续计时；
 - 循环可重复任意次，每次都在 Flow Log 留痕并记录停留时长。
 
 ---

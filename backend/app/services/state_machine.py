@@ -460,6 +460,9 @@ async def apply_return(db: AsyncSession, ticket: Ticket, *, operator: User, reas
     db.expire(ticket, ["category", "skill_group", "handler_skill_group", "owner", "dispatcher", "returned_to_user", "first_owner", "group"])
     ticket.has_returned = True
     now = datetime.now(timezone.utc)
+    if old_state == "resolved":
+        from app.services.sla import start_round
+        await start_round(db, ticket, started_at=now)
     last = (await db.execute(
         select(TicketStateLog).where(TicketStateLog.ticket_id == ticket.id)
         .order_by(TicketStateLog.created_at.desc(), TicketStateLog.id.desc()).limit(1)
@@ -1143,8 +1146,8 @@ async def apply_transition(
     elif to_state == "resolved":
         ticket.solved_at = now
         ticket.resolved = True
-        if ticket.solution_deadline and now > ticket.solution_deadline:
-            ticket.sla_solution_breached = True
+        from app.services.sla import finish_round
+        await finish_round(db, ticket, status="delivered", ended_at=now)
     elif to_state == "returned":
         # 仅 pending→returned：分配给创建工单的客服人员
         if old_state == "pending":
@@ -1153,6 +1156,9 @@ async def apply_transition(
     elif to_state in ("archived", "cancelled"):
         # 终态：记录结案时间
         ticket.closed_at = now
+        if to_state == "cancelled":
+            from app.services.sla import finish_round
+            await finish_round(db, ticket, status="cancelled", ended_at=now)
         if ticket.created_at:
             ticket.closed_duration_minutes = int((now - ticket.created_at).total_seconds() / 60)
 
