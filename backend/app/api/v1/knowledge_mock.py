@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from app.core.config import settings
 from app.core.deps import require_role
 
-router = APIRouter(prefix="/knowledge", tags=["knowledge-prototype"], dependencies=[Depends(require_role("admin"))])
+router = APIRouter(prefix="/knowledge", tags=["knowledge-prototype"], dependencies=[Depends(require_role("admin", "observer"))])
 
 COLLECTIONS = [
     {"id": "demo-service", "name": "客服知识库", "description": "客服常见问题与处理说明", "document_count": 3},

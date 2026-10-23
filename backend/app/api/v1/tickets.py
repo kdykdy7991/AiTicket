@@ -939,6 +939,13 @@ async def get_ticket(
     if ticket.is_draft and ticket.creator_id != user.id:
         raise NotFoundError("草稿", ticket_id)
     terminal_ops = await _get_terminal_operators(db, [ticket_id])
+    if user.role == "observer":
+        return _ticket_to_detail(
+            ticket, terminal_ops,
+            lineage=cat_idx.lineage, responsibility=cat_idx.responsibility,
+            allowed_actions=[], can_reply=False, can_addition=False,
+            can_refine=False, node_context=None, current_form=None,
+        )
     # 后端唯一事实来源：动作/能力元数据全部由 state_machine 的真实规则生成
     try:
         allowed_actions = await compute_allowed_actions(db, ticket, user)

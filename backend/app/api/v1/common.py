@@ -55,7 +55,7 @@ async def list_users(
     if not show_all:
         query = query.where(User.is_active == True)
     # 非管理员只能看到本组成员（用于选负责人/筛选）
-    if user.role != "admin":
+    if user.role not in {"admin", "observer"}:
         query = query.where(User.group_id == user.group_id)
     if role:
         query = query.where(User.role == role)
@@ -111,6 +111,8 @@ async def create_user(
         raise HTTPException(422, detail="客服坐席必须选择客服组")
     if body.role == "handler" and not body.skill_groups:
         raise HTTPException(422, detail="处理人必须选择所属对接部门")
+    if body.role == "observer" and (body.group_id is not None or body.skill_groups or body.is_group_leader):
+        raise HTTPException(422, detail="观察员不能加入客服组或对接部门")
 
     u = User(
         username=body.username, name=body.name, phone=body.phone,
@@ -151,6 +153,16 @@ async def update_user(
         )).scalar_one_or_none())
         if not has_membership:
             raise HTTPException(422, detail="处理人必须选择所属对接部门")
+    if next_role == "observer" and (body.group_id is not None or body.skill_groups or body.is_group_leader):
+        raise HTTPException(422, detail="观察员不能加入客服组或对接部门")
+    if next_role == "observer" and u.role != "observer":
+        active_assignment = (await db.execute(select(Ticket.id).where(
+            Ticket.state.notin_(["archived", "cancelled"]),
+            or_(Ticket.owner_id == user_id, Ticket.dispatcher_id == user_id,
+                Ticket.creator_id == user_id),
+        ).limit(1))).scalar_one_or_none()
+        if active_assignment is not None:
+            raise HTTPException(409, detail="该用户仍关联在途工单，请先移交后再改为观察员")
 
     # 不能禁用/降级最后一个管理员
     if body.role is not None and body.role != "admin" and u.role == "admin":
@@ -170,6 +182,10 @@ async def update_user(
             u.local_login_enabled = True
     if body.role is not None:
         u.role = body.role
+        if body.role == "observer":
+            u.group_id = None
+            u.is_group_leader = False
+            await db.execute(UserSkillGroup.__table__.delete().where(UserSkillGroup.user_id == user_id))
     if body.group_id is not None:
         u.group_id = body.group_id
     if body.is_group_leader is not None:
@@ -180,8 +196,7 @@ async def update_user(
         u.is_active = body.is_active
 
     # 更新对接部门关联（全量替换，含对接人标记）
-    if body.skill_groups is not None:
-        from app.models.group import UserSkillGroup
+    if body.skill_groups is not None and next_role != "observer":
         await db.execute(
             UserSkillGroup.__table__.delete().where(UserSkillGroup.user_id == user_id)
         )
@@ -750,7 +765,7 @@ sla_router = APIRouter(tags=["sla"])
 
 
 @sla_router.get("/sla-policies")
-async def list_sla_policies(db: AsyncSession = Depends(get_db), user: User = Depends(require_role("admin"))):
+async def list_sla_policies(db: AsyncSession = Depends(get_db), user: User = Depends(require_role("admin", "observer"))):
     result = await db.execute(select(SLAPolicy).order_by(SLAPolicy.id))
     policies = result.scalars().all()
     data = []
@@ -843,7 +858,7 @@ stats_router = APIRouter(tags=["stats"])
 async def dashboard_stats(
     group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(require_role("admin", "agent", "observer")),
 ):
     from datetime import datetime, timezone
     from sqlalchemy import or_
@@ -945,7 +960,7 @@ async def report_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(require_role("admin", "agent", "observer")),
 ):
     """按时间范围聚合统计报表。
 
@@ -1234,7 +1249,7 @@ async def trend_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(require_role("admin", "agent", "observer")),
 ):
     """按天返回新增/闭环趋势，供折线图使用。"""
     from datetime import date, datetime, timedelta, timezone
@@ -1305,7 +1320,7 @@ async def service_analysis_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(require_role("admin", "agent", "observer")),
 ):
     """全量工单总览。时间范围按北京时间的建单日期筛选。"""
     from collections import Counter, defaultdict
@@ -1652,7 +1667,7 @@ async def opportunity_analysis_stats(
     owner_id: int | None = None,
     granularity: str = Query("day", pattern="^(day|week)$"),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(require_role("admin", "agent", "observer")),
 ):
     """线索工单分析：机会识别、有效性判断与销售承接效率。
 

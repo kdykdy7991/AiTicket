@@ -1,6 +1,7 @@
 """Pydantic schemas for users, groups, categories, regions, SLA."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,12 +13,15 @@ class SkillGroupMembership(BaseModel):
     is_dispatcher: bool = False
 
 
+UserRole = Literal["admin", "agent", "handler", "observer"]
+
+
 class UserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=50)
     name: str = Field(..., min_length=1, max_length=100)
     phone: str | None = None
     password: str = Field(..., min_length=6)
-    role: str = Field(default="agent")
+    role: UserRole = Field(default="agent")
     group_id: int | None = None
     is_group_leader: bool = False
     skill_groups: list[SkillGroupMembership] = Field(default_factory=list)
@@ -28,7 +32,7 @@ class UserUpdate(BaseModel):
     name: str | None = None
     phone: str | None = None
     password: str | None = None
-    role: str | None = None
+    role: UserRole | None = None
     group_id: int | None = None
     is_group_leader: bool | None = None
     skill_groups: list[SkillGroupMembership] | None = None

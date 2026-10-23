@@ -5,7 +5,7 @@
         <h2 class="page-title">SLA 策略</h2>
         <p class="page-subtitle">按一级分类配置解决时限：投诉三级、业务保障 P1～P4，其余分类单档；未配置的档位不计时。</p>
       </div>
-      <el-button type="primary" @click="openCreate">新增策略</el-button>
+      <el-button v-if="auth.isAdmin" type="primary" @click="openCreate">新增策略</el-button>
     </div>
 
     <el-card shadow="never" class="list-card" v-loading="loading">
@@ -24,7 +24,7 @@
         <el-table-column label="解决时限（小时）">
           <template #default="{ row }">{{ formatHours(row.solution_minutes) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column v-if="auth.isAdmin" label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button text size="small" @click="openEdit(row)">编辑</el-button>
             <el-button text size="small" type="danger" @click="onRemove(row)">删除</el-button>
@@ -63,9 +63,11 @@ import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { slaApi, type SLAPolicyItem, type SLAPolicyPayload } from '@/api/sla'
 import { metaApi } from '@/api/overviews'
+import { useAuthStore } from '@/stores/auth'
 import type { TicketCategory } from '@/types'
 
 const loading = ref(false)
+const auth = useAuthStore()
 const saving = ref(false)
 const policies = ref<SLAPolicyItem[]>([])
 const rootCategories = ref<TicketCategory[]>([])

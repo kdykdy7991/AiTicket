@@ -4,7 +4,7 @@
       <div>
         <h2 class="page-title">用户管理</h2>
       </div>
-      <el-button type="primary" @click="openCreate">
+      <el-button v-if="auth.isAdmin" type="primary" @click="openCreate">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right: 6px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         新建用户
       </el-button>
@@ -16,6 +16,7 @@
         <el-option label="管理员" value="admin" />
         <el-option label="客服坐席" value="agent" />
         <el-option label="处理人" value="handler" />
+        <el-option label="只读观察员" value="observer" />
       </el-select>
       <el-select v-model="filterSkillGroup" popper-class="ticket-dark-select-popper" placeholder="全部对接部门" clearable size="default" style="width: 160px" @change="loadUsers">
         <el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id" />
@@ -63,7 +64,7 @@
             <el-tag v-else size="small" type="info">禁用</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="170" fixed="right">
+        <el-table-column v-if="auth.isAdmin" label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <el-button text size="small" @click="openEdit(row)">编辑</el-button>
             <el-button v-if="row.is_active" text size="small" type="danger" @click="onDisable(row)">禁用</el-button>
@@ -93,6 +94,7 @@
             <el-option label="管理员" value="admin" />
             <el-option label="客服坐席" value="agent" />
             <el-option label="处理人" value="handler" />
+            <el-option label="只读观察员" value="observer" />
           </el-select>
         </el-form-item>
         <!-- 客服坐席：选客服组 + 组长开关 -->
@@ -135,9 +137,11 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { userApi, type UserItem, type UserPayload } from '@/api/users'
 import { metaApi } from '@/api/overviews'
+import { useAuthStore } from '@/stores/auth'
 import type { Group } from '@/types'
 
 const loading = ref(false)
+const auth = useAuthStore()
 const saving = ref(false)
 const users = ref<UserItem[]>([])
 const groups = ref<Group[]>([])
@@ -174,7 +178,7 @@ const rules: FormRules = {
 }
 
 function roleLabel(role: string) {
-  return role === 'admin' ? '管理员' : role === 'agent' ? '客服坐席' : role === 'handler' ? '处理人' : role
+  return role === 'admin' ? '管理员' : role === 'agent' ? '客服坐席' : role === 'handler' ? '处理人' : role === 'observer' ? '只读观察员' : role
 }
 function roleTagType(role: string) {
   return role === 'admin' ? 'danger' : role === 'agent' ? '' : 'info'
@@ -201,6 +205,11 @@ function onRoleChange() {
   } else if (form.role === 'handler') {
     form.group_id = null
     form.is_group_leader = false
+  } else {
+    form.group_id = null
+    form.is_group_leader = false
+    form.skill_group_ids = []
+    form.skill_groups = []
   }
 }
 

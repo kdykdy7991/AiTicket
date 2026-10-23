@@ -1,6 +1,6 @@
 """FastAPI dependencies: current user, database session."""
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +13,7 @@ bearer_scheme = HTTPBearer()
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -34,6 +35,22 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="该账号已在其他设备登录，请重新登录",
         )
+
+    # A viewer can inspect data but cannot take part in any business or
+    # administration workflow. Keep the guard here so new write endpoints
+    # cannot accidentally grant access through a permissive dependency.
+    if user.role == "observer" and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        path = request.url.path
+        read_only_post = (
+            request.method == "POST"
+            and path.startswith("/api/v1/knowledge/collections/")
+            and path.endswith("/queries")
+        )
+        own_account_post = request.method == "POST" and path in {
+            "/api/v1/auth/logout", "/api/v1/auth/change-password",
+        }
+        if not (read_only_post or own_account_post):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="观察员只能查看数据")
 
     return user
 

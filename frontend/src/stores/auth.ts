@@ -14,7 +14,9 @@ export const useAuthStore = defineStore('auth', () => {
     return typeof r === 'string' ? r : r?.name || null
   })
   const isAdmin = computed(() => userRole.value === 'admin')
+  const isObserver = computed(() => userRole.value === 'observer')
   const isAgent = computed(() => userRole.value === 'agent' || userRole.value === 'admin')
+  const canViewReports = computed(() => isAgent.value || isObserver.value)
   const displayName = computed(() => {
     if (!user.value) return ''
     const u = user.value as any
@@ -55,7 +57,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     accessToken, refreshToken, user,
-    isLoggedIn, userRole, isAdmin, isAgent, displayName,
+    isLoggedIn, userRole, isAdmin, isObserver, isAgent, canViewReports, displayName,
     login, completeLogin, logout,
   }
 })

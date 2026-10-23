@@ -12,7 +12,7 @@
         <div class="section-header">
           <h3 class="section-title">客服组</h3>
           <span class="section-hint">工单归属的客服团队，决定组长可见范围</span>
-          <el-button type="primary" size="small" @click="openCreate('group')">新建客服组</el-button>
+          <el-button v-if="auth.isAdmin" type="primary" size="small" @click="openCreate('group')">新建客服组</el-button>
         </div>
       </template>
       <el-table :data="groups" :key="groupKey" v-loading="loadingGroup">
@@ -26,7 +26,7 @@
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
+        <el-table-column v-if="auth.isAdmin" label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button text size="small" :disabled="!row.dingtalk_webhook_url" @click="onTestDingtalk('group', row)">测试机器人</el-button>
             <el-button text size="small" @click="openEdit('group', row)">编辑</el-button>
@@ -42,7 +42,7 @@
         <div class="section-header">
           <h3 class="section-title">对接部门</h3>
           <span class="section-hint">工单派发去向，如技术/市场/售后</span>
-          <el-button type="primary" size="small" @click="openCreate('skill')">新建对接部门</el-button>
+          <el-button v-if="auth.isAdmin" type="primary" size="small" @click="openCreate('skill')">新建对接部门</el-button>
         </div>
       </template>
       <el-table :data="skillGroups" :key="skillKey" v-loading="loadingSkill">
@@ -56,7 +56,7 @@
         <el-table-column label="创建时间" width="180">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="210" fixed="right">
+        <el-table-column v-if="auth.isAdmin" label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <el-button text size="small" :disabled="!row.dingtalk_webhook_url" @click="onTestDingtalk('skill', row)">测试机器人</el-button>
             <el-button text size="small" @click="openEdit('skill', row)">编辑</el-button>
@@ -88,8 +88,10 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { groupApi, skillGroupApi, type GroupItem } from '@/api/groups'
+import { useAuthStore } from '@/stores/auth'
 
 const loadingGroup = ref(false)
+const auth = useAuthStore()
 const loadingSkill = ref(false)
 const saving = ref(false)
 const groups = ref<GroupItem[]>([])

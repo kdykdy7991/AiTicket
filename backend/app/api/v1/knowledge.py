@@ -82,19 +82,19 @@ def _document(row: dict) -> dict:
 
 
 @router.get("/status")
-async def status(user: User = Depends(require_role("admin"))):
+async def status(user: User = Depends(require_role("admin", "observer"))):
     return {"mode": "rag"}
 
 
 @router.get("/collections")
 async def collections(limit: int = Query(20, ge=1, le=100), cursor: str | None = None,
-                      user: User = Depends(require_role("admin"))):
+                      user: User = Depends(require_role("admin", "observer"))):
     return await _json("GET", "/collections", user, params={"limit": limit, "cursor": cursor})
 
 
 @router.get("/collections/{collection_id}/documents")
 async def documents(collection_id: str, limit: int = Query(20, ge=1, le=100), cursor: str | None = None,
-                    q: str = "", file_type: str = "", user: User = Depends(require_role("admin"))):
+                    q: str = "", file_type: str = "", user: User = Depends(require_role("admin", "observer"))):
     result = await _json("GET", f"/collections/{_id(collection_id)}/documents", user,
                          params={"limit": limit, "cursor": cursor, "q": q or None, "file_type": file_type or None})
     return {**result, "items": [_document(row) for row in result.get("items", [])]}
@@ -107,35 +107,35 @@ class QueryBody(BaseModel):
 
 
 @router.post("/collections/{collection_id}/queries")
-async def query_collection(collection_id: str, body: QueryBody, user: User = Depends(require_role("admin"))):
+async def query_collection(collection_id: str, body: QueryBody, user: User = Depends(require_role("admin", "observer"))):
     return await _json("POST", f"/collections/{_id(collection_id)}/queries", user, body=body.model_dump())
 
 
 @router.get("/documents/{document_id}")
-async def document_detail(document_id: str, user: User = Depends(require_role("admin"))):
+async def document_detail(document_id: str, user: User = Depends(require_role("admin", "observer"))):
     return _document(await _json("GET", f"/documents/{_id(document_id)}", user))
 
 
 @router.get("/documents/{document_id}/chunks")
 async def chunks(document_id: str, page: int = Query(1, ge=1), page_size: int = Query(10, ge=1, le=50),
-                 user: User = Depends(require_role("admin"))):
+                 user: User = Depends(require_role("admin", "observer"))):
     return await _json("GET", f"/documents/{_id(document_id)}/chunks", user,
                        params={"page": page, "page_size": page_size})
 
 
 @router.get("/documents/{document_id}/chunks/{chunk_id}")
-async def chunk_detail(document_id: str, chunk_id: str, user: User = Depends(require_role("admin"))):
+async def chunk_detail(document_id: str, chunk_id: str, user: User = Depends(require_role("admin", "observer"))):
     return await _json("GET", f"/documents/{_id(document_id)}/chunks/{_id(chunk_id)}", user)
 
 
 @router.get("/documents/{document_id}/presentation")
-async def document_presentation(document_id: str, user: User = Depends(require_role("admin"))):
+async def document_presentation(document_id: str, user: User = Depends(require_role("admin", "observer"))):
     """Document Presentation：只读转发摘要、重点和派生图片资产引用。"""
     return await _json("GET", f"/documents/{_id(document_id)}/presentation", user)
 
 
 @router.get("/assets/{asset_id}")
-async def asset(asset_id: str, user: User = Depends(require_role("admin"))):
+async def asset(asset_id: str, user: User = Depends(require_role("admin", "observer"))):
     """只返回图片类知识派生资产；不代理原文件。"""
     response = await _request("GET", f"/assets/{_id(asset_id)}", user)
     content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()

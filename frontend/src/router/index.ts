@@ -91,11 +91,11 @@ const routes: RouteRecordRaw[] = [
     path: '/knowledge',
     name: 'KnowledgeBase',
     component: () => import('@/views/KnowledgeBaseView.vue'),
-    meta: { title: '知识库', requiresAdmin: true },
+    meta: { title: '知识库', requiresKnowledgeAccess: true },
   },
   {
     path: '/admin',
-    meta: { requiresAdmin: true },
+    meta: { requiresManagementRead: true },
     children: [
       { path: 'users', name: 'AdminUsers', component: () => import('@/views/admin/UsersView.vue'), meta: { title: '用户管理' } },
       { path: 'groups', name: 'AdminGroups', component: () => import('@/views/admin/GroupsView.vue'), meta: { title: '组管理' } },
@@ -122,8 +122,16 @@ router.beforeEach((to) => {
     return { name: 'TicketList' }
   }
 
+  if (to.meta.requiresManagementRead && !(auth.isAdmin || auth.isObserver)) {
+    return { name: 'TicketList' }
+  }
+
+  if (to.meta.requiresKnowledgeAccess && !(auth.isAdmin || auth.isObserver)) {
+    return { name: 'TicketList' }
+  }
+
   // 统计报表仅客服和管理员可访问
-  if (to.meta.requiresAgent && !auth.isAgent) {
+  if (to.meta.requiresAgent && !auth.canViewReports) {
     return { name: 'TicketList' }
   }
 
