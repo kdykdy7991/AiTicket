@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.category import TicketCategory
-from app.models.node_form import FormBinding, FormDefinition, FormFieldDefinition
+from app.models.node_form import FormBinding, FormDefinition, FormFieldDefinition, TicketNodeSubmission
 from app.models.ticket import Ticket
 from app.services.node_context import NodeContext
 
@@ -132,11 +132,22 @@ async def present_form(
     target_category_id: int | None = None,
     values: dict | None = None,
 ) -> dict:
+    historical_values: dict = {}
+    if form.definition.node_type == "sales_opportunity":
+        imported = (await db.execute(
+            select(TicketNodeSubmission.data).where(
+                TicketNodeSubmission.ticket_id == ticket.id,
+                TicketNodeSubmission.node_type == "sales_opportunity",
+                TicketNodeSubmission.action_type == "historical_import",
+            ).order_by(TicketNodeSubmission.id.desc()).limit(1)
+        )).scalar_one_or_none()
+        historical_values = imported or {}
     fields = []
     for field in form.fields:
         visible = await _condition(db, field.visibility_condition, target_category_id, values)
         conditional_required = await _condition(db, field.required_condition, target_category_id, values) if field.required_condition else False
-        value = getattr(ticket, field.storage_key, None) if field.storage_type == "ticket_field" else None
+        value = (getattr(ticket, field.storage_key, None) if field.storage_type == "ticket_field"
+                 else historical_values.get(field.field_key))
         fields.append({
             "field_key": field.field_key, "label": field.label, "field_type": field.field_type,
             "sort_order": field.sort_order, "required": visible and (field.required or conditional_required),

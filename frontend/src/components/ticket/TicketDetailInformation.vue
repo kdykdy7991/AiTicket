@@ -18,7 +18,7 @@
       </div>
     </TicketFormSection>
 
-    <TicketFormSection v-if="hasFaultInfo" title="故障信息" icon="Tools" eyebrow="FAULT INFORMATION">
+    <TicketFormSection v-if="!isOpportunity && hasFaultInfo" title="故障信息" icon="Tools" eyebrow="FAULT INFORMATION">
       <div class="fields fault-fields">
         <div v-for="field in faultFields" :key="field.label" class="field"><span class="field-icon"><component :is="field.icon" /></span><div class="field-copy"><span>{{ field.label }}</span><strong>{{ field.value }}</strong></div></div>
       </div>
@@ -34,6 +34,7 @@ import type { TicketDetail, User } from '@/types'
 import TicketFormSection from '@/components/ticket-create/TicketFormSection.vue'
 const props = defineProps<{ ticket: TicketDetail }>()
 const t = computed<Record<string, any>>(() => props.ticket)
+const isOpportunity = computed(() => t.value.is_opportunity === true)
 const userName = (user?: User | null) => user ? `${user.firstname || ''}${user.lastname || ''}`.trim() : ''
 const customerName = computed(() => t.value.customer_name || userName(t.value.customer) || '—')
 const regionText = computed(() => t.value.region_name || [t.value.region?.province, t.value.region?.city, t.value.region?.district, t.value.region?.station].filter(Boolean).join(' / '))
@@ -47,20 +48,24 @@ const systemFields = computed(() => [
   { label: '受理班组', value: t.value.creator_group_name || t.value.creator_group || '—', icon: OfficeBuilding },
   { label: '受理时间', value: formatTime(t.value.created_at), icon: Clock },
   { label: '受理渠道', value: channelText.value, icon: ChatDotRound },
+  ...(isOpportunity.value ? [{ label: '是否为线索工单', value: '是', icon: Warning }] : []),
 ])
 const customerFields = computed(() => [
   { label: '客户名称', value: customerName.value, icon: OfficeBuilding },
   { label: '单位全称', value: t.value.customer_company || t.value.organization?.name || '—', icon: OfficeBuilding },
-  { label: '联系人', value: t.value.contact_name || '—', icon: UserIcon },
+  ...(!isOpportunity.value ? [{ label: '联系人', value: t.value.contact_name || '—', icon: UserIcon }] : []),
   { label: '行业', value: t.value.industry || '—', icon: Collection },
   { label: '来电号码', value: t.value.customer_phone || '—', icon: Phone },
   { label: '联系号码', value: t.value.contact_phone || '—', icon: Phone },
-  ...(regionText.value || t.value.device_sn ? [
+  ...(!isOpportunity.value && (regionText.value || t.value.device_sn) ? [
     { label: '区域', value: regionText.value || '—', icon: Location },
     { label: '设备 SN', value: t.value.device_sn || '—', icon: Connection },
   ] : []),
 ])
-const contentFields = computed(() => [
+const contentFields = computed(() => isOpportunity.value ? [
+  { label: '销售人员', value: t.value.owner_name || userName(t.value.owner) || '—', icon: UserIcon },
+  { label: '客户问题详情', value: t.value.description || '—', icon: Document, full: true, description: true },
+] : [
   { label: '卫星物联网码号', value: t.value.satellite_number || '—', icon: Connection },
   { label: '一级分类', value: t.value.category_l1?.name || '—', icon: Grid },
   { label: '二级分类', value: t.value.category_l2?.name || '—', icon: Grid },

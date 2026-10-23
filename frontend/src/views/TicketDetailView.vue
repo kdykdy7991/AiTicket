@@ -11,7 +11,7 @@
         <div class="header-meta">
           <span class="ticket-number">{{ ticket.number || '未编号' }}</span>
           <StateTag :state="ticket.state" />
-          <div class="header-actions">
+          <div v-if="!auth.isObserver" class="header-actions">
             <el-button v-if="canReturn" :type="isResuming ? 'primary' : 'danger'" size="small" class="header-action-btn" @click="openReturnDialog">{{ isResuming ? '恢复处理' : '退 回' }}</el-button>
             <el-button v-if="canCancel" type="danger" size="small" class="header-action-btn" @click="openCancelDialog">撤销</el-button>
           </div>
@@ -61,6 +61,7 @@
             </div>
           </div>
 
+          <template v-if="!auth.isObserver">
           <!-- 已退回工单：补充后重新提交 -->
           <div v-if="canResubmit" class="resubmit-card">
             <div class="resubmit-card-title">重新提交工单</div>
@@ -393,6 +394,7 @@
             :articles="ticket.articles"
             @submitted="onRefresh"
           />
+          </template>
           <div v-if="isTerminalState" class="terminal-notice">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
             工单已结束，无法继续提交处理说明。
@@ -494,6 +496,7 @@ import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import dayjs from 'dayjs'
 import { useRoute, useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
+import { useAuthStore } from '@/stores/auth'
 import { metaApi } from '@/api/overviews'
 import { ticketApi } from '@/api/tickets'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -507,6 +510,7 @@ import { timelineActionName } from '@/utils/ticketTimeline'
 const route = useRoute()
 const router = useRouter()
 const ticketStore = useTicketStore()
+const auth = useAuthStore()
 
 const ticket = computed(() => ticketStore.currentTicket)
 type SlaRound = NonNullable<NonNullable<typeof ticket.value>['sla_rounds']>[number]
@@ -543,7 +547,12 @@ function submissionFields(submission: any): Array<{ key: string; label: string; 
     const value = field.storage_type === 'submission' ? submission.data?.[field.storage_key || field.key]
       : field.storage_type === 'ticket_field' ? field.submitted_value
         : field.storage_type === 'article' ? submission.article_body : undefined
-    if (value === null || value === undefined || value === '') return []
+    if (value === null || value === undefined || value === '') {
+      if (submission.action_type === 'historical_import' && field.key === 'customer_rating') {
+        return [{ key: field.key, label: field.label, type: field.type, value: '未评级' }]
+      }
+      return []
+    }
     const label = ['sales_opportunity_v1', 'sales_opportunity_v2'].includes(submission.form_code) && field.key === 'valid_opportunity'
       ? '是否为有效线索' : field.label
     return [{ key: field.key, label, type: field.type,
@@ -616,7 +625,8 @@ const timelineCards = computed(() => {
         && Boolean(t.root_cause || t.solution || t.resolution)
       const showInstantResolution = log.action_type === 'instant_resolve' && Boolean(t.resolution)
       if (!nodeSubmissions.length && !articles.length && !showLegacyClosure && !showLegacyResult && !showInstantResolution) return []
-      return [{ log, title: timelineActionName(log, submissions, logs), submissions: nodeSubmissions, articles, showLegacyClosure, showLegacyResult, showInstantResolution }]
+      const historicalOnly = nodeSubmissions.length > 0 && nodeSubmissions.every((entry: any) => entry.action_type === 'historical_import')
+      return [{ log, title: historicalOnly ? '历史线索资料（导入闭环）' : timelineActionName(log, submissions, logs), submissions: nodeSubmissions, articles, showLegacyClosure, showLegacyResult, showInstantResolution }]
     })
 })
 const closureLogId = computed<number | null>(() => {
