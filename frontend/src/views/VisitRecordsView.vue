@@ -25,7 +25,7 @@
         <el-table-column prop="channel" label="渠道" min-width="120" />
         <el-table-column prop="contact_number" label="联系号码" min-width="135" />
         <el-table-column prop="customer_name" label="姓名" min-width="88">
-          <template #default="{ row }">{{ row.customer_name || '—' }}</template>
+          <template #default="{ row }">{{ displayCustomerName(row) || '—' }}</template>
         </el-table-column>
         <el-table-column prop="category_l1" label="一级分类" min-width="115" />
         <el-table-column prop="category_l2" label="二级分类" min-width="120" />
@@ -41,7 +41,6 @@
     </div>
 
     <el-dialog v-model="dialogVisible" :title="selected?.id ? (editing ? '编辑来访记录' : '来访记录详情') : '新增来访记录'" width="820px" append-to-body class="visit-dialog ticket-dark-dialog" destroy-on-close>
-      <div v-if="selected?.source_sheet" class="source-note">原始来源：{{ selected.source_sheet }} · 第 {{ selected.source_row }} 行</div>
       <div v-if="!editing && selected" class="detail-grid">
         <div v-for="item in detailItems" :key="item.label" :class="{ wide: item.wide }">
           <span>{{ item.label }}</span><p>{{ item.value }}</p>
@@ -78,9 +77,7 @@ import { useAuthStore } from '@/stores/auth'
 import { visitRecordApi, type VisitRecord, type VisitPayload } from '@/api/visitRecords'
 
 const extraFields: Array<{ key: string; label: string; multiline?: boolean }> = [
-  { key: 'source_order', label: '原表序号' },
   { key: 'customer_source', label: '客户来源' },
-  { key: 'gender', label: '称谓' },
   { key: 'customer_type', label: '客户分类' },
   { key: 'company_name', label: '公司名称' },
   { key: 'valid_contact', label: '是否有效电话' },
@@ -121,7 +118,7 @@ const detailItems = computed(() => {
     { label: '联系时间', value: formatTime(record.contact_at) },
     { label: '渠道', value: record.channel },
     { label: '联系号码', value: record.contact_number },
-    { label: '姓名', value: record.customer_name },
+    { label: '姓名', value: displayCustomerName(record) },
     { label: '接待客服', value: record.service_agent },
     { label: '一级分类', value: record.category_l1 },
     { label: '二级分类', value: record.category_l2 },
@@ -129,6 +126,12 @@ const detailItems = computed(() => {
   const extra = extraFields.map(field => ({ label: field.label, value: record.fields[field.key], wide: field.multiline }))
   return [...base, ...extra].filter(item => item.value)
 })
+
+function displayCustomerName(record: VisitRecord): string {
+  const name = record.customer_name?.trim() || ''
+  const title = record.fields?.gender?.trim() || ''
+  return name && title && !name.endsWith(title) ? `${name}${title}` : name
+}
 
 function formatTime(value: string) {
   return new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
@@ -159,12 +162,13 @@ function fill(record: VisitRecord | null) {
   form.contact_at = record ? localInput(record.contact_at) : localInput(new Date().toISOString())
   form.channel = record?.channel || '400客服热线'
   form.contact_number = record?.contact_number || ''
-  form.customer_name = record?.customer_name || ''
+  form.customer_name = record ? displayCustomerName(record) : ''
   form.service_agent = record?.service_agent || ''
   form.registered_ticket = record?.registered_ticket == null ? '' : String(record.registered_ticket)
   form.category_l1 = record?.category_l1 || ''
   form.category_l2 = record?.category_l2 || ''
   form.fields = { ...(record?.fields || {}) }
+  delete form.fields.gender
 }
 function openCreate() { selected.value = null; fill(null); editing.value = true; dialogVisible.value = true }
 function openDetail(record: VisitRecord) { selected.value = record; fill(record); editing.value = false; dialogVisible.value = true }
@@ -221,7 +225,6 @@ onMounted(() => load(1))
 .table-card :deep(.el-button.is-link:hover) { color: #b7e6ff; }
 .pager { display: flex; justify-content: flex-end; padding: 15px 18px; border-top: 1px solid #16476e; }
 .pager :deep(.el-pagination) { color: #9bbbd7; }
-.source-note { margin-bottom: 16px; padding: 10px 12px; border: 1px solid #1b547f; border-radius: 4px; background: #092843; color: #9ec2de; font-size: 12px; }
 .visit-form, .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; max-height: 65vh; overflow: auto; padding-right: 5px; }
 .visit-form :deep(.el-form-item) { min-width: 0; }
 .visit-form .wide, .detail-grid .wide { grid-column: 1 / -1; }
