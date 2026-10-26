@@ -17,12 +17,11 @@ async def test_admin_exchanges_only_own_identity(client, monkeypatch):
     monkeypatch.setattr(settings, "AGENT_EMBED_API_URL", "http://debussy.internal:8765")
     monkeypatch.setattr(settings, "AGENT_EMBED_CLIENT_ID", "ta_test")
     monkeypatch.setattr(settings, "AGENT_EMBED_CLIENT_SECRET", "server-only-secret")
-    monkeypatch.setattr(settings, "AGENT_EMBED_HOST_ORIGINS", "http://localhost:5173")
     code = "a" * 43
     fake_response = Response(200, json={"data": {"code": code, "expiresIn": 60}}, request=Request("POST", "http://debussy.internal:8765/api/embed/v1/auth/exchange"))
 
-    denied = await http.post("/api/v1/agent/embed/code", headers={"Origin": "http://evil.example"})
-    assert denied.status_code == 403
+    missing_origin = await http.post("/api/v1/agent/embed/code")
+    assert missing_origin.status_code == 400
 
     app.dependency_overrides[get_current_user] = lambda: type("Admin", (), {"id": 1, "name": "管理员", "role": "admin"})()
     upstream = MagicMock()
@@ -48,6 +47,15 @@ async def test_admin_exchanges_only_own_identity(client, monkeypatch):
     }
     assert kwargs["headers"]["Authorization"] == "Bearer ta_test.server-only-secret"
     assert "server-only-secret" not in str(response.json())
+
+    platform_denial = Response(403, json={"error": "origin_not_allowed"},
+                               request=Request("POST", "http://debussy.internal:8765/api/embed/v1/auth/exchange"))
+    upstream.post = AsyncMock(return_value=platform_denial)
+    with patch("app.api.v1.agent_embed.httpx.AsyncClient", return_value=upstream):
+        denied = await http.post("/api/v1/agent/embed/code", headers={"Origin": "http://evil.example"})
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "Agent 平台未允许当前页面来源"
+    assert upstream.post.await_args.kwargs["json"]["origin"] == "http://evil.example"
 
     app.dependency_overrides[get_current_user] = lambda: type("Agent", (), {"id": 9, "role": "agent"})()
     forbidden = await http.post("/api/v1/agent/embed/code", headers={"Origin": "http://localhost:5173"})

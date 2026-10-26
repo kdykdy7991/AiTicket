@@ -18,12 +18,20 @@ code 不进入 URL 或浏览器存储。离开页面或退出登录时清理 ifr
   与浏览器地址可以不同；它不能指向仅监听宿主机回环地址、容器无法访问的服务。
 - `AGENT_EMBED_CLIENT_ID` 和 `AGENT_EMBED_CLIENT_SECRET`：Debussy 为该受信任系统
   签发的专用凭据。Secret 仅放在工单后端环境变量中。
-- `AGENT_EMBED_HOST_ORIGINS`：工单页面实际 Origin，多个以英文逗号分隔，
-  必须与 Debussy 发布应用和受信任系统中的允许来源一致。
 
-Debussy 开发应用目前允许 `http://localhost:5173` 和 `http://localhost:8003`。
-本机的 8003 当前由 `skdy-poc-web` 提供，客服工单联调使用 5173。
-这与 `http://127.0.0.1:5173`、`http://10.113.114.88:8003` 都是不同的 Origin。
+工单后端不再维护第二份页面来源白名单。浏览器 `Origin` 原样交给
+Debussy，由发布应用及受信任系统的允许来源决定是否接受，并据此生成
+iframe 的嵌入策略。当前用户仍须通过工单系统的管理员鉴权。
+
+从仓库根目录启动开发后端时，使用 `make backend`（已显式加载根目录
+`.env`）。直接调用 Compose 时需写成
+`docker compose --env-file .env -f backend/docker-compose.yml up -d --no-deps --force-recreate api`；
+省略 `--env-file` 会让本仓库的 Embed 地址和换票凭据以空值进入容器，
+智能助手接口返回“尚未完成配置”。
+
+当前发布应用的公开配置允许 `http://localhost:5173`、
+`http://127.0.0.1:5173` 和 `http://10.113.114.88:5173`。实际允许来源
+以 Debussy 发布应用的配置为准；协议、主机和端口共同决定 Origin。
 其他开发地址需由平台侧先配置支持。
 
 当前 Debussy Vite 监听 `127.0.0.1:5176`，并将 `/api/embed` 代理到

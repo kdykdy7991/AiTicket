@@ -38,7 +38,6 @@ class Settings(BaseSettings):
     AGENT_EMBED_API_URL: str = ""
     AGENT_EMBED_CLIENT_ID: str = ""
     AGENT_EMBED_CLIENT_SECRET: str = ""
-    AGENT_EMBED_HOST_ORIGINS: str = ""
 
     # Casdoor OIDC: issuer must be reachable by both browser and API container.
     CASDOOR_ISSUER: str = ""

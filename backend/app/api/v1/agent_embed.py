@@ -21,13 +21,10 @@ async def create_embed_code(
     user: User = Depends(require_role("admin")),
 ):
     """Exchange only a verified ticket user; never expose the client secret."""
-    configured_origins = {
-        value.strip().rstrip("/")
-        for value in settings.AGENT_EMBED_HOST_ORIGINS.split(",")
-        if value.strip()
-    }
-    if not origin or origin not in configured_origins:
-        raise HTTPException(403, detail="当前页面来源不允许打开智能助手")
+    # The agent platform owns the app's allowed origins and iframe CSP. Keep
+    # the browser Origin for its exchange check without a second local list.
+    if not origin:
+        raise HTTPException(400, detail="缺少页面来源信息")
     if not all((settings.AGENT_EMBED_URL, settings.AGENT_EMBED_API_URL,
                 settings.AGENT_EMBED_CLIENT_ID, settings.AGENT_EMBED_CLIENT_SECRET)):
         raise HTTPException(503, detail="智能助手尚未完成配置")
@@ -56,6 +53,10 @@ async def create_embed_code(
                 raise ValueError("Invalid exchange code")
             if not isinstance(expires_in, int) or expires_in <= 0:
                 raise ValueError("Invalid exchange expiry")
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 403:
+            raise HTTPException(403, detail="Agent 平台未允许当前页面来源") from exc
+        raise HTTPException(502, detail="智能助手身份交换失败，请稍后重试") from exc
     except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
         raise HTTPException(502, detail="智能助手身份交换失败，请稍后重试") from exc
     return JSONResponse(
