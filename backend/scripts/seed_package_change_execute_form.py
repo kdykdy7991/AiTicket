@@ -38,15 +38,16 @@ async def seed_package_change_execute_form(session_factory: async_sessionmaker |
                                     label="附件", field_type="attachment", sort_order=1,
                                     required=False, storage_type="system"),
             ])
-        binding = (await db.execute(select(FormBinding).where(
+        bindings = (await db.execute(select(FormBinding).where(
             FormBinding.node_type == "processing",
             FormBinding.department_code == DEPARTMENT,
             FormBinding.category_id == CATEGORY_ID,
-        ))).scalar_one_or_none()
-        if binding is None:
+        ))).scalars().all()
+        if not any(binding.form_definition_id == form.id for binding in bindings):
             db.add(FormBinding(node_type="processing", department_code=DEPARTMENT,
                                category_id=CATEGORY_ID, category_match_type="exact",
-                               form_definition_id=form.id, priority=0, enabled=True))
+                               form_definition_id=form.id, priority=0,
+                               enabled=not any(binding.enabled for binding in bindings)))
         if form.published_at is None:
             form.published_at = datetime.now(timezone.utc)
         await db.commit()

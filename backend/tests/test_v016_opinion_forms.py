@@ -25,6 +25,8 @@ async def test_v016_opinion_bindings_requiredness_and_idempotence(client):
     await seed_package_change_execute_form(factory)
     await seed_v016_opinion_forms(factory)
     await seed_v016_opinion_forms(factory)
+    # 全量播种会先重跑旧版，再重跑新版；旧版不能因多条历史 binding 而失败。
+    await seed_package_change_execute_form(factory)
 
     async with factory() as db:
         for category_id, department in [
