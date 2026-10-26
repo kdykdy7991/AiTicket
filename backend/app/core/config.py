@@ -27,8 +27,8 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 12 * 60
+    REFRESH_TOKEN_EXPIRE_MINUTES: int = 12 * 60
 
     # MCP 容器调用内部只读接口的专用密钥；不设置时接口不可用。
     MCP_INTERNAL_TOKEN: str = ""

@@ -203,6 +203,6 @@ async def login_with_casdoor(body: ExchangeRequest, db: AsyncSession = Depends(g
     return LoginResponse(
         access_token=create_access_token(user.id, user.role, version),
         refresh_token=create_refresh_token(user.id, version),
-        expires_in=1800,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserInfo.model_validate(user),
     )

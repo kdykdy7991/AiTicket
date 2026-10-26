@@ -37,7 +37,7 @@ export const mockAuthApi = {
       access_token: 'mock-access-token-' + user.id,
       refresh_token: 'mock-refresh-token-' + user.id,
       token_type: 'bearer',
-      expires_in: 1800,
+      expires_in: 12 * 60 * 60,
       user,
     })
   },

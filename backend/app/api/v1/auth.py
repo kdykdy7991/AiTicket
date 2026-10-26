@@ -63,7 +63,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=1800,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserInfo.model_validate(user),
     )
 
@@ -102,7 +102,7 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
-        expires_in=1800,
+        expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         user=UserInfo.model_validate(user),
     )
 
