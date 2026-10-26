@@ -815,13 +815,19 @@ async def seed_node_forms() -> None:
     from scripts.seed_sales_opportunity_form import seed_sales_opportunity_form
     from scripts.seed_reconciliation_form import seed_reconciliation_form
     from scripts.seed_v016_opinion_forms import seed_v016_opinion_forms
-    from scripts.seed_triage_form import seed_triage_form
-    from scripts.seed_constellation_triage_form import seed_constellation_triage_form
+    from scripts.seed_triage_form import seed_triage_form, seed_constellation_intake_fields, seed_constellation_intake_fields_v3
+    from scripts.seed_constellation_triage_form import seed_constellation_triage_form, seed_constellation_route_form
+    from scripts.seed_constellation_response_form import seed_constellation_response_form
+    from scripts.seed_constellation_confirmation_form import seed_constellation_confirmation_form
+    from scripts.seed_constellation_analysis_form import seed_constellation_analysis_form
 
     local_engine = create_async_engine(DATABASE_URL, future=True)
     factory = async_sessionmaker(local_engine, class_=AsyncSession, expire_on_commit=False)
     try:
-        for seed in (seed_triage_form, seed_constellation_triage_form,
+        for seed in (seed_triage_form, seed_constellation_intake_fields,
+                     seed_constellation_intake_fields_v3, seed_constellation_triage_form,
+                     seed_constellation_route_form, seed_constellation_response_form,
+                     seed_constellation_confirmation_form, seed_constellation_analysis_form,
                      seed_processing_form, seed_package_change_review_form,
                      seed_package_change_execute_form,
                      seed_phone_feedback_form, seed_closure_form, seed_closure_v4_form,

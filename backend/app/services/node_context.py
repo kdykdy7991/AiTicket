@@ -13,7 +13,7 @@ from app.models.ticket import Ticket
 from app.models.user import User
 from app.services.dispatch_chain import category_children, judging_department
 
-NodeType = Literal["intake", "assignment", "triage", "processing", "phone_feedback", "closure", "sales_opportunity"]
+NodeType = Literal["intake", "assignment", "triage", "processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "closure", "sales_opportunity"]
 
 
 class NodeContextConflict(ValueError):
@@ -53,7 +53,7 @@ async def derive_node_type(db: AsyncSession, ticket: Ticket) -> tuple[NodeType |
     department = await db.get(SkillGroup, ticket.skill_group_id) if ticket.skill_group_id else None
     department_code = department.name if department else None
     stage = step.get("stage") if step else None
-    if stage not in (None, "judgement", "phone_feedback"):
+    if stage not in (None, "judgement", "response_plan", "response_confirmation", "analysis", "phone_feedback"):
         raise NodeContextConflict(f"未知分派阶段：{stage}")
     if step and department_code != step["department_code"]:
         raise NodeContextConflict("当前责任部门与分派链步骤不一致")
@@ -76,7 +76,9 @@ async def derive_node_type(db: AsyncSession, ticket: Ticket) -> tuple[NodeType |
         judgement = await judging_department(db, ticket.category_id)
         children = await category_children(db, ticket.category_id) if ticket.category_id else []
         triage = bool(children and judgement and department_code == judgement)
-        if stage == "phone_feedback":
+        if stage in ("response_plan", "response_confirmation", "analysis"):
+            node_type = stage
+        elif stage == "phone_feedback":
             if triage:
                 raise NodeContextConflict("当前步骤同时表示分诊与致电反馈")
             node_type = "phone_feedback"
@@ -89,6 +91,8 @@ async def derive_node_type(db: AsyncSession, ticket: Ticket) -> tuple[NodeType |
 
 def node_action_error(node_type: NodeType | None, action: str) -> str | None:
     """Filter candidate domain actions by duty; identity checks remain elsewhere."""
+    if node_type in {"response_plan", "response_confirmation", "analysis"} and action in {"refine", "dispatch", "reply", "resolve", "hold", "transfer", "return"}:
+        return "当前节点须按星座大系统流程提交节点表单"
     if node_type == "assignment" and action in {"refine", "reply", "resolve", "hold", "transfer"}:
         return "请先由售后负责人指派售后人员，再进行问题判断"
     if node_type == "triage" and action in {"dispatch", "reply", "resolve", "hold", "transfer"}:

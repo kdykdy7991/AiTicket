@@ -30,6 +30,7 @@ class ResolvedForm:
 # - is_callbacked / callback_details / satisfaction / unsatisfied_reason /
 #   closure_result / customer_recognized / archive_notes: closure
 WRITABLE_TICKET_FIELDS = frozenset({
+    "title",
     "device_sn",
     "root_cause",
     "is_callbacked",
@@ -42,7 +43,7 @@ WRITABLE_TICKET_FIELDS = frozenset({
     "archive_notes",
 })
 
-FORM_NODE_TYPES = ("triage", "processing", "phone_feedback", "closure", "sales_opportunity")
+FORM_NODE_TYPES = ("triage", "processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "closure", "sales_opportunity")
 
 
 async def _ancestors(db: AsyncSession, category_id: int | None) -> list[int]:
@@ -124,6 +125,14 @@ async def _condition(
         if not isinstance(spec, dict) or set(spec) != {"field", "value"} or not isinstance(spec["field"], str):
             raise HTTPException(409, detail="表单条件配置错误")
         return (values or {}).get(spec["field"]) == spec["value"]
+    if set(condition) == {"field_in"}:
+        spec = condition["field_in"]
+        if (not isinstance(spec, dict) or set(spec) != {"field", "values"}
+                or not isinstance(spec["field"], str)
+                or not isinstance(spec["values"], list)
+                or not spec["values"] or not all(isinstance(v, str) for v in spec["values"])):
+            raise HTTPException(409, detail="表单条件配置错误")
+        return (values or {}).get(spec["field"]) in spec["values"]
     raise HTTPException(409, detail="不支持的表单条件配置")
 
 
@@ -133,13 +142,16 @@ async def present_form(
     values: dict | None = None,
 ) -> dict:
     historical_values: dict = {}
-    if form.definition.node_type == "sales_opportunity":
+    if form.definition.node_type in ("sales_opportunity", "response_plan"):
+        node_type = form.definition.node_type
+        query = select(TicketNodeSubmission.data).where(
+            TicketNodeSubmission.ticket_id == ticket.id,
+            TicketNodeSubmission.node_type == node_type,
+        )
+        if node_type == "sales_opportunity":
+            query = query.where(TicketNodeSubmission.action_type == "historical_import")
         imported = (await db.execute(
-            select(TicketNodeSubmission.data).where(
-                TicketNodeSubmission.ticket_id == ticket.id,
-                TicketNodeSubmission.node_type == "sales_opportunity",
-                TicketNodeSubmission.action_type == "historical_import",
-            ).order_by(TicketNodeSubmission.id.desc()).limit(1)
+            query.order_by(TicketNodeSubmission.id.desc()).limit(1)
         )).scalar_one_or_none()
         historical_values = imported or {}
     fields = []

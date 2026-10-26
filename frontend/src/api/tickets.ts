@@ -300,6 +300,7 @@ export const ticketApi = {
     form_definition_id: number
     form_version: number
     values: Record<string, string>
+    assigned_owner_id?: number | null
   }): Promise<any> {
     return api.post(`/tickets/${id}/triage-submit`, payload)
   },

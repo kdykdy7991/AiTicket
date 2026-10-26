@@ -156,7 +156,7 @@ class AllowedAction(BaseModel):
 
 class NodeContextOut(BaseModel):
     ticket_id: int
-    node_type: Literal["intake", "assignment", "triage", "processing", "phone_feedback", "closure", "sales_opportunity"] | None
+    node_type: Literal["intake", "assignment", "triage", "processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "closure", "sales_opportunity"] | None
     category_id: int | None
     department_id: int | None
     department_code: str | None

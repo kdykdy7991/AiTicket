@@ -900,14 +900,14 @@ async def _compose_node_form(
         # 回访要求是只读事实：随表单一起下发，供界面展示且驱动字段可见性。
         return (await present_form(db, form, ticket, values=closure_condition_context(ticket))
                 if form else None)
-    if node_type not in ("triage", "processing", "phone_feedback", "sales_opportunity"):
+    if node_type not in ("triage", "processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "sales_opportunity"):
         return None
     if not (refine["can_refine"] or article_actions["can_reply"]):
         return None
     form = await resolve_form(db, context)
     if not form:
         return None
-    if node_type in ("processing", "phone_feedback", "sales_opportunity") and article_actions["can_reply"]:
+    if node_type in ("processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "sales_opportunity") and article_actions["can_reply"]:
         article_actions["can_reply"] = False
         node_context["allowed_actions"] = [
             a for a in node_context["allowed_actions"] if a["action"] != "reply"
@@ -1059,6 +1059,7 @@ class TriageSubmissionIn(BaseModel):
     form_definition_id: int
     form_version: int
     values: dict[str, Any] = Field(default_factory=dict)
+    assigned_owner_id: int | None = None
 
 
 @router.get("/tickets/{ticket_id}/current-form")
@@ -1074,11 +1075,11 @@ async def get_current_form(
     context = await resolve_node_context(db, ticket, user)
     can_read = (
         (context.node_type == "triage" and any(a["action"] == "refine" for a in context.allowed_actions))
-        or (context.node_type in ("processing", "phone_feedback", "sales_opportunity") and compute_article_actions(ticket, user)["can_reply"])
+        or (context.node_type in ("processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "sales_opportunity") and compute_article_actions(ticket, user)["can_reply"])
     )
     if not can_read:
         raise HTTPException(403, detail="当前无节点表单权限")
-    if context.node_type in ("processing", "phone_feedback", "sales_opportunity") and target_category_id is not None:
+    if context.node_type in ("processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "sales_opportunity") and target_category_id is not None:
         raise HTTPException(400, detail="当前节点表单无需目标分类")
     if target_category_id is not None:
         options = (await refine_capability(db, ticket, user))["refine_options"]
@@ -1165,7 +1166,7 @@ async def submit_node_form(
             or body.get("expected_state") != ticket.state):
         raise HTTPException(409, detail="工单上下文已变化，请刷新后重新提交")
     context = await resolve_node_context(db, ticket, user)
-    if context.node_type not in ("processing", "phone_feedback", "sales_opportunity"):
+    if context.node_type not in ("processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "sales_opportunity"):
         raise HTTPException(409, detail="当前节点已变化或不是可提交节点")
     form = await resolve_form(db, context)
     if form is None:
@@ -1180,6 +1181,24 @@ async def submit_node_form(
     data, ticket_updates, article_values, snapshot = await validate_submission(
         db, form, ticket, None, body["values"],
     )
+    confirmation_action: str | None = None
+    if context.node_type == "response_confirmation":
+        confirmation_action = body.get("action")
+        if confirmation_action not in ("confirm", "return"):
+            raise HTTPException(422, detail="请选择确认效果或退回修改措施")
+        if confirmation_action == "confirm":
+            if data.get("return_reason"):
+                raise HTTPException(422, detail="确认效果时不能填写退回原因")
+            article_values["body"] = "售后确认响应效果" + (
+                f"；确认意见：{data['plan_confirmation_comment']}"
+                if data.get("plan_confirmation_comment") else ""
+            )
+        else:
+            if not data.get("return_reason", "").strip():
+                raise HTTPException(422, detail="退回原因必填")
+            if data.get("plan_confirmation_comment"):
+                raise HTTPException(422, detail="退回时请将说明填写在退回原因")
+            article_values["body"] = f"售后退回响应措施；退回原因：{data['return_reason']}"
     finance_owner_id: int | None = None
     if ticket.category_id == 2204 and context.department_code == "销售":
         expected_person = {"时空道宇": "姜敏", "青岛上合": "朱景升"}.get(data.get("finance_company"))
@@ -1200,6 +1219,44 @@ async def submit_node_form(
         if finance_person is None:
             raise HTTPException(422, detail="所选财务人员不是当前有效的财务部门成员")
         finance_owner_id = finance_person.id
+    if context.node_type == "response_plan":
+        planned = data.get("planned_completion_at")
+        if planned:
+            try:
+                parsed = datetime.fromisoformat(planned)
+                if parsed.tzinfo is None:
+                    raise ValueError
+            except ValueError:
+                raise HTTPException(422, detail="计划完成时间须填写带时区的 ISO 日期时间") from None
+        article_values["body"] = "\n".join(
+            f"{label}：{data[key]}" for key, label in (
+                ("initial_investigation", "初步排查结论"),
+                ("temporary_measure", "临时响应措施"),
+                ("long_term_measure", "长期措施"),
+                ("planned_completion_at", "计划完成时间"),
+            ) if data.get(key)
+        )
+    if context.node_type == "analysis":
+        completed = data.get("rectification_completion_at")
+        try:
+            parsed = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError
+        except (AttributeError, ValueError):
+            raise HTTPException(422, detail="整改完成时间须填写带时区的 ISO 日期时间") from None
+        labels = {
+            "reason_category": "原因分类", "rectification_completion_at": "整改完成时间",
+            "process_analysis": "问题过程分析", "long_term_rectification_measure": "长期整改措施",
+            "verification_situation": "验证情况", "mechanism_analysis": "机理分析",
+            "analysis_report": "举一反三", "conclusion": "结论",
+            "responsible_person": "责任人", "rule_improvement": "完善规章制度",
+        }
+        categories = {"technical": "技术原因", "management": "管理原因",
+                      "technical_management": "技术与管理原因"}
+        article_values["body"] = "\n".join(
+            f"{label}：{categories.get(data[key], data[key]) if key == 'reason_category' else data[key]}"
+            for key, label in labels.items() if data.get(key)
+        )
     if not article_values.get("body", "").strip():
         raise HTTPException(422, detail="节点反馈正文必填")
     # The reply endpoint uses this log as the completed node's timeline key.
@@ -1221,9 +1278,53 @@ async def submit_node_form(
             await db.flush()
         for key, value in ticket_updates.items():
             setattr(ticket, key, value)
-        log = await apply_transition(db, ticket, to_state="resolved", operator=user,
-                                     allow_intermediate_transfer=True,
-                                     allow_sales_completion=context.node_type == "sales_opportunity")
+        if context.node_type in ("response_plan", "response_confirmation", "analysis"):
+            steps = ticket.dispatch_chain_steps or []
+            current_index = {"response_plan": 0, "response_confirmation": 1, "analysis": 2}[context.node_type]
+            if (ticket.dispatch_step_index != current_index or len(steps) != 4
+                    or steps[0].get("stage") != "response_plan"
+                    or steps[1].get("stage") != "response_confirmation"
+                    or steps[2].get("stage") != "analysis"
+                    or steps[3].get("stage") != "phone_feedback"):
+                raise HTTPException(409, detail="星座大系统响应流程已变化")
+            next_index = (1 if context.node_type == "response_plan" else
+                          3 if context.node_type == "analysis" else
+                          2 if confirmation_action == "confirm" else 0)
+            next_step = steps[next_index]
+            group = (await db.execute(select(SkillGroup).where(
+                SkillGroup.name == next_step["department_code"],
+            ))).scalar_one_or_none()
+            next_owner_id = (steps[1].get("assigned_owner_id") if context.node_type == "analysis"
+                             else next_step.get("assigned_owner_id"))
+            if group is None or not next_owner_id:
+                raise HTTPException(409, detail="下一节点责任人未配置")
+            ticket.dispatch_step_index = next_index
+            ticket.skill_group_id = group.id
+            ticket.handler_skill_group_id = group.id
+            ticket.owner_id = next_owner_id
+            ticket.dispatcher_id = next_owner_id
+            action_type = ("submit_plan" if context.node_type == "response_plan" else
+                           "submit_analysis" if context.node_type == "analysis" else
+                           "confirm_plan" if confirmation_action == "confirm" else "return_plan")
+            reason = ("专业处理人提交响应措施，交售后确认响应效果"
+                      if context.node_type == "response_plan" else
+                      "专业处理人提交分析验证，交售后致电反馈"
+                      if context.node_type == "analysis" else
+                      article_values["body"])
+            log = TicketStateLog(
+                ticket_id=ticket.id, from_state=ticket.state, to_state=ticket.state,
+                action_type=action_type, operator_id=user.id,
+                reason=reason,
+                creator_id_snapshot=ticket.creator_id,
+                dispatcher_id_snapshot=ticket.dispatcher_id,
+                owner_id_snapshot=ticket.owner_id,
+            )
+            db.add(log)
+            await db.flush()
+        else:
+            log = await apply_transition(db, ticket, to_state="resolved", operator=user,
+                                         allow_intermediate_transfer=True,
+                                         allow_sales_completion=context.node_type == "sales_opportunity")
         if finance_owner_id is not None:
             await apply_transition(db, ticket, to_state="open", operator=user,
                                    owner_id=finance_owner_id, dispatcher_id=finance_owner_id,
@@ -1272,7 +1373,8 @@ async def submit_triage(
     form = await resolve_form(db, context)
     if form is None:
         raise HTTPException(409, detail="当前分诊节点未配置表单")
-    if form.definition.code == "constellation_triage_v1":
+    is_constellation_route = form.definition.code == "constellation_triage_v2"
+    if form.definition.code in ("constellation_triage_v1", "constellation_triage_v2"):
         # The selected category is the only editable routing choice. Reject a
         # broken target chain before saving the form or changing the category.
         from app.services.dispatch_chain import get_dept, resolve_chain
@@ -1280,10 +1382,28 @@ async def submit_triage(
         target_chain = await resolve_chain(db, body.target_category_id)
         target_steps = target_chain["steps"] if target_chain else []
         target_department = target_steps[0].get("department_code") if target_steps else None
+        target_group = await get_dept(db, target_department) if target_department else None
         if not target_chain or target_chain["matched_category_id"] != body.target_category_id \
                 or not target_department or target_department == context.department_code \
-                or await get_dept(db, target_department) is None:
+                or target_group is None:
             raise HTTPException(422, detail="目标分类未配置有效的流转部门")
+        if is_constellation_route:
+            if ticket.state != "open" or body.assigned_owner_id is None:
+                raise HTTPException(422, detail="确认并流转必须指定专业处理人")
+            now = datetime.now(timezone.utc)
+            assigned = (await db.execute(select(User).join(
+                UserSkillGroup, UserSkillGroup.user_id == User.id,
+            ).where(
+                User.id == body.assigned_owner_id,
+                User.is_active.is_(True),
+                UserSkillGroup.skill_group_id == target_group.id,
+                or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
+                or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
+            ))).scalar_one_or_none()
+            if assigned is None:
+                raise HTTPException(422, detail="专业处理人须为目标部门的在岗成员")
+    elif body.assigned_owner_id is not None:
+        raise HTTPException(422, detail="当前分诊不支持指定专业处理人")
     if (body.form_definition_id, body.form_version) != (form.definition.id, form.definition.version):
         raise HTTPException(409, detail="表单版本已变化，请刷新后重新提交")
     data, ticket_updates, _article_values, snapshot = await validate_submission(
@@ -1298,6 +1418,29 @@ async def submit_triage(
     for key, value in ticket_updates.items():
         setattr(ticket, key, value)
     log = await apply_refine(db, ticket, new_category_id=body.target_category_id, operator=user)
+    if is_constellation_route:
+        # Freeze the four POC duties on this ticket. The after-sales judger who
+        # selected 星座大系统 owns effect confirmation; the selected professional
+        # handles both response measures and later analysis.
+        after_sales_owner_id = await db.scalar(select(TicketStateLog.operator_id).where(
+            TicketStateLog.ticket_id == ticket.id,
+            TicketStateLog.action_type == "refine",
+            TicketStateLog.reason.like("分诊：业务保障 → 星座大系统%"),
+        ).order_by(TicketStateLog.id.desc()).limit(1))
+        steps = ticket.dispatch_chain_steps or []
+        if after_sales_owner_id is None or len(steps) != 2 or steps[1].get("stage") != "phone_feedback":
+            raise HTTPException(409, detail="星座大系统流转链或售后判断人缺失")
+        professional, after_sales = steps
+        ticket.dispatch_chain_steps = [
+            {**professional, "stage": "response_plan", "assigned_owner_id": body.assigned_owner_id},
+            {**after_sales, "stage": "response_confirmation", "assigned_owner_id": after_sales_owner_id},
+            {**professional, "stage": "analysis", "assigned_owner_id": body.assigned_owner_id},
+            {**after_sales, "stage": "phone_feedback"},
+        ]
+        ticket.dispatch_step_index = 0
+        ticket.owner_id = body.assigned_owner_id
+        log.owner_id_snapshot = body.assigned_owner_id
+        log.reason = f"{log.reason}；确认信息：{body.values['confirmation_info']}；专业处理人：{assigned.name}"
     submission.state_log_id = log.id
     await db.commit()
     return await _detail_after_mutation(db, ticket_id, user, cat_idx.lineage, cat_idx.responsibility)

@@ -295,6 +295,12 @@
               <label>目标流转部门</label>
               <p class="archive-readonly">{{ refineOptions.find(option => option.id === triageTargetCategoryId)?.next_department || '—' }}</p>
             </div>
+            <div v-if="isConstellationRoute && triageTargetCategoryId" class="triage-field">
+              <label>专业处理人<span> *</span></label>
+              <el-select popper-class="ticket-dark-select-popper" v-model="triageAssignedOwnerId" placeholder="选择目标部门处理人" filterable>
+                <el-option v-for="person in triageHandlers" :key="person.id" :label="person.name" :value="person.id" />
+              </el-select>
+            </div>
             <div v-for="field in currentForm.fields.filter((item: any) => item.visible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="field.required"> *</span></label>
               <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="triageValues[field.field_key]" clearable>
@@ -302,7 +308,7 @@
               </el-select>
               <el-input v-else v-model="triageValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? 3 : undefined" />
             </div>
-            <el-button type="primary" :loading="refining" :disabled="!triageTargetCategoryId" @click="submitTriageForm">提交分诊并重新派单</el-button>
+            <el-button type="primary" :loading="refining" :disabled="!triageTargetCategoryId || (isConstellationRoute && !triageAssignedOwnerId)" @click="submitTriageForm">{{ isConstellationRoute ? '确认并流转' : '提交分诊并重新派单' }}</el-button>
           </div>
           <div v-else-if="canRefine" class="refine-card">
             <div class="refine-card-title">下一级问题判断</div>
@@ -324,24 +330,44 @@
           </div>
 
           <div v-if="processingForm" class="refine-card">
-            <div class="refine-card-title">{{ isSalesOpportunity ? '完成销售线索处理' : '完成本节点处理' }}</div>
-            <p class="refine-card-hint">{{ isSalesOpportunity ? '提交本表单会完成线索处理并归档。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
+            <div class="refine-card-title">{{ isAnalysis ? '提交分析验证' : isResponsePlan ? '提交响应措施' : isSalesOpportunity ? '完成销售线索处理' : '完成本节点处理' }}</div>
+            <p class="refine-card-hint">{{ isAnalysis ? '按原因分类填写分析与验证内容，提交后交售后致电反馈。' : isResponsePlan ? '填写初步排查结论和临时响应措施，提交后交售后确认响应效果。' : isSalesOpportunity ? '提交本表单会完成线索处理并归档。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
               <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable
                          :disabled="field.field_key === 'finance_person' && !processingValues.finance_company"
                          @change="field.field_key === 'finance_company' && (processingValues.finance_person = '')">
-                <el-option v-for="option in processingOptions(field)" :key="option" :label="option" :value="option" />
+                <el-option v-for="option in processingOptions(field)" :key="option" :label="field.option_labels?.[option] || option" :value="option" />
               </el-select>
               <el-radio-group v-else-if="field.field_type === 'boolean'" v-model="processingValues[field.field_key]">
                 <el-radio :label="true">是</el-radio><el-radio :label="false">否</el-radio>
               </el-radio-group>
               <input v-else-if="field.field_type === 'attachment'" type="file" multiple accept="image/*,application/pdf" @change="onProcessingFiles" />
+              <el-date-picker v-else-if="field.field_key === 'planned_completion_at' || field.field_key === 'rectification_completion_at'"
+                              v-model="processingValues[field.field_key]" type="datetime"
+                              value-format="YYYY-MM-DDTHH:mm:ssZ" style="width:100%" />
               <el-input v-else v-model="processingValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? 3 : undefined" />
             </div>
             <div class="archive-actions">
-              <el-button type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
+              <el-button type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isAnalysis ? '提交分析验证' : isResponsePlan ? '提交响应措施' : isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
               <el-button v-if="canHold" :loading="holding" @click="holdDialogVisible = true">暂缓处理</el-button>
+            </div>
+          </div>
+
+          <div v-if="responseConfirmationForm" class="refine-card">
+            <div class="refine-card-title">确认响应效果</div>
+            <p class="refine-card-hint">确认后交专业处理人提交分析验证；退回后由专业处理人修改响应措施。</p>
+            <div class="triage-field">
+              <label>确认意见（确认时选填）</label>
+              <el-input v-model="confirmationComment" type="textarea" :rows="3" maxlength="4000" show-word-limit />
+            </div>
+            <div class="triage-field">
+              <label>退回原因（退回时必填）</label>
+              <el-input v-model="confirmationReturnReason" type="textarea" :rows="3" maxlength="4000" show-word-limit />
+            </div>
+            <div class="archive-actions">
+              <el-button type="primary" :loading="confirmationSubmitting" @click="submitResponseConfirmation('confirm')">确认响应效果</el-button>
+              <el-button :loading="confirmationSubmitting" @click="submitResponseConfirmation('return')">退回修改措施</el-button>
             </div>
           </div>
 
@@ -680,14 +706,56 @@ const refining = ref(false)
 const currentForm = ref<any>(null)
 const triageTargetCategoryId = ref<number | null>(null)
 const triageValues = ref<Record<string, string>>({})
+const triageAssignedOwnerId = ref<number | null>(null)
+const triageHandlers = ref<{ id: number; name: string }[]>([])
+const isConstellationRoute = computed(() => (ticket.value as any)?.category_id === 2310 && currentForm.value?.code === 'constellation_triage_v2')
 const processingValues = ref<Record<string, any>>({})
 const processingFiles = ref<File[]>([])
 const processingSubmitting = ref(false)
 const isSalesOpportunity = computed(() => (ticket.value as any)?.node_context?.node_type === 'sales_opportunity')
 // 暂缓期间不提供「完成本节点处理」：主流程是先恢复处理再完成，避免绕过 resume。
 const processingForm = computed(() =>
-  ['processing', 'sales_opportunity'].includes((ticket.value as any)?.node_context?.node_type)
+  ['processing', 'response_plan', 'analysis', 'sales_opportunity'].includes((ticket.value as any)?.node_context?.node_type)
     && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+const isResponsePlan = computed(() => (ticket.value as any)?.node_context?.node_type === 'response_plan')
+const isAnalysis = computed(() => (ticket.value as any)?.node_context?.node_type === 'analysis')
+const responseConfirmationForm = computed(() =>
+  (ticket.value as any)?.node_context?.node_type === 'response_confirmation'
+    && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+const confirmationComment = ref('')
+const confirmationReturnReason = ref('')
+const confirmationSubmitting = ref(false)
+
+async function submitResponseConfirmation(action: 'confirm' | 'return') {
+  if (!ticket.value || !responseConfirmationForm.value) return
+  if (action === 'return' && !confirmationReturnReason.value.trim()) {
+    ElMessage.warning('请填写退回原因')
+    return
+  }
+  const t = ticket.value as any
+  confirmationSubmitting.value = true
+  try {
+    await ticketApi.submitNode(t.id, {
+      form_definition_id: responseConfirmationForm.value.form_definition_id,
+      form_version: responseConfirmationForm.value.version,
+      expected_category_id: t.category_id,
+      expected_department_id: t.skill_group_id,
+      expected_dispatch_step_index: t.dispatch_step_index,
+      expected_state: t.state_key,
+      action,
+      values: action === 'confirm'
+        ? { plan_confirmation_comment: confirmationComment.value.trim() }
+        : { return_reason: confirmationReturnReason.value.trim() },
+    }, [])
+    ElMessage.success(action === 'confirm' ? '已确认响应效果，交专业处理人提交分析验证' : '已退回专业处理人修改响应措施')
+    confirmationComment.value = ''
+    confirmationReturnReason.value = ''
+    ticketStore.refreshCurrentInList()
+    await loadTicket()
+  } catch {
+    // API interceptor displays validation errors.
+  } finally { confirmationSubmitting.value = false }
+}
 function processingOptions(field: any): string[] {
   if (field.field_key === 'finance_person') {
     return ({ 时空道宇: ['姜敏'], 青岛上合: ['朱景升'] } as Record<string, string[]>)[processingValues.value.finance_company] || []
@@ -731,13 +799,17 @@ async function submitPhoneFeedbackForm() {
 }
 
 function processingFieldVisible(field: any): boolean {
-  const condition = field.visibility_condition?.field_equals
-  return !condition || processingValues.value[condition.field] === condition.value
+  const equals = field.visibility_condition?.field_equals
+  const includes = field.visibility_condition?.field_in
+  return (!equals || processingValues.value[equals.field] === equals.value)
+    && (!includes || includes.values.includes(processingValues.value[includes.field]))
 }
 
 function processingFieldRequired(field: any): boolean {
-  const condition = field.required_condition?.field_equals
-  return field.required || !!(condition && processingValues.value[condition.field] === condition.value)
+  const equals = field.required_condition?.field_equals
+  const includes = field.required_condition?.field_in
+  return field.required || !!(equals && processingValues.value[equals.field] === equals.value)
+    || !!(includes && includes.values.includes(processingValues.value[includes.field]))
 }
 
 function onProcessingFiles(event: Event) {
@@ -769,7 +841,7 @@ async function submitProcessingForm() {
       expected_state: t.state_key,
       values,
     }, processingFiles.value)
-    ElMessage.success(isSalesOpportunity.value ? '销售线索已处理并归档' : '本节点处理已完成')
+    ElMessage.success(isAnalysis.value ? '分析验证已提交，等待售后致电反馈' : isResponsePlan.value ? '响应措施已提交，等待售后确认效果' : isSalesOpportunity.value ? '销售线索已处理并归档' : '本节点处理已完成')
     processingValues.value = {}
     phoneFeedbackValues.value = {}
     processingFiles.value = []
@@ -948,8 +1020,15 @@ watch(closureForm, () => { prefillClosureForm() }, { immediate: true })
 
 async function loadTriageForm(categoryId: number) {
   if (!ticket.value) return
+  triageAssignedOwnerId.value = null
+  triageHandlers.value = []
   try {
     currentForm.value = normalizeOpportunityForm(await ticketApi.currentForm((ticket.value as any).id, categoryId))
+    if (isConstellationRoute.value) {
+      const department = refineOptions.value.find(option => option.id === categoryId)?.next_department
+      const group = (await metaApi.getSkillGroups()).find(item => item.name === department)
+      if (group) triageHandlers.value = await metaApi.getHandlers(group.id)
+    }
     for (const field of currentForm.value.fields) {
       if (field.value != null && triageValues.value[field.field_key] == null) {
         triageValues.value[field.field_key] = field.value
@@ -965,6 +1044,10 @@ async function loadTriageForm(categoryId: number) {
 
 async function submitTriageForm() {
   if (!ticket.value || !triageTargetCategoryId.value || !currentForm.value) return
+  if (isConstellationRoute.value && !triageAssignedOwnerId.value) {
+    ElMessage.warning('请选择专业处理人')
+    return
+  }
   for (const field of currentForm.value.fields) {
     if (field.visible && field.required && !triageValues.value[field.field_key]?.trim()) {
       ElMessage.warning(`请填写${field.label}`)
@@ -978,10 +1061,12 @@ async function submitTriageForm() {
       form_definition_id: currentForm.value.form_definition_id,
       form_version: currentForm.value.version,
       values: triageValues.value,
+      assigned_owner_id: isConstellationRoute.value ? triageAssignedOwnerId.value : undefined,
     })
     ElMessage.success('分诊已提交，责任部门已重新落位')
     triageValues.value = {}
     triageTargetCategoryId.value = null
+    triageAssignedOwnerId.value = null
     ticketStore.refreshCurrentInList()
     await loadTicket()
   } catch {
@@ -1031,6 +1116,8 @@ async function loadTicket() {
   if (id) {
     await ticketStore.fetchTicketDetail(id)
     currentForm.value = normalizeOpportunityForm((ticket.value as any)?.current_form ?? null)
+    confirmationComment.value = ''
+    confirmationReturnReason.value = ''
     processingValues.value = {}
     for (const field of currentForm.value?.fields || []) {
       if (field.value != null) processingValues.value[field.field_key] = field.value

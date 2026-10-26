@@ -16,7 +16,7 @@ from app.models.ticket import Ticket, TicketStateLog
 from app.models.user import User
 from app.services.node_context import resolve_node_context
 from app.services.node_form import resolve_form
-from scripts.seed_triage_form import FIELDS
+from scripts.seed_triage_form import FIELDS, seed_constellation_intake_fields, seed_constellation_intake_fields_v3
 from test_refine import assign_after_sales, async_sessionmaker_for, renv
 from test_workflow_regression import as_user
 
@@ -53,6 +53,44 @@ async def install_form(env):
 def payload(form_id, target=2310, **values):
     return {"target_category_id": target, "form_definition_id": form_id,
             "form_version": 1, "values": values}
+
+
+@pytest.mark.asyncio
+async def test_constellation_requires_poc_intake_fields_at_after_sales_triage(renv):
+    await install_form(renv)
+    factory = async_sessionmaker_for(renv["engine"])
+    await seed_constellation_intake_fields(factory)
+    await seed_constellation_intake_fields(factory)
+    await seed_constellation_intake_fields_v3(factory)
+    await seed_constellation_intake_fields_v3(factory)
+    c = renv["client"]
+    ticket = await renv["create_ticket"]()
+    await assign_after_sales(renv, ticket["id"])
+    tid = ticket["id"]
+    form = (await c.get(f"/api/v1/tickets/{tid}/current-form", params={"target_category_id": 2310})).json()
+    assert form["version"] == 3
+    required = {field["field_key"] for field in form["fields"] if field["visible"] and field["required"]}
+    assert required == {
+        "proposer", "proposer_department", "investigation_notes", "test_scenario",
+        "closure_requirement", "test_device", "terminal_firmware_version",
+        "terminal_configuration", "host_software", "satellite_selection_rule",
+        "data_frequency_packet_length", "deployment_environment",
+    }
+    other = (await c.get(f"/api/v1/tickets/{tid}/current-form", params={"target_category_id": 2302})).json()
+    assert {field["field_key"] for field in other["fields"] if field["visible"] and field["required"]} == {"initial_opinion"}
+    body = {"target_category_id": 2310, "form_definition_id": form["form_definition_id"],
+            "form_version": 3, "values": {}}
+    invalid = await c.post(f"/api/v1/tickets/{tid}/triage-submit", json=body)
+    assert invalid.status_code == 422
+    async with factory() as s:
+        assert (await s.get(Ticket, tid)).category_id == 2301
+        assert not (await s.execute(select(TicketNodeSubmission).where(TicketNodeSubmission.ticket_id == tid))).scalars().all()
+    body["values"] = {key: "客户测" if key == "test_scenario" else f"已填写{key}" for key in required}
+    submitted = await c.post(f"/api/v1/tickets/{tid}/triage-submit", json=body)
+    assert submitted.status_code == 200, submitted.text
+    history = (await c.get(f"/api/v1/tickets/{tid}/node-submissions")).json()
+    assert history[0]["form_version"] == 3
+    assert required <= set(history[0]["data"])
 
 
 @pytest.mark.asyncio
