@@ -1,5 +1,5 @@
 <template>
-  <el-container class="default-layout" :class="{ 'ticket-dark-theme': route.name === 'TicketList' || route.name === 'TicketDetail' || route.name === 'TicketCreate' || route.name === 'TicketCreateDesign' || route.name === 'TicketDrafts' || route.name === 'VisitRecords' || route.name === 'Report' || route.name === 'OpportunityAnalysis' || route.name === 'AdminUsers' || route.name === 'AdminGroups' || route.name === 'AdminSLA' || route.name === 'KnowledgeBase' || route.name === 'AgentAssistant', 'ticket-detail-theme': route.name === 'TicketDetail', 'ticket-create-theme': route.name === 'TicketCreate' || route.name === 'TicketCreateDesign' }">
+  <el-container class="default-layout" :class="{ 'ticket-dark-theme': route.name === 'TicketList' || route.name === 'TicketDetail' || route.name === 'TicketCreate' || route.name === 'TicketCreateDesign' || route.name === 'TicketDrafts' || route.name === 'VisitRecords' || route.name === 'Report' || route.name === 'OpportunityAnalysis' || route.name === 'AdminUsers' || route.name === 'AdminGroups' || route.name === 'AdminSLA' || route.name === 'KnowledgeBase' || route.name === 'AgentAssistant', 'ticket-detail-theme': route.name === 'TicketDetail', 'ticket-create-theme': route.name === 'TicketCreate' || route.name === 'TicketCreateDesign', 'agent-assistant-theme': route.name === 'AgentAssistant' }">
     <TheSidebar />
     <el-container direction="vertical">
       <TheTopbar />
@@ -63,6 +63,7 @@ const route = useRoute()
 .ticket-create-theme .content-wrapper--ticket-create { max-width: 1600px; padding: 18px clamp(16px, 1.7vw, 30px) 30px; }
 .ticket-dark-theme .content-wrapper--knowledge { padding: 0; }
 .ticket-dark-theme .content-wrapper--assistant { padding: 0; }
+.agent-assistant-theme .main-content { overflow: hidden; border-left: 0; }
 
 @keyframes page-in {
   from { opacity: 0; transform: translateY(6px); }

@@ -135,14 +135,13 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.assistant-page { position: relative; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; overflow: hidden; padding: 16px clamp(16px, 1.7vw, 30px) 24px; background: #020d20; }
-.embed-container { width: 100%; height: 100%; overflow: hidden; border: 1px solid #176496; border-radius: 8px; background: #061b34; box-shadow: 0 0 16px #0064ae30; }
+.assistant-page { position: relative; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.embed-container { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
 .embed-container :deep(iframe) { display: block; width: 100%; height: 100% !important; min-height: 0 !important; }
-.panel-state { position: absolute; inset: 16px clamp(16px, 1.7vw, 30px) 24px; display: flex; align-items: center; justify-content: center; gap: 12px; text-align: center; color: #91b5d2; border: 1px solid #176496; border-radius: 8px; background: linear-gradient(135deg, #082646, #061d39 78%); box-shadow: 0 0 12px #0064ae30; }
+.panel-state { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 12px; text-align: center; color: #91b5d2; background: linear-gradient(135deg, #082646, #061d39 78%); }
 .state-spinner { width: 19px; height: 19px; border: 2px solid #245b88; border-top-color: #51b5f6; border-radius: 50%; animation: spin .8s linear infinite; }
 .error-state { flex-direction: column; color: #eaf6ff; }
 .error-state p { margin: 0; }
 .error-state :deep(.el-button--primary) { border-color: #168cea; background: linear-gradient(180deg, #0b74d5, #074eae); }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 680px) { .assistant-page { padding: 12px; } .panel-state { inset: 12px; } }
 </style>
