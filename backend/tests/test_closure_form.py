@@ -173,11 +173,11 @@ async def test_closure_validation_permissions_and_replay(tenv):
     tid = ticket["id"]
     # 回访未完成时，客户侧结论字段不出现
     assert (await submit(tenv, ticket, form_id, drop=("callback_completed",))).status_code == 422
-    # 未完成回访：客户侧结论字段被隐藏，夹带即拒绝；只记录「未完成」本身
+    # 未完成回访：即使填写关单结果也拒绝提交，不产生成功的闭环记录
     not_done = ("callback_completed", "callback_details", "satisfaction", "customer_recognized")
     assert (await submit(tenv, ticket, form_id, callback_completed=False,
                          drop=("callback_details", "satisfaction",
-                               "customer_recognized"))).status_code == 200
+                               "customer_recognized"))).status_code == 422
     assert (await submit(tenv, ticket, form_id, callback_completed=False,
                          satisfaction="satisfied")).status_code == 422
     assert not_done

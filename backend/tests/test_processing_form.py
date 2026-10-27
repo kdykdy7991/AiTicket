@@ -89,7 +89,7 @@ async def test_processing_form_mid_chain_article_submission_and_feedback(tenv, t
         files=[("attachments", ("proof.png", b"image-data", "image/png"))])
     assert r.status_code == 200, r.text
     d = r.json()["data"]
-    assert d["state"] == "pending" and d["dispatch_step_index"] == 1
+    assert d["state"] == "open" and d["dispatch_step_index"] == 1
     assert d["skill_group_name"] == "售后"
     assert d["node_context"]["node_type"] == "phone_feedback"
     factory = async_sessionmaker(tenv["engine"], class_=AsyncSession, expire_on_commit=False)

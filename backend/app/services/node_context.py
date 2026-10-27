@@ -97,6 +97,8 @@ def node_action_error(node_type: NodeType | None, action: str) -> str | None:
         return "请先由售后负责人指派售后人员，再进行问题判断"
     if node_type == "triage" and action in {"dispatch", "reply", "resolve", "hold", "transfer"}:
         return "当前节点须先细化问题分类，不能分派或提交处理结果"
+    if node_type == "phone_feedback" and action == "dispatch":
+        return "售后致电反馈由指定处理人直接办理，无需再次分派"
     if node_type == "phone_feedback" and action in {"refine", "transfer", "resolve", "hold"}:
         # 致电反馈是链末步：先提交反馈记录，不做与反馈无关的暂缓。
         return "当前节点须提交致电反馈记录"

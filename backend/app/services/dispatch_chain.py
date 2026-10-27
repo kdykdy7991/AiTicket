@@ -19,6 +19,7 @@ from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.user import User
+from app.services.direct_assign import resolve_direct_assign
 
 async def resolve_chain(db: AsyncSession, category_id: int | None) -> dict | None:
     """分类 → 启用中的链。返回 {"matched_category_id", "steps"}；无链返回 None。"""
@@ -123,6 +124,7 @@ async def resolve_responsibility(db: AsyncSession, category_id: int | None) -> d
             "matched_rule_category_id": chain["matched_category_id"],
             "reason": reason,
             "chain_steps": steps,
+            "direct_assign": await resolve_direct_assign(db, category_id),
             "dispatcher_skill_group_id": sg_id,
             "dispatcher_skill_group_name": dept_code,
             "dispatcher_id": dispatcher_id,
@@ -140,6 +142,7 @@ async def resolve_responsibility(db: AsyncSession, category_id: int | None) -> d
     out["via"] = "rule" if out.get("matched") else None
     out["chain_steps"] = None
     out["chain_matched_category_id"] = None
+    out["direct_assign"] = await resolve_direct_assign(db, category_id)
     return out
 
 

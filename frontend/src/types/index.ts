@@ -232,6 +232,7 @@ export interface Ticket {
   refine_denied_reason?: string | null
   /** 后端从当前工单事实和该用户权限即时推导；前端不可提交 node_type。 */
   node_context?: {
+    node_name?: string | null
     ticket_id: number
     node_type: 'intake' | 'triage' | 'processing' | 'phone_feedback' | 'closure' | 'sales_opportunity' | null
     category_id: number | null
@@ -450,6 +451,8 @@ export interface TicketCreatePayload {
   channel: TicketChannel
   skill_group_id?: number | null
   dispatcher_id?: number | null
+  // 直指派分类（分类表 direct_assign=true）建单时直接指定处理人；其他分类忽略
+  owner_id?: number | null
   is_draft?: boolean
 }
 

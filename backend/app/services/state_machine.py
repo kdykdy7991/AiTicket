@@ -34,6 +34,7 @@ from app.core.exceptions import ForbiddenError, StateTransitionError
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.ticket import Ticket, TicketStateLog
 from app.services.callback_policy import resolve_callback_required
+from app.services.direct_assign import is_direct_assign_ticket
 from app.models.user import User
 
 # 状态的中文展示名（错误信息 / 导出 / allowed_actions label 共用）
@@ -105,7 +106,10 @@ TRANSITION_ACTIONS: dict[tuple[str | None, str], str] = {
 # 全量动作类型（文档 / 测试断言用）。
 # refine/transfer 不是状态流转边（from==to 的域动作，见 apply_refine /
 # apply_transfer），故不在 TRANSITION_ACTIONS，单独并入。
-ACTION_TYPES: set[str] = set(TRANSITION_ACTIONS.values()) | {"refine", "transfer"}
+# direct_assign 同理：它是 pending→open 这条边的**另一种语义**
+# （建单直指派：建单人直接指定处理人，免部门对接人分派），
+# 用 action_type 覆盖写入 Flow Log，避免把客服建单记成一次「分派」。
+ACTION_TYPES: set[str] = set(TRANSITION_ACTIONS.values()) | {"refine", "transfer", "direct_assign", "auto_assign"}
 
 
 def action_for(
@@ -130,6 +134,8 @@ ACTION_LABELS: dict[str, str] = {
     "archive": "归档",
     "refine": "分诊",     # 判断人细化分类一级（域动作，不改状态）
     "transfer": "转派",   # 多步链推进到下一部门（open→pending 的链语义）
+    "auto_assign": "自动交接",  # 系统自动确定处理人，不是人工分派节点
+    "direct_assign": "建单指派",  # 直指派分类：建单人直接指定处理人（免分派）
 }
 
 
@@ -497,7 +503,7 @@ async def transition_permission_error(
     db: AsyncSession, ticket: Ticket, to_state: str, user: User,
     *, allow_phone_feedback_reply: bool = False, enforce_node: bool = True,
     allow_sales_intake: bool = False, allow_sales_completion: bool = False,
-    allow_reconciliation_handoff: bool = False,
+    allow_processing_handoff: bool = False,
 ) -> str | None:
     """身份/角色层面是否允许该状态变更：允许返回 None，否则返回错误文案。
 
@@ -511,6 +517,7 @@ async def transition_permission_error(
         node_error = node_action_error(node_type, action_for(ticket.state, to_state) or "")
         if node_error is not None and not (
             (node_type == "phone_feedback" and to_state == "resolved" and allow_phone_feedback_reply)
+            or (node_type == "phone_feedback" and to_state == "open" and allow_processing_handoff)
             or (node_type == "sales_opportunity" and to_state == "resolved" and allow_sales_completion)
             or (node_type == "sales_opportunity" and to_state == "open" and allow_sales_intake)
         ):
@@ -522,25 +529,16 @@ async def transition_permission_error(
 
     # 分派：部门对接人
     if (from_state, to_state) == ("pending", "open"):
-        if allow_reconciliation_handoff and ticket.category_id == 2204 and ticket.skill_group_id is not None:
+        if (allow_processing_handoff and ticket.skill_group_id is not None
+                and (ticket.category_id == 2204 or await is_direct_assign_ticket(db, ticket))):
             return None
         if allow_sales_intake and (ticket.is_opportunity or ticket.category_id == 2204) and ticket.creator_id == user.id:
             return None
-        steps = ticket.dispatch_chain_steps or []
-        step_index = ticket.dispatch_step_index
-        if (
-            step_index is not None and step_index < len(steps)
-            and steps[step_index].get("stage") == "phone_feedback"
-        ):
-            if ticket.dispatcher_id != user.id or ticket.skill_group_id is None:
-                return "仅当前售后致电反馈对接人可分派工单"
-            member = await db.scalar(select(UserSkillGroup.user_id).where(
-                UserSkillGroup.user_id == user.id,
-                UserSkillGroup.skill_group_id == ticket.skill_group_id,
-            ))
-            if member is not None:
-                return None
-            return "售后致电反馈对接人不属于当前责任部门"
+        # 直指派分类（services/direct_assign.py）：该类别工单免部门对接人分派，
+        # 由建单人（客服）直接指定处理人 —— 建单那一刻、以及处理人打回后
+        # 客服重新指派，走的都是这一条边。
+        if ticket.creator_id == user.id and await is_direct_assign_ticket(db, ticket):
+            return None
         if not await is_dispatcher(db, user.id, ticket.skill_group_id):
             return "只有该部门的对接人可分派工单"
         return None
@@ -595,7 +593,7 @@ async def check_transition_permission(
     db: AsyncSession, ticket: Ticket, to_state: str, user: User, owner_id: int | None = None,
     *, allow_phone_feedback_reply: bool = False,
     allow_sales_intake: bool = False, allow_sales_completion: bool = False,
-    allow_reconciliation_handoff: bool = False,
+    allow_processing_handoff: bool = False,
 ) -> None:
     """校验当前用户是否有权执行该状态变更（非法则抛 ForbiddenError / 422）。
 
@@ -619,7 +617,7 @@ async def check_transition_permission(
         allow_phone_feedback_reply=allow_phone_feedback_reply,
         allow_sales_intake=allow_sales_intake,
         allow_sales_completion=allow_sales_completion,
-        allow_reconciliation_handoff=allow_reconciliation_handoff,
+        allow_processing_handoff=allow_processing_handoff,
     )
     if error is not None:
         raise ForbiddenError(error)
@@ -917,15 +915,14 @@ async def apply_transfer(
     operator: User,
     reason: str | None = None,
 ) -> TicketStateLog:
-    """转派执行入口：链快照推进一步 → 工单落到下一部门的待受理。
+    """转派执行入口：有明确处理人直接交接，否则进入下一部门待分派。
 
     收口顺序（与 apply_refine / apply_transition 同纪律）：
       1. 前置（transfer_permission_error：状态、链上有下一步、处理人身份）
       2. 下一步部门处方（部门代称 → skill_group/dispatcher）
       3. 步骤推进 + 部门落位（先改人员，Flow Log 快照记新部门）
-      4. 状态推进复用 apply_transition 唯一入口（open→pending：清 owner、
-         记停留时长、原因校验），action_type 覆盖为 "transfer"——
-         与"处理人打回"同一条边但语义是链前进
+      4. 直接交接保持 open，记录 transfer 自环及新处理人快照；
+         部门内分派复用 apply_transition（open→pending）清空处理人
       5. 保留历史退回标记：转派是前进，不新增退回历史
 
     不负责 commit——由调用方按请求边界提交。
@@ -943,29 +940,49 @@ async def apply_transfer(
     if rx is None:
         raise HTTPException(422, detail=f"链上下一步部门不存在：{next_dept}")
 
-    # 步骤推进 + 部门落位（owner 由下面 open→pending 的副作用清空，
-    # 下一部门对接人在 pending→open 分派时指定处理人）
-    await push_node(db, ticket)
-    ticket.dispatch_step_index = next_index
-    ticket.skill_group_id = rx["skill_group_id"]
-    ticket.handler_skill_group_id = rx["skill_group_id"]
+    next_owner_id = None
     feedback_judger_id = None
     if steps[next_index].get("stage") == "phone_feedback":
-        # 业务保障的问题判断由售后人员完成。回到售后致电反馈时，
-        # 由该判断人指派反馈人，而不是重新取售后组的默认对接人。
+        # 售后反馈直接交给此前的问题判断人办理，不再把他当成待分派对接人。
         feedback_judger_id = await db.scalar(
             select(TicketStateLog.operator_id)
-            .join(UserSkillGroup, UserSkillGroup.user_id == TicketStateLog.operator_id)
             .where(
                 TicketStateLog.ticket_id == ticket.id,
                 TicketStateLog.action_type == "refine",
                 TicketStateLog.reason.like("分诊：业务保障 → %"),
-                UserSkillGroup.skill_group_id == rx["skill_group_id"],
-            )
-            .order_by(TicketStateLog.id)
-            .limit(1)
+            ).order_by(TicketStateLog.id).limit(1)
         )
-    next_dispatcher_id = feedback_judger_id or rx["dispatcher_id"]
+    if (steps[next_index].get("stage") == "phone_feedback"
+            or steps[next_index].get("assigned_owner_id")
+            or await is_direct_assign_ticket(db, ticket)):
+        from app.services.direct_assign import assign_chain_owners
+        selected = steps[next_index].get("assigned_owner_id") or feedback_judger_id
+        next_steps = await assign_chain_owners(
+            db, [steps[next_index]], {next_dept: selected} if selected else {},
+        )
+        next_owner_id = next_steps[0]["assigned_owner_id"]
+
+    # 仅需要部门内分派的节点才落到 pending；明确处理人的节点直接交接。
+    await push_node(db, ticket)
+    ticket.dispatch_step_index = next_index
+    ticket.skill_group_id = rx["skill_group_id"]
+    ticket.handler_skill_group_id = rx["skill_group_id"]
+    if next_owner_id is not None:
+        ticket.owner_id = next_owner_id
+        ticket.dispatcher_id = None
+        last = await db.scalar(select(TicketStateLog).where(
+            TicketStateLog.ticket_id == ticket.id,
+        ).order_by(TicketStateLog.id.desc()).limit(1))
+        duration = int((datetime.now(timezone.utc) - last.created_at).total_seconds() / 60) if last else None
+        log = TicketStateLog(
+            ticket_id=ticket.id, from_state="open", to_state="open", operator_id=operator.id,
+            action_type="transfer", reason=reason or f"本步完成，交「{next_dept}」处理人直接办理",
+            duration_minutes=duration, **snapshot_people(ticket),
+        )
+        db.add(log)
+        await db.flush()
+        return log
+    next_dispatcher_id = rx["dispatcher_id"]
     if next_dispatcher_id is not None:
         ticket.dispatcher_id = next_dispatcher_id
     # 转派本步不设处理人（open→pending 会清空 owner），错配只可能出现在下一步
@@ -1002,7 +1019,7 @@ async def apply_transition(
     allow_intermediate_transfer: bool = False,
     allow_sales_intake: bool = False,
     allow_sales_completion: bool = False,
-    allow_reconciliation_handoff: bool = False,
+    allow_processing_handoff: bool = False,
 ) -> TicketStateLog | None:
     """单条工单状态流转的唯一执行入口。
 
@@ -1032,6 +1049,7 @@ async def apply_transition(
     action_error = node_action_error(node_type, action_for(ticket.state, to_state, action_type) or "")
     if action_error is not None and action_type != "transfer" and not (
         (node_type == "phone_feedback" and to_state == "resolved" and allow_intermediate_transfer)
+        or (node_type == "phone_feedback" and to_state == "open" and allow_processing_handoff)
         or (node_type == "sales_opportunity" and to_state == "resolved" and allow_sales_completion)
         or (node_type == "sales_opportunity" and to_state == "open" and allow_sales_intake)
     ):
@@ -1081,7 +1099,7 @@ async def apply_transition(
         allow_phone_feedback_reply=allow_intermediate_transfer,
         allow_sales_intake=allow_sales_intake,
         allow_sales_completion=allow_sales_completion,
-        allow_reconciliation_handoff=allow_reconciliation_handoff,
+        allow_processing_handoff=allow_processing_handoff,
     )
 
     # 4. 原因必填
@@ -1105,7 +1123,14 @@ async def apply_transition(
     action = action_for(ticket.state, to_state, action_type)
     if action in RETURN_ACTIONS:
         return await apply_return(db, ticket, operator=operator, reason=reason or "")
-    if action == "dispatch":
+    if action == "direct_assign":
+        # 建单直指派：上一节点快照是「待受理、无处理人」——处理人打回后由
+        # 建单人（客服）重新指派，因此快照里不保留处理人（下面的副作用
+        # 再把本轮的处理人写回）。
+        ticket.owner_id = None
+        await push_node(db, ticket)
+    elif action in {"dispatch", "auto_assign"} and not allow_processing_handoff:
+        # 自动交接不新增一个无处理人的中间节点，退回仍回到上一实际办理节点。
         await push_node(db, ticket)
     elif action == "resolve":
         await push_node(db, ticket, state="open" if ticket.state == "on_hold" else None)

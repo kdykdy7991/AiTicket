@@ -96,11 +96,17 @@
           </p>
           <div class="form-row">
             <el-form-item label="对接部门" prop="skill_group_id" class="form-col">
-              <el-select v-model="form.skill_group_id" placeholder="技术/市场/售后" style="width: 100%" :disabled="isAssuranceJudgement" @change="onSkillGroupChange">
+              <el-select v-model="form.skill_group_id" placeholder="技术/市场/售后" style="width: 100%" :disabled="isAssuranceJudgement || isDirectAssign" @change="onSkillGroupChange">
                 <el-option v-for="g in skillGroups" :key="g.id" :label="g.name" :value="g.id" />
               </el-select>
             </el-form-item>
-            <el-form-item label="部门对接人" prop="dispatcher_id" class="form-col">
+            <!-- 直指派分类：该类别免部门对接人分派，客服建单时直接指定处理人 -->
+            <el-form-item v-if="isDirectAssign" label="处理人" prop="owner_id" class="form-col">
+              <el-select v-model="form.owner_id" placeholder="选择处理人" style="width: 100%" filterable :disabled="!form.skill_group_id">
+                <el-option v-for="h in handlers" :key="h.id" :label="h.name" :value="h.id" />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-else label="部门对接人" prop="dispatcher_id" class="form-col">
               <el-select v-model="form.dispatcher_id" placeholder="选择部门对接人" style="width: 100%" filterable :disabled="!form.skill_group_id || isAssuranceJudgement">
                 <el-option v-for="d in dispatchers" :key="d.id" :label="d.name" :value="d.id" />
               </el-select>
@@ -168,8 +174,12 @@ const editingDraftId = ref<number | null>(null)
 const groups = ref<Group[]>([])
 const skillGroups = ref<Group[]>([])
 const dispatchers = ref<any[]>([])
+const handlers = ref<any[]>([])
 const priorities = ref<TicketPriority[]>([])
 const categories = ref<TicketCategory[]>([])
+
+/** 直指派分类：免部门对接人分派，客服建单时直接指定处理人（后端按分类配置判定） */
+const isDirectAssign = ref(false)
 
 const form = reactive({
   customer_type: 'enterprise' as 'personal' | 'enterprise',
@@ -185,6 +195,7 @@ const form = reactive({
   group_id: null as number | null,
   skill_group_id: null as number | null,
   dispatcher_id: null as number | null,
+  owner_id: null as number | null,
   priority_id: null as number | null,
   channel: 'phone' as 'phone' | 'wechat' | 'internal',
   body: '',
@@ -239,7 +250,15 @@ const rules: FormRules = {
   }],
   dispatcher_id: [{
     validator: (_r, _v, cb) => {
+          if (isDirectAssign.value) return cb()   // 直指派分类免对接人分派
           if (!form.dispatcher_id) return cb(new Error('请选择部门对接人'))
+      cb()
+    },
+    trigger: 'change',
+  }],
+  owner_id: [{
+    validator: (_r, _v, cb) => {
+          if (isDirectAssign.value && !form.owner_id) return cb(new Error('请选择处理人'))
       cb()
     },
     trigger: 'change',
@@ -328,6 +347,7 @@ watch([() => form.category_l2_id, () => form.category_l1_id], async ([l2, l1]) =
   try {
     const data = await metaApi.resolveRouting(cid)
     if (seq !== routingSeq) return
+    isDirectAssign.value = !!data?.direct_assign
     if (data?.chain_steps?.length) {
       const depts = data.chain_steps.map((s: any) => s.department_code)
       routingHint.value = { type: 'chain', text: cid === 2301 ? '建单后由售后张华直接判断下一级问题分类' : `将按分派链流转：${depts.join(' → ')}` }
@@ -338,6 +358,17 @@ watch([() => form.category_l2_id, () => form.category_l1_id], async ([l2, l1]) =
       form.dispatcher_id = null
       dispatchers.value = await metaApi.getDispatchers(sgId)
       if (data.dispatcher_id) form.dispatcher_id = data.dispatcher_id
+    }
+    if (isDirectAssign.value) {
+      // 直指派分类：责任部门由分派链决定，客服在建单时直接指定处理人；
+      // 免「部门对接人」选择——建单后工单直接进入处理中。
+      form.dispatcher_id = null
+      form.owner_id = null
+      handlers.value = form.skill_group_id ? await metaApi.getHandlers(form.skill_group_id) : []
+      routingHint.value = { type: 'chain', text: '该分类由建单时直接指派处理人，无需部门对接人分派' }
+    } else {
+      handlers.value = []
+      form.owner_id = null
     }
     if (data?.reason) {
       routingHint.value = { type: 'warn', text: data.reason }
@@ -398,6 +429,20 @@ onMounted(async () => {
       if (form.skill_group_id) {
         dispatchers.value = await metaApi.getDispatchers(form.skill_group_id)
       }
+      // 草稿回填：直指派分类要恢复「处理人」选择与候选名单
+      const draftCategoryId = form.category_l2_id || form.category_l1_id
+      if (draftCategoryId) {
+        try {
+          const data = await metaApi.resolveRouting(draftCategoryId)
+          isDirectAssign.value = !!data?.direct_assign
+          if (isDirectAssign.value) {
+            form.owner_id = (draft as any).owner_id || null
+            handlers.value = form.skill_group_id ? await metaApi.getHandlers(form.skill_group_id) : []
+          }
+        } catch {
+          // 预填失败不阻塞草稿：由后端按分类配置判定
+        }
+      }
     } catch {
       ElMessage.warning('加载草稿失败')
     }
@@ -410,6 +455,10 @@ async function onSkillGroupChange() {
   dispatchers.value = []
   if (form.skill_group_id) {
     dispatchers.value = await metaApi.getDispatchers(form.skill_group_id)
+    if (isDirectAssign.value) {
+      form.owner_id = null
+      handlers.value = await metaApi.getHandlers(form.skill_group_id)
+    }
   }
 }
 
@@ -431,10 +480,13 @@ watch(() => route.query.draft_id, (newDraftId, oldDraftId) => {
     form.group_id = groups.value[0]?.id || null
     form.skill_group_id = null
     form.dispatcher_id = null
+    form.owner_id = null
     form.priority_id = priorities.value.find(x => x.name === 'P4 一般事件')?.id || priorities.value.find(x => x.id === 4)?.id || priorities.value[0]?.id || null
     form.channel = 'phone'
     form.body = ''
     dispatchers.value = []
+    handlers.value = []
+    isDirectAssign.value = false
   }
 })
 
@@ -479,6 +531,7 @@ function buildFormPayload(extra: Record<string, any> = {}): Record<string, any> 
     category_l2_id: form.category_l2_id,
     skill_group_id: form.skill_group_id,
     dispatcher_id: form.dispatcher_id,
+    owner_id: form.owner_id,
     channel: form.channel,
     article: { body: form.body, content_type: 'text/plain' },
     priority_id: form.priority_id,
@@ -505,6 +558,7 @@ async function doSubmit() {
       category_l2_id: form.category_l2_id,
       skill_group_id: form.skill_group_id,
       dispatcher_id: form.dispatcher_id,
+      owner_id: form.owner_id,
       article: { body: form.body, content_type: 'text/plain' },
     })
     // 如果是从草稿提交的，删除原草稿

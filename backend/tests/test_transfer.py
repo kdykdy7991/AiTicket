@@ -47,6 +47,11 @@ async def tenv(client):
                     id=cid, parent_id=parent, name=name, level=level,
                     sort_order=sort, is_active=True, created_at=now, updated_at=now,
                 ))
+        # 此夹具验证仍需部门分派的通用链，不继承迁移中套餐变更的直指派开关。
+        await s.flush()
+        for cid, *_ in CATS:
+            category = await s.get(TicketCategory, cid)
+            category.direct_assign = False
         sgs = {
             sg.name: sg
             for sg in (await s.execute(
@@ -169,7 +174,7 @@ async def test_handling_reply_requires_aftersales_feedback_before_resolved(tenv)
         )
     assert reply.status_code == 201, reply.text
     pending = await tenv["get"](t["id"])
-    assert pending["state"] == "pending"
+    assert pending["state"] == "open"
     assert pending["skill_group_name"] == "售后"
     assert pending["dispatch_step_index"] == 1
     assert pending["dispatch_chain_steps"][1]["stage"] == "phone_feedback"
@@ -188,7 +193,7 @@ async def test_handling_reply_requires_aftersales_feedback_before_resolved(tenv)
         )
     assert feedback.status_code == 201, feedback.text
     assert (await tenv["get"](t["id"]))["state"] == "resolved"
-    assert await action_sequence(tenv, t["id"]) == ["create", "dispatch", "transfer", "dispatch", "resolve"]
+    assert await action_sequence(tenv, t["id"]) == ["create", "dispatch", "transfer", "resolve"]
 
 
 async def test_transfer_custom_reason(tenv):

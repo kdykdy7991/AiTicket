@@ -129,13 +129,12 @@
           <!-- 已处理工单：回访闭环（结构化表单） -->
           <div v-if="closureForm" class="archive-card">
             <div class="archive-card-title">{{ closureForm.name }}</div>
-            <p class="refine-card-hint">回访与关单信息一次提交；关单由系统按既有归档流转执行。</p>
             <div class="triage-field">
               <label class="triage-field-label">回访要求</label>
               <el-tag :type="callbackRequired ? 'warning' : 'info'">
                 {{ callbackRequired ? '需要回访' : '无需回访' }}
               </el-tag>
-              <p class="refine-card-hint">回访要求由更早的流程确定，此处只展示，不做修改。</p>
+              <p v-if="callbackRequired" class="refine-card-hint">{{ callbackRequirementReason }}</p>
             </div>
             <div v-for="field in closureForm.fields.filter(closureFieldVisible)" :key="field.field_key" class="triage-field">
               <label class="triage-field-label">
@@ -181,6 +180,7 @@
               客户不满意不能直接关单。提交后仅记录回访结果，请通过顶部「退回」让处理人重新处理，
               再次回访满意后才能归档。
             </p>
+            <p v-if="closureCallbackIncomplete" class="refine-card-hint" role="status">请先完成回访，再关单归档。</p>
             <div class="archive-actions">
               <el-button
                 type="success"
@@ -330,7 +330,7 @@
           </div>
 
           <div v-if="processingForm" class="refine-card">
-            <div class="refine-card-title">{{ isAnalysis ? '提交分析验证' : isResponsePlan ? '提交响应措施' : isSalesOpportunity ? '完成销售线索处理' : '完成本节点处理' }}</div>
+            <div class="refine-card-title">{{ isAnalysis ? '提交分析验证' : isResponsePlan ? '提交响应措施' : isSalesOpportunity ? '完成销售线索处理' : processingForm.code === 'reconciliation_review_v1' ? processingForm.name : '完成本节点处理' }}</div>
             <p class="refine-card-hint">{{ isAnalysis ? '按原因分类填写分析与验证内容，提交后交售后致电反馈。' : isResponsePlan ? '填写初步排查结论和临时响应措施，提交后交售后确认响应效果。' : isSalesOpportunity ? '提交本表单会完成线索处理并归档。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
@@ -405,7 +405,7 @@
               <el-button
                 type="primary"
                 :loading="dispatching"
-                :disabled="!dispatchOwnerId"
+                :disabled="handlersLoading || !dispatchOwnerId"
                 @click="confirmDispatch"
               >
                 确认指派
@@ -518,7 +518,7 @@
     </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import dayjs from 'dayjs'
 import { useRoute, useRouter } from 'vue-router'
 import { useTicketStore } from '@/stores/ticket'
@@ -592,7 +592,7 @@ function normalizeOpportunityForm(form: any) {
 }
 const articlePlacement = computed(() => {
   const byLogId = new Map<number, any[]>()
-  const logs = [...((ticket.value as any)?.state_logs || [])].sort((a: any, b: any) => a.id - b.id)
+  const logs = [...((ticket.value as any)?.state_logs || [])].filter((entry: any) => entry.action_type !== 'auto_assign').sort((a: any, b: any) => a.id - b.id)
   const articles = (ticket.value as any)?.articles || []
   const submissionLogByArticle = new Map<number, number>(
     ((ticket.value as any)?.node_submissions || [])
@@ -636,7 +636,7 @@ const timelineCards = computed(() => {
   if (!t) return []
   const submissions = t.node_submissions || []
   const linkedArticleIds = new Set(submissions.map((entry: any) => entry.article_id).filter(Boolean))
-  const logs = [...(t.state_logs || [])]
+  const logs = [...(t.state_logs || [])].filter((entry: any) => entry.action_type !== 'auto_assign')
   const legacyResultLog = [...logs].reverse().find((entry: any) => ['resolve', 'transfer'].includes(entry.action_type))
   return logs
     .sort((a: any, b: any) => new Date(a.entered_at).getTime() - new Date(b.entered_at).getTime())
@@ -679,7 +679,7 @@ const findAction = (name: string): AllowedAction | undefined =>
 const isTerminalState = computed(() => (ticket.value as any)?.is_terminal ?? false)
 
 // 显示「指派处理人」卡片：后端允许 dispatch（对接人/admin + 目标状态由后端给出）
-const canDispatch = computed(() => !!findAction('dispatch'))
+const canDispatch = computed(() => ticket.value?.id === Number(route.params.id) && !!findAction('dispatch'))
 
 // 顶部「退回」按钮承载三种后端动作：
 //   return  —— pending→returned / open→pending（打回）
@@ -961,13 +961,35 @@ function closureFieldRequired(field: any): boolean {
 
 const callbackRequired = computed(() => (ticket.value as any)?.callback_required === true)
 
+const callbackRequirementReason = computed(() => {
+  const t = ticket.value
+  const category = t?.category_l2?.name || t?.category_l1?.name
+  if (t?.category_l1?.name === '业务保障') {
+    return '业务保障类工单需要回访确认故障是否解决、业务是否恢复，完成回访后才能归档。'
+  }
+  if (category === '套餐变更') {
+    return '套餐变更工单需要回访确认变更结果及客户使用情况，完成回访后才能归档。'
+  }
+  if (category === '业财对账') {
+    return '业财对账工单需要回访确认对账结果及客户是否仍有疑问，完成回访后才能归档。'
+  }
+  const name = t?.category_path || category
+  return name
+    ? `该工单属于「${name}」，按此类工单的回访要求，完成客户回访后才能归档。`
+    : '该工单要求完成客户回访后才能归档。'
+})
+
 const closureRecordsDissatisfied = computed(
   () => closureValues.value.customer_recognized === false ||
     closureValues.value.satisfaction === 'dissatisfied',
 )
 
+const closureCallbackIncomplete = computed(
+  () => callbackRequired.value && closureValues.value.callback_completed !== true,
+)
+
 const closureDisabled = computed(() => {
-  if (!closureForm.value) return true
+  if (!closureForm.value || closureCallbackIncomplete.value) return true
   return closureForm.value.fields.some((field: any) => {
     if (!closureFieldVisible(field) || !closureFieldRequired(field)) return false
     const value = closureValues.value[field.field_key]
@@ -987,7 +1009,12 @@ function prefillClosureForm() {
 }
 
 async function submitClosureForm() {
-  if (!ticket.value || !closureForm.value) return
+  if (!ticket.value || !closureForm.value || closureSubmitting.value) return
+  if (closureCallbackIncomplete.value) {
+    ElMessage.warning('请先完成回访，再关单归档')
+    return
+  }
+  if (closureDisabled.value) return
   const t = ticket.value as any
   const values = Object.fromEntries(
     Object.entries(closureValues.value).filter(([key]) =>
@@ -998,7 +1025,7 @@ async function submitClosureForm() {
   )
   closureSubmitting.value = true
   try {
-    await ticketApi.submitClosure(t.id, {
+    const response = await ticketApi.submitClosure(t.id, {
       form_definition_id: closureForm.value.form_definition_id,
       form_version: closureForm.value.version,
       expected_category_id: t.category_id,
@@ -1007,10 +1034,13 @@ async function submitClosureForm() {
       expected_state: t.state_key,
       values,
     })
-    ElMessage.success(closureRecordsDissatisfied.value ? '已记录回访结果' : '工单已归档')
-    closureValues.value = {}
-    ticketStore.refreshCurrentInList()
+    if (response.data?.state === 'archived') {
+      ElMessage.success('工单已归档')
+    } else {
+      ElMessage.warning('已记录回访结果，工单尚未归档')
+    }
     await loadTicket()
+    ticketStore.refreshCurrentInList()
   } catch {
     // API 拦截器统一展示后端权威校验错误。
   } finally { closureSubmitting.value = false }
@@ -1142,32 +1172,28 @@ const handlersLoading = ref(false)
 const dispatching = ref(false)
 const isAssuranceAssignment = computed(() => (ticket.value as any)?.node_context?.node_type === 'assignment')
 
-// 当指派卡片可见时，加载该对接部门的处理人列表
-watch(canDispatch, async (visible) => {
-  if (!visible) {
-    dispatchOwnerId.value = null
-    dispatchHandlers.value = []
-    return
-  }
-  const t = ticket.value as any
+// 工单/部门/权限变化及详情刷新都重新加载；旧请求失效后不能覆盖当前列表。
+watch([ticket, () => ticket.value?.skill_group_id, () => route.params.id, canDispatch], async ([current, , routeId, visible], _previous, onCleanup) => {
+  let active = true
+  onCleanup(() => { active = false })
   dispatchOwnerId.value = null
-  await nextTick()
-  if (t?.skill_group_id) {
-    handlersLoading.value = true
-    try {
-      dispatchHandlers.value = await metaApi.getHandlers(t.skill_group_id)
-    } catch {
-      dispatchHandlers.value = []
-    } finally {
-      handlersLoading.value = false
-    }
-  } else {
-    dispatchHandlers.value = []
+  dispatchHandlers.value = []
+  handlersLoading.value = false
+  if (!visible || current?.id !== Number(routeId) || !current?.skill_group_id) return
+  handlersLoading.value = true
+  try {
+    const handlers = await metaApi.getHandlers(current.skill_group_id)
+    if (active) dispatchHandlers.value = handlers
+  } catch {
+    if (active) dispatchHandlers.value = []
+  } finally {
+    if (active) handlersLoading.value = false
   }
 }, { immediate: true })
 
 async function confirmDispatch() {
-  if (!dispatchOwnerId.value) {
+  if (!canDispatch.value || handlersLoading.value) return
+  if (!dispatchOwnerId.value || !dispatchHandlers.value.some(person => person.id === dispatchOwnerId.value)) {
     ElMessage.warning('请选择处理人')
     return
   }
@@ -1936,9 +1962,8 @@ async function confirmCancel() {
 .timeline-section-title small { margin-left: auto; color: #2c9be9; font-size: 10px; font-weight: 500; letter-spacing: .08em; white-space: nowrap; }
 .flow-card :deep(.timeline-item) { min-height: 76px; padding-bottom: 20px; gap: 16px; }
 .flow-card :deep(.timeline-marker) { width: 16px; }
-.flow-card :deep(.marker-dot) { width: 14px; height: 14px; margin-top: 4px; border: 2px solid #2d9ef2; background: #54b5ff; box-shadow: 0 0 0 3px #07518d, 0 0 12px #159cff; }
-.flow-card :deep(.is-first .marker-dot) { border-color: #6afb9b; background: #42df7b; box-shadow: 0 0 0 3px #116443, 0 0 13px #50e67f; }
-.flow-card :deep(.is-current .marker-dot) { width: 18px; height: 18px; margin-left: -2px; border-color: #58c1ff; background: #228bff; box-shadow: 0 0 0 4px #094783, 0 0 15px #219dff; }
+.flow-card :deep(.marker-dot) { width: 14px; height: 14px; margin-top: 4px; border: 2px solid var(--color-border); background: var(--color-text-tertiary); box-shadow: none; }
+.flow-card :deep(.is-current .marker-dot) { width: 18px; height: 18px; margin-left: -2px; border-color: #6afb9b; background: #42df7b; box-shadow: 0 0 0 4px #116443, 0 0 15px #50e67f; }
 .flow-card :deep(.marker-line) { width: 2px; background: linear-gradient(#2eaafa, #176996); }
 .flow-card :deep(.timeline-head) { align-items: flex-start; flex-wrap: nowrap; }
 .flow-card :deep(.action-name) { color: #f2f8ff; font-size: 15px; line-height: 1.5; }

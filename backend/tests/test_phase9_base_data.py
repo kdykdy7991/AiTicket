@@ -1,9 +1,5 @@
 """Phase 9 seed keeps the complaint fallback and current dispatch chains."""
 
-import asyncio
-import subprocess
-import sys
-from pathlib import Path
 from datetime import datetime, timezone
 
 import pytest
@@ -17,41 +13,11 @@ from app.models.routing import CategoryRoutingRule
 from app.models.user import User
 
 
-def _run_seed_phase9():
-    """Run scripts/seed.py --phase9 as a subprocess against the test DB."""
-    env = {"DATABASE_URL": "postgresql+asyncpg://skdy:skdy123@localhost:5433/skdy_ticket_test",
-           "PATH": "/usr/bin:/bin"}
-    import os
-    full_env = {**os.environ, **env}
-    result = subprocess.run(
-        [sys.executable, "scripts/seed.py", "--phase9"],
-        cwd=Path(__file__).resolve().parents[1],
-        env=full_env,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    return result
-
-
 async def _seed_phase9_directly(engine):
-    """In-process equivalent of seed.py --phase9 for fast tests.
-
-    Reimports the seed module in-process with the test engine so we don't have
-    to share the global session/connection state.
-    """
-    import importlib
-    import os
-    os.environ["DATABASE_URL"] = "postgresql+asyncpg://skdy:skdy123@localhost:5433/skdy_ticket_test"
-    # Re-import seed module fresh (its module-level `engine`/`async_session`
-    # are bound to whatever DATABASE_URL was at import time).
-    if "scripts.seed" in sys.modules:
-        del sys.modules["scripts.seed"]
-    seed_mod = importlib.import_module("scripts.seed")
-    # Override the engine / session to point at the test DB.
-    seed_mod.engine = engine
-    seed_mod.async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    await seed_mod.seed_phase9_base_data()
+    """Use the fixture's isolated database explicitly; never open another engine."""
+    from scripts.seed import seed_phase9_base_data
+    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    await seed_phase9_base_data(factory)
 
 
 async def _category_exists(engine, cat_id: int) -> bool:
@@ -265,7 +231,7 @@ async def test_phase9_seed_resolves_formal_chains_and_complaint_fallback(phase9_
     expectations = {
         1202: "品牌传播与大客户", 1203: "产品", 1204: "市场生态部",
         2301: "售后", 2311: "软件开发组", 2312: "测运控组",
-        2313: "整星产品", 2203: "市场生态部", 2204: "销售",
+        2313: "整星产品", 2203: "市场生态部", 2204: "经营管理部",
     }
     async with factory() as s:
         for cat_id, department in expectations.items():

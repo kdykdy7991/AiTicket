@@ -35,7 +35,10 @@ class TicketCreate(BaseModel):
     skill_group_id: int | None = None
     handler_skill_group_id: int | None = None  # 专业处理部门（Phase 4 新增，可由路由规则自动填）
     dispatcher_id: int | None = None  # 部门对接人（正式提交必填）
-    sales_owner_id: int | None = None  # 线索或业财对账建单时选择的销售处理人；不持久化为对接人
+    # 直指派分类（services/direct_assign.py）建单时直接指定处理人；其他分类忽略。
+    owner_id: int | None = None
+    dispatch_owner_ids: dict[str, int] = Field(default_factory=dict)  # 建单时各处理部门选定的人员
+    sales_owner_id: int | None = None  # 线索建单时选择的销售处理人；不持久化为对接人
     is_duplicate: bool = False
     duplicate_reason: str | None = None
     is_draft: bool = False
@@ -155,6 +158,7 @@ class AllowedAction(BaseModel):
 
 
 class NodeContextOut(BaseModel):
+    node_name: str | None = None  # 已发布节点定义的名称，与操作权限和完成动作无关
     ticket_id: int
     node_type: Literal["intake", "assignment", "triage", "processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "closure", "sales_opportunity"] | None
     category_id: int | None
@@ -245,6 +249,7 @@ class PaginatedTickets(BaseModel):
 
 
 class DuplicateWarning(BaseModel):
+    # 兼容已有响应字段；客服建单不判重，不返回重复候选。
     duplicate_detected: bool = False
     duplicate_tickets: list[dict] = []
     # Phase 5: 工单创建后告诉前端路由规则填了哪些字段 / 是否有警告

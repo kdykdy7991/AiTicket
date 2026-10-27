@@ -127,7 +127,7 @@ async def test_feedback_wrong_node_and_return_recomputes_context(tenv):
     assert (await submit_processing(tenv, ticket, processing_form, owner)).status_code == 200
     pending = await tenv["get"](ticket["id"])
     assert pending["node_context"]["node_type"] == "phone_feedback"
-    await tenv["patch"](ticket["id"], {"state": "returned", "reason": "需原部门复查"})
+    await tenv["patch"](ticket["id"], {"state": "pending", "reason": "需原部门复查"})
     returned = await tenv["get"](ticket["id"])
     assert returned["node_context"]["node_type"] == "processing"
     assert (await submit(tenv, pending, feedback_form)).status_code == 409

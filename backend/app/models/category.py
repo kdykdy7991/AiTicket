@@ -21,6 +21,11 @@ class TicketCategory(Base):
     # 因此标在「业务保障」一级上即可覆盖其全部后代；标在「套餐变更」上只覆盖
     # 该分支。业务代码不硬编码分类 ID，只读这一列。见 services/callback_policy.py。
     requires_callback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 分类级业务规则：该分类是否「建单直指派」。语义为「自身或任一祖先为 True」，
+    # 与 requires_callback 同一套继承语义。标为直指派的分类，其工单由建单人
+    # （客服）在建单时直接指定处理人，工单直接进入「处理中」，不经过部门
+    # 对接人分派。业务代码不硬编码分类 ID，只读这一列。见 services/direct_assign.py。
+    direct_assign: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
 

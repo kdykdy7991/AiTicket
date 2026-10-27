@@ -2013,4 +2013,10 @@ async def resolve_routing_rule(
     """
     category_id = body.get("category_id") if isinstance(body, dict) else None
     from app.services.dispatch_chain import resolve_responsibility
-    return {"data": await resolve_responsibility(db, category_id)}
+    responsibility = await resolve_responsibility(db, category_id)
+    if responsibility.get("direct_assign"):
+        from app.services.direct_assign import assignment_departments
+        responsibility["assignment_departments"] = await assignment_departments(
+            db, responsibility.get("chain_steps") or [],
+        )
+    return {"data": responsibility}

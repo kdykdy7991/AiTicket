@@ -13,7 +13,17 @@
         <div class="field"><label for="contactPhone" :class="{ required: isOpportunity }">联系号码</label><input id="contactPhone" v-model.trim="form.contactPhone" inputmode="tel" placeholder="请输入联系号码" :class="{ invalid: errors.contactPhone }" /><small v-if="!isOpportunity" class="help">联系方式与来电号码不同时补充</small><small v-if="errors.contactPhone" class="error">{{ errors.contactPhone }}</small></div>
       </div></TicketFormSection>
       <TicketFormSection title="工单内容" icon="Document" eyebrow="TICKET CONTENT"><div class="grid content-grid">
-        <div v-if="isOpportunity || isReconciliation" class="field"><label for="salesUser" class="required">销售人员</label><select id="salesUser" v-model.number="form.salesUserId" :class="{ invalid: errors.salesUserId }"><option :value="null" disabled>请选择销售人员</option><option v-for="person in salesUsers" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="errors.salesUserId" class="error">{{ errors.salesUserId }}</small></div>
+        <div v-if="isOpportunity" class="field"><label for="salesUser" class="required">销售人员</label><select id="salesUser" v-model.number="form.salesUserId" :class="{ invalid: errors.salesUserId }"><option :value="null" disabled>请选择销售人员</option><option v-for="person in salesUsers" :key="person.id" :value="person.id">{{ person.name }}</option></select><small v-if="errors.salesUserId" class="error">{{ errors.salesUserId }}</small></div>
+        <div v-for="department in assignmentDepartments" :key="department.department_code" class="field">
+          <label :class="{ required: department.handlers.length > 1 }">{{ department.department_code }}处理人</label>
+          <select v-if="department.handlers.length > 1" v-model.number="assignmentChoices[department.department_code]">
+            <option :value="null" disabled>请选择处理人</option>
+            <option v-for="person in department.handlers" :key="person.id" :value="person.id">{{ person.name }}</option>
+          </select>
+          <input v-else :value="department.handlers[0]?.name || '暂无有效处理人'" readonly />
+          <small v-if="department.handlers.length === 1" class="help">系统自动确定处理人</small>
+        </div>
+        <small v-if="assignmentLoading || assignmentError" class="field full" :class="{ error: assignmentError }">{{ assignmentLoading ? '正在加载处理人…' : assignmentError }}</small>
         <div v-if="!isOpportunity && !isInstantConsult" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
         <div v-if="!isOpportunity" class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
         <div v-if="!isOpportunity && !rootCategory?.create_selectable" class="field"><label for="subcategory" class="required">细分分类</label><select id="subcategory" v-model="form.subcategory" :disabled="!form.category" :class="{ invalid: errors.subcategory }"><option value="" disabled hidden>{{ form.category ? '请选择可提交的分类' : '请先选择一级分类' }}</option><option v-for="v in subcategoryOptions" :key="v.id" :value="v.label">{{ v.label }}</option></select><small v-if="errors.subcategory" class="error">{{ errors.subcategory }}</small></div>
@@ -41,7 +51,7 @@
   </main>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAuthStore } from '@/stores/auth'
@@ -70,6 +80,13 @@ const salesGroupId = ref<number | null>(null)
 const salesUsers = ref<{ id: number; name: string }[]>([])
 const draftId = ref<number | null>(null)
 const busy = ref(false)
+type AssignmentDepartment = { department_code: string; handlers: { id: number; name: string }[] }
+const assignmentDepartments = ref<AssignmentDepartment[]>([])
+const assignmentChoices = reactive<Record<string, number | null>>({})
+const assignmentLoading = ref(false)
+const assignmentError = ref('')
+let assignmentRequest = 0
+let savedAssignments: Record<string, number> = {}
 const now = ref(new Date().toLocaleString('sv-SE').replace('T', ' '))
 let clockTimer: number | undefined
 const systemInfo = computed(() => [
@@ -102,12 +119,31 @@ const numberRequired = computed(() => form.category === '业务运营' || form.c
 const isAssurance = computed(() => form.category === '业务保障')
 const isOpportunity = computed(() => form.businessOpportunity === 'yes')
 const isInstantConsult = computed(() => !isOpportunity.value && selectedCategoryId.value === 1205)
-const isReconciliation = computed(() => !isOpportunity.value && selectedCategoryId.value === 2204)
+async function loadAssignments() {
+  const request = ++assignmentRequest
+  assignmentDepartments.value = []
+  assignmentError.value = ''
+  for (const key of Object.keys(assignmentChoices)) delete assignmentChoices[key]
+  if (isOpportunity.value || !selectedCategoryId.value) { assignmentLoading.value = false; return }
+  assignmentLoading.value = true
+  try {
+    const response: any = await api.post('/routing-rules/resolve', { category_id: selectedCategoryId.value })
+    if (request !== assignmentRequest) return
+    assignmentDepartments.value = response.data.assignment_departments || []
+    for (const department of assignmentDepartments.value) {
+      const saved = savedAssignments[department.department_code]
+      assignmentChoices[department.department_code] = department.handlers.length === 1
+        ? department.handlers[0]!.id
+        : department.handlers.some(person => person.id === saved) ? saved! : null
+    }
+  } catch { if (request === assignmentRequest) assignmentError.value = '处理人加载失败，请重新选择分类后重试' }
+  finally { if (request === assignmentRequest) assignmentLoading.value = false }
+}
+watch([selectedCategoryId, isOpportunity], () => { savedAssignments = {}; void loadAssignments() })
 const requiredFields = computed<(keyof TicketCreateDesignForm)[]>(() => {
   if (isInstantConsult.value) return ['channel', 'callerPhone', 'category', 'subcategory', 'description', 'instantAnswer']
   const fields: (keyof TicketCreateDesignForm)[] = ['channel', 'customerName', 'companyName', 'industry', 'callerPhone', 'businessOpportunity', 'description']
   if (isOpportunity.value) return [...fields, 'contactPhone', 'salesUserId']
-  if (isReconciliation.value) fields.push('salesUserId')
   fields.push('category')
   if (!rootCategory.value?.create_selectable) fields.push('subcategory')
   if (numberRequired.value) fields.push('satelliteNumber')
@@ -155,13 +191,19 @@ onMounted(async () => {
       form.category = (Object.keys(rootNames) as CategoryName[]).find(k => rootNames[k] === root?.name) || ''
       form.subcategory = subcategoryOptions.value.find(c => c.id === ticket.category_id)?.label || ''
       form.businessOpportunity = ticket.is_opportunity == null ? '' : ticket.is_opportunity ? 'yes' : 'no'
-      form.salesUserId = ticket.is_opportunity || ticket.category_id === 2204 ? ticket.owner_id ?? null : null
+      form.salesUserId = ticket.is_opportunity ? ticket.owner_id ?? null : null
       form.priority = (Object.keys(priorityCodes).find(k => priorityCodes[k] === ticket.priority)) || 'P4'
       form.description = ticket.description || ''
       form.faultTime = ticket.fault_occurred_at ? new Date(ticket.fault_occurred_at).toLocaleString('sv-SE').replace(' ', 'T').slice(0, 16) : ''
       form.recurrence = ticket.fault_recurrence || ''
       form.faultLocation = ticket.fault_location || ''
       form.batchFault = ticket.is_batch_fault == null ? '' : ticket.is_batch_fault ? 'yes' : 'no'
+      // 等分类 watch 执行完，再恢复草稿里已选定的各部门处理人。
+      await Promise.resolve()
+      savedAssignments = Object.fromEntries((ticket.dispatch_chain_steps || [])
+        .filter((step: any) => step.assigned_owner_id)
+        .map((step: any) => [step.department_code, step.assigned_owner_id]))
+      await loadAssignments()
     } catch { ElMessage.error('草稿加载失败') }
   }
 })
@@ -178,12 +220,22 @@ function validate(): boolean {
     const value = form[key]
     if (value === null || value === undefined || (typeof value === 'string' && !value.trim())) errors[key] = '请填写此项'
   }
-  if ((isOpportunity.value || isReconciliation.value) && (!salesGroupId.value || !salesUsers.value.some(person => person.id === form.salesUserId))) errors.salesUserId = '请选择有效的销售人员'
+  if (isOpportunity.value && (!salesGroupId.value || !salesUsers.value.some(person => person.id === form.salesUserId))) errors.salesUserId = '请选择有效的销售人员'
   if (!isOpportunity.value && form.subcategory && !subcategoryOptions.value.some(c => c.label === form.subcategory)) errors.subcategory = '请选择当前分类下可提交的细分分类'
   const phone = /^(1[3-9]\d{9}|0\d{2,3}-?\d{7,8})$/
   if (form.callerPhone && !phone.test(form.callerPhone)) errors.callerPhone = '请输入有效的手机号或固定电话'
   if (form.contactPhone && !phone.test(form.contactPhone)) errors.contactPhone = '请输入有效的手机号或固定电话'
   if (!isOpportunity.value && (!categoriesLoaded.value || !selectedCategoryId.value)) errors.subcategory ||= '分类尚未加载或当前分类不可提交'
+  if (assignmentLoading.value || assignmentError.value) {
+    ElMessage.warning(assignmentError.value || '请等待处理人加载完成')
+    return false
+  }
+  for (const department of assignmentDepartments.value) {
+    if (!department.handlers.some(person => person.id === assignmentChoices[department.department_code])) {
+      ElMessage.warning(`请选择${department.department_code}处理人`)
+      return false
+    }
+  }
   return !Object.keys(errors).length
 }
 function payload(isDraft: boolean) {
@@ -198,9 +250,11 @@ function payload(isDraft: boolean) {
     contact_phone: form.contactPhone.trim() || null, customer_email: null,
     channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value || isInstantConsult.value || !isAssurance.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
     category_id: isOpportunity.value ? null : selectedCategoryId.value || null, description: form.description.trim(),
-    skill_group_id: isOpportunity.value || isReconciliation.value ? salesGroupId.value : null,
-    sales_owner_id: isOpportunity.value || isReconciliation.value ? form.salesUserId : null,
+    skill_group_id: isOpportunity.value ? salesGroupId.value : null,
+    sales_owner_id: isOpportunity.value ? form.salesUserId : null,
     dispatcher_id: null,
+    owner_id: assignmentDepartments.value.length ? assignmentChoices[assignmentDepartments.value[0]!.department_code] : null,
+    dispatch_owner_ids: Object.fromEntries(Object.entries(assignmentChoices).filter(([, id]) => id != null)),
     complaint_level: !isOpportunity.value && form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
     satellite_number: isOpportunity.value || isInstantConsult.value ? null : form.satelliteNumber.trim() || null,
     is_opportunity: isInstantConsult.value ? false : form.businessOpportunity ? form.businessOpportunity === 'yes' : null,

@@ -2,7 +2,7 @@ import api from './index'
 import type {
   TicketFilters, TicketCreatePayload, TicketUpdatePayload,
   ArticleCreatePayload, Ticket, TicketDetail, Article, PaginatedResponse,
-  TicketStateLog, DuplicateCheckPayload, DuplicateCheckResult,
+  TicketStateLog,
   BatchUpdatePayload,
 } from '@/types'
 
@@ -95,7 +95,7 @@ function adaptStateLogs(logs: any[]): any[] {
 }
 
 /** 时间线日志专用：state 字符串 → 状态对象
- *  与 stateStrToObj 的区别：returned 显示"退回"（日志记录的是退回动作） */
+ *  与列表/详情的区别：returned 显示"退回"（日志记录的是退回动作） */
 function stateLogStrToObj(key: string): any {
   const map: Record<string, { name: string; state_type: string }> = {
     pending: { name: '待受理', state_type: 'new' },
@@ -109,19 +109,7 @@ function stateLogStrToObj(key: string): any {
   return map[key] || { name: key, state_type: 'open' }
 }
 
-/** state 字符串 → StateTag 组件期望的对象（列表/详情用） */
-function stateStrToObj(key: string): any {
-  const map: Record<string, { name: string; state_type: string }> = {
-    pending: { name: '待受理', state_type: 'new' },
-    open: { name: '处理中', state_type: 'open' },
-    resolved: { name: '已处理', state_type: 'pending' },
-    on_hold: { name: '暂缓处理', state_type: 'pending' },
-    archived: { name: '已归档', state_type: 'closed' },
-    returned: { name: '待受理', state_type: 'new' },
-    cancelled: { name: '已撤销', state_type: 'closed' },
-  }
-  return map[key] || { name: key, state_type: 'open' }
-}
+
 
 /** 后端沟通记录映射为处理流程节点可展示的数据。 */
 function adaptArticle(a: any): any {
@@ -239,6 +227,7 @@ function buildCreatePayload(data: any): Record<string, any> {
     group_id: data.group_id || undefined,
     skill_group_id: data.skill_group_id || undefined,
     dispatcher_id: data.dispatcher_id || undefined,  // 部门对接人（建单必填）
+    owner_id: data.owner_id || undefined,            // 直指派分类建单时指定的处理人
     is_duplicate: !!data.is_duplicate,
     duplicate_reason: data.is_duplicate ? (data.duplicate_reason || undefined) : undefined,
     linked_ticket_id: data.duplicate_of_id || undefined,
@@ -323,24 +312,6 @@ export const ticketApi = {
     values: Record<string, unknown>
   }): Promise<any> {
     return api.post(`/tickets/${id}/closure-submit`, payload)
-  },
-
-  async checkDuplicate(data: DuplicateCheckPayload): Promise<DuplicateCheckResult> {
-    const res: ListResponse<any> = await api.get('/tickets', {
-      params: {
-        keyword: data.customer_phone,
-        page: 1, page_size: 5,
-      },
-    })
-    return {
-      has_duplicates: res.data.length > 0,
-      candidates: res.data.map((t: any) => ({
-        id: t.id, number: t.number,
-        state: stateStrToObj(t.state),  // StateTag 需要对象
-        created_at: t.created_at, customer_phone: t.customer_phone,
-        device_sn: t.device_sn || null,
-      })),
-    } as any
   },
 
   async getStateLogs(ticketId: number): Promise<TicketStateLog[]> {

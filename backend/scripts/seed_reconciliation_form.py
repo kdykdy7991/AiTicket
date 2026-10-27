@@ -1,4 +1,4 @@
-"""Published sales handoff form and finance handlers for reconciliation tickets."""
+"""业财对账经管审核及财务处理表单；保留旧销售表单以读取存量工单。"""
 
 import asyncio
 import sys
@@ -11,35 +11,34 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.database import async_session
-from app.core.security import hash_password
-from app.models.group import SkillGroup, UserSkillGroup
 from app.models.node_form import FormBinding, FormDefinition, FormFieldDefinition
-from app.models.user import User
-
-
-FINANCE_PEOPLE = (("jiangmin", "姜敏"), ("zhujingsheng", "朱景升"))
 
 
 async def seed_reconciliation_form(session_factory: async_sessionmaker | None = None) -> None:
     async with (session_factory or async_session)() as db:
-        finance = (await db.execute(select(SkillGroup).where(SkillGroup.name == "财务"))).scalar_one_or_none()
-        if finance is None:
-            finance = SkillGroup(name="财务")
-            db.add(finance)
+        review = (await db.execute(select(FormDefinition).where(
+            FormDefinition.code == "reconciliation_review_v1", FormDefinition.version == 1,
+        ))).scalar_one_or_none()
+        if review is None:
+            review = FormDefinition(code="reconciliation_review_v1", name="经管审核",
+                                    node_type="processing", version=1, enabled=True)
+            db.add(review)
             await db.flush()
-        for username, name in FINANCE_PEOPLE:
-            person = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
-            if person is None:
-                person = (await db.execute(select(User).where(User.name == name))).scalar_one_or_none()
-            if person is None:
-                person = User(username=username, name=name, password_hash=hash_password("skdy123"),
-                              role="handler", is_active=True)
-                db.add(person)
-                await db.flush()
-            membership = await db.get(UserSkillGroup, (person.id, finance.id))
-            if membership is None:
-                db.add(UserSkillGroup(user_id=person.id, skill_group_id=finance.id,
-                                      is_dispatcher=False))
+            db.add(FormFieldDefinition(
+                form_definition_id=review.id, field_key="processing_opinion",
+                label="处理意见", field_type="textarea", sort_order=0, required=True,
+                validation={"max_length": 4000}, storage_type="article", storage_key="body",
+            ))
+            await db.flush()
+            review.published_at = datetime.now(timezone.utc)
+        review_binding = (await db.execute(select(FormBinding).where(
+            FormBinding.node_type == "processing", FormBinding.department_code == "经营管理部",
+            FormBinding.category_id == 2204, FormBinding.form_definition_id == review.id,
+        ))).scalar_one_or_none()
+        if review_binding is None:
+            db.add(FormBinding(node_type="processing", department_code="经营管理部", category_id=2204,
+                               category_match_type="exact", form_definition_id=review.id,
+                               priority=0, enabled=True))
 
         form = (await db.execute(select(FormDefinition).where(
             FormDefinition.code == "reconciliation_sales_v1", FormDefinition.version == 1,

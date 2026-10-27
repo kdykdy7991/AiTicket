@@ -15,6 +15,7 @@
       <div class="timeline-content">
         <div class="timeline-head">
           <span class="action-name">{{ timelineActionName(node.log, ticket?.node_submissions || [], logs) }}</span>
+          <span v-if="completedSubmission(node.log)" class="completed-tag">已完成</span>
           <span class="action-time">
             <DateTimeLabel :iso="node.ts" />
           </span>
@@ -61,6 +62,7 @@ interface TimelineNode {
 
 const nodes = computed<TimelineNode[]>(() =>
   (props.logs || [])
+    .filter(log => log.action_type !== 'auto_assign')
     .map(log => ({
       key: `state-${log.id}`,
       log,
@@ -69,10 +71,18 @@ const nodes = computed<TimelineNode[]>(() =>
     .sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime()),
 )
 
+function completedSubmission(log: TicketStateLog) {
+  return props.ticket?.node_submissions?.find((entry: any) =>
+    entry.state_log_id === log.id && entry.action_type !== 'callback_record',
+  )
+}
+
 function responsibleLabel(log: TicketStateLog): string {
+  if (completedSubmission(log)?.node_type === 'processing') return '处理人'
   const actionLabels: Record<string, string> = {
     create: '创建人',
     dispatch: '分派人',
+    direct_assign: '指派人',
     refine: '判断人',
     transfer: '转派人',
     resolve: '处理人',
@@ -105,16 +115,23 @@ const TERMINAL_STATES = new Set(['archived', 'cancelled'])
 const currentStage = computed(() => {
   const state = props.currentState || nodes.value[nodes.value.length - 1]?.log.to_state_key
   if (!state || TERMINAL_STATES.has(state)) return null
-  const enteredAt = nodes.value[nodes.value.length - 1]?.ts || ''
+  const latestLog = [...(props.logs || [])].sort((a, b) => new Date(a.entered_at).getTime() - new Date(b.entered_at).getTime()).at(-1)
+  const enteredAt = latestLog?.entered_at || ''
   const steps = props.ticket?.dispatch_chain_steps || []
   const isPhoneFeedback = steps[props.ticket?.dispatch_step_index]?.stage === 'phone_feedback'
+  const nodeName = props.ticket?.node_context?.node_name
+  if (nodeName && state === 'resolved') return { title: nodeName, personLabel: '', person: '', enteredAt }
+  if (nodeName && ['pending', 'open', 'on_hold'].includes(state)) {
+    return { title: nodeName, personLabel: state === 'pending' ? '对接人' : '处理人',
+      person: state === 'pending' ? props.currentDispatcherName || '' : props.currentOwnerName || '', enteredAt }
+  }
   if (props.ticket?.node_context?.node_type === 'assignment' && state === 'pending') {
     return { title: '待指派售后人员', personLabel: '售后负责人', person: props.currentDispatcherName || '', enteredAt }
   }
   if (props.ticket?.category_id === 2301 && state === 'open') {
     return { title: '待售后问题判断', personLabel: '售后人员', person: props.currentOwnerName || '', enteredAt }
   }
-  if (isPhoneFeedback && state === 'pending') return { title: '待指派售后致电反馈人', personLabel: '对接人', person: props.currentDispatcherName || '', enteredAt }
+  if (isPhoneFeedback && state === 'pending') return { title: '售后致电反馈待接续', personLabel: '责任人', person: props.currentOwnerName || props.currentDispatcherName || '', enteredAt }
   if (isPhoneFeedback && state === 'open') return { title: '待售后致电反馈', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }
   if (state === 'pending') return { title: '待分派处理人', personLabel: '对接人', person: props.currentDispatcherName || '', enteredAt }
   if (state === 'open') return { title: '待提交处理说明', personLabel: '处理人', person: props.currentOwnerName || '', enteredAt }
@@ -185,6 +202,14 @@ const currentStage = computed(() => {
   color: var(--color-text-primary);
 }
 .is-current .action-name { color: var(--color-primary); }
+
+.completed-tag {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  border: 1px solid var(--color-border);
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+}
 
 .current-tag {
   font-size: 11px;

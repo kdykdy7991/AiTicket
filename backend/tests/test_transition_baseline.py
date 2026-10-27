@@ -643,6 +643,8 @@ def test_action_map_covers_all_reachable_transitions():
         "resolve", "hold", "resume", "reopen", "archive", "resubmit",
         # 域动作（非状态流转边，from==to 自环日志）
         "refine", "transfer",
+        # pending→open 的另一种语义：建单直指派（免部门对接人分派）
+        "direct_assign", "auto_assign",
     }
     assert action_for("pending", "open") == "dispatch"
     assert action_for("pending", "open", override="custom") == "custom"

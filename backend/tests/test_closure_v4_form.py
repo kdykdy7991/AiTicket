@@ -1,12 +1,12 @@
 """V0.15 closure score and recognition remain independent of legacy satisfaction."""
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.models.node_form import FormBinding, FormDefinition, TicketNodeSubmission
 from app.models.category import TicketCategory
-from app.models.ticket import Ticket
+from app.models.ticket import Ticket, TicketStateLog
 from scripts.seed_closure_v4_form import seed_closure_v4_form
 from test_closure_form import install_closure_form, resolved, payload, submit, REQUIRED_CATEGORY
 from test_transfer import tenv
@@ -116,11 +116,19 @@ async def test_v4_no_callback_or_incomplete_callback_hides_customer_fields(tenv)
     with as_user(tenv["aftersale_user"], "agent"):
         incomplete = await tenv["client"].post(
             f"/api/v1/tickets/{required['id']}/closure-submit", json=body)
-    assert incomplete.status_code == 200, incomplete.text
-    assert incomplete.json()["data"]["state"] == "resolved"
-    assert incomplete.json()["data"]["customer_satisfaction_score"] is None
-    assert incomplete.json()["data"]["callback_required"] is True
-    assert incomplete.json()["data"]["is_callbacked"] is False
+    assert incomplete.status_code == 422, incomplete.text
+    assert "请先完成回访" in incomplete.text
+    refreshed = await tenv["get"](required["id"])
+    assert refreshed["state"] == "resolved"
+    assert refreshed["callback_required"] is True and refreshed["is_callbacked"] is False
+    async with factory() as db:
+        stored = await db.get(Ticket, required["id"])
+        assert stored.closed_at is None and stored.closure_result is None
+        assert await db.scalar(select(func.count()).select_from(TicketNodeSubmission).where(
+            TicketNodeSubmission.ticket_id == required["id"], TicketNodeSubmission.node_type == "closure")) == 0
+        assert await db.scalar(select(func.count()).select_from(TicketStateLog).where(
+            TicketStateLog.ticket_id == required["id"], TicketStateLog.action_type == "archive")) == 0
+
 
 
 @pytest.mark.asyncio

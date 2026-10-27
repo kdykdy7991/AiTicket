@@ -81,11 +81,27 @@
 1. **路由规则自动匹配**（若给了 `category_id`）：`resolve_rule` 按分类路由规则补齐留空的对接部门 / 对接人字段（**body 显式值优先**）；不匹配只产生 warning，不拦截。注意：**处理人不在建单时分配**，留给"分派"步骤。
 2. **生成工单号**：`YYYYMMDD-XXXX`，当日自增计数。
 3. **计算解决时限**：按一级分类及其档位匹配策略，创建第一轮计时记录和 `solution_deadline`；线索工单不计 SLA。详见 [解决时限规则](sla-resolution-rules.md)。
-4. **重复工单检查**（仅提示，不拦截）：同 `customer_phone`、状态 ∈ {pending, open, resolved, on_hold}、非草稿的工单（若给了分类则再按分类过滤）→ 返回 `duplicate_tickets` warning。
-5. **部门对接人必填**：`dispatcher_id` 为空 → **422「建单时必须指定部门对接人」**。
+4. **客服新建不判重**（2026-10-27 用户确认）：无论来电号码、分类是否与既有工单相同，都作为独立工单创建，不查询重复候选、不弹重复告警，也不因相同信息拦截。原 TC-WF-008 的重复告警预期作废，验收应为同号码、同分类可连续创建独立工单，原工单保持不变。
+5. **部门对接人必填**：`dispatcher_id` 为空 → **422「建单时必须指定部门对接人」**（直指派分类例外，见 §3.5）。
 6. **写初始状态**：`apply_initial_state(None → pending)`，Action = `create`，Flow Log 记录创建人/对接人快照。
 
 > 建单后的工单固定为 `pending`：**无处理人（owner=None）**，等待分派。
+
+### 3.5 直指派分类：建单即指定处理人（2026-10-26 定稿）
+
+分类表布尔列 `ticket_categories.direct_assign` 打开时（语义：**自身或任一祖先为 True**，读时按父链上溯），该分类的工单**不走部门对接人分派**：
+
+| 环节 | 直指派分类 | 其他分类 |
+|---|---|---|
+| 建单表单 | 必选**处理人**（从责任部门成员中选），对接部门/对接人只读带出 | 必选部门对接人，处理人留到分派时选 |
+| 建单结果 | `pending` → 立即流转到 `open`，Flow Log = `create → direct_assign` | `pending`，Flow Log = `create`，等待分派 |
+| 处理人打回 | 回到**建单人（客服）**：状态 `pending`、**处理人清空**，客服重新指派 | 回到部门对接人待分派 |
+| 建单缺处理人 | 422「该分类由建单时直接指派处理人，请选择处理人」 | — |
+| 处理人不在责任部门 | 422 | — |
+
+- 状态机**无结构性改动**：`pending → open` 本就是既有边，只是 `action_type` 记为 `direct_assign`（区别于 `dispatch`）；权限矩阵新增一个与 `allow_sales_intake` 同族的场景豁免（建单人可直接推进）。
+- 打回落点由 `return_checkpoints` 快照保证：`direct_assign` 分支在写快照前清空 `owner_id`，还原出来即"待受理、无处理人"。
+- 规则是**分类级配置**，不是写死的分类 id；其他分类要采用同样通道只需把该列置 True。详见 [工单分派设计 §5.4](ticket_dispatch_design.md)。
 
 ### 3.4 问题分类口径（2026-09-29 定稿）
 
@@ -128,6 +144,8 @@
 分派后进入 `open`，工单有了处理人，责任从"受理侧"转移到"处理侧"。
 
 > **特例**：分类为"业务保障 > 星座大系统"的工单应分派给**星座大系统负责人**（占位账号），由其判断三级问题并回填工单（见 3.4）。
+
+> **例外**：直指派分类（§3.5）的工单不进这一阶段——它在建单时由客服直接指定处理人，随即走同一条 `pending → open` 边，Flow Log 记 `direct_assign`；此后处理人打回时回到**建单人**而非对接人。
 
 ---
 
@@ -365,6 +383,7 @@ on_hold → resolved（处理人确认，可直接办结） ；on_hold → cance
 ### 10.5 Flow Log 的 action_type
 
 - 新写入的日志**必有**业务动作类型：`action_type = 显式覆盖值 或 action_for(from, to)`，映射表覆盖全部 17 条边（create / instant_resolve / dispatch / return / cancel / resolve / hold / resume / reopen / resubmit / archive）；
+- **动作覆盖**：`direct_assign`（建单直指派，§3.5）与 `refine` / `transfer`（域动作）不属于任何流转边，靠显式 `action_type` 覆盖写入；
 - 接口读取时 `log.action_type or action_for(from, to)` —— 后者**仅**作为迁移前 NULL 历史行的展示兜底；
 - `duration_minutes` = 该日志到上一条日志之间的停留分钟数（首条为 None）。
 
@@ -379,7 +398,7 @@ on_hold → resolved（处理人确认，可直接办结） ；on_hold → cance
 | 400 | 需要原因的流转缺 `reason` |
 | 403 | 权限不足（矩阵任一不满足） |
 | 409 | 同一 resolved 节点重复提交处理说明 |
-| 422 | 非法流转 / dissatisfied 归档 / 分派缺处理人 / 建单缺对接人 / 沟通记录状态或角色不符 / 催办重复 / satisfaction 取值非法等输入与前置问题 |
+| 422 | 非法流转 / dissatisfied 归档 / 分派缺处理人 / 建单缺对接人 / 直指派建单缺处理人或处理人不在责任部门 / 沟通记录状态或角色不符 / 催办重复 / satisfaction 取值非法等输入与前置问题 |
 
 ---
 
@@ -388,6 +407,7 @@ on_hold → resolved（处理人确认，可直接办结） ；on_hold → cance
 | 场景 | action 序列 | 说明 |
 |---|---|---|
 | 标准闭环 | `create → dispatch → resolve → archive` | 最短正常路径 |
+| 直指派分类 | `create → direct_assign → resolve → archive` | 建单即指定处理人，免分派（§3.5） |
 | 即时办结咨询 | `instant_resolve` | 一跳到终态，免分派免回访 |
 | 草稿转正 | （草稿无日志）`create → dispatch → …` | 提交瞬间记 create |
 | 不满意闭环 | `create → dispatch → resolve → reopen → resolve → archive` | reopen 清满意度后再回访 |

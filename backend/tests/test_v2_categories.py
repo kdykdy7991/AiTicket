@@ -312,6 +312,6 @@ async def test_responsibility_slots_judgement_vs_handling(seeded_categories):
     assert change.transit_departments == ("市场生态部",)
     assert change.handling_department == "业务支撑组"
 
-    ledger = slots(2204)  # 业财对账：[销售, 财务]
-    assert ledger.transit_departments == ("销售",)
+    ledger = slots(2204)  # 业财对账：[经营管理部, 财务]
+    assert ledger.transit_departments == ("经营管理部",)
     assert ledger.handling_department == "财务"

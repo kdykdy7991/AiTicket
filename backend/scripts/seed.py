@@ -295,10 +295,10 @@ async def seed() -> None:
         print("Seeding categories...")
         await db.execute(
             text("""
-                INSERT INTO ticket_categories (id, parent_id, name, level, sort_order, is_active, requires_callback,
-                 created_at, updated_at)
+                INSERT INTO ticket_categories (id, parent_id, name, level, sort_order, is_active,
+                 requires_callback, direct_assign, created_at, updated_at)
                 VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active,
-                        :requires_callback, :created_at, :updated_at)
+                        :requires_callback, :direct_assign, :created_at, :updated_at)
                 ON CONFLICT (id) DO NOTHING
             """),
             [
@@ -306,6 +306,8 @@ async def seed() -> None:
                     "id": c[0], "parent_id": c[1], "name": c[2],
                     "level": c[3], "sort_order": c[4],
                     "is_active": True,
+                    "requires_callback": False,
+                    "direct_assign": False,
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -348,6 +350,16 @@ CALLBACK_REQUIRED_CATEGORY_IDS = {
     V2_CAT["业务保障"],
     2203,   # 业务运营 / 套餐变更
     2204,   # 业务运营 / 业财对账
+}
+
+# 建单直指派的分类规则（business rule, 不是工单事实）。
+# 语义见 app/services/direct_assign.py：标在某个分类上 = 该分类及其全部后代
+# 都由建单人（客服）在建单时直接指定处理人，不经过部门对接人分派。
+#   - 客户咨询/渠道代理合作(1204) 只覆盖该分类自己
+# 业务保障(2301) 及其后代走售后判断链，不在此列。
+DIRECT_ASSIGN_CATEGORY_IDS = {
+    1204,   # 客户咨询 / 渠道·代理合作
+    2203,   # 业务运营 / 套餐变更：建单确定各部门处理人
 }
 
 # 尚需旧 Rule 的服务投诉协调部门；测运控组转由正式链部门表维护。
@@ -441,7 +453,7 @@ DISPATCH_CHAINS: list[tuple[int, list[str], str]] = [
     (1204, ["市场生态部"],         "咨询/渠道/代理合作：单步直达"),
     (2102, ["值班组"],             "一般投诉：值班组承接（人员按班次维护）"),
     (2203, ["市场生态部", "业务支撑组"], "套餐变更：审核→执行，两步"),
-    (2204, ["销售", "财务"],       "业财对账：客服指定销售→销售指定财务"),
+    (2204, ["经营管理部", "财务"], "业财对账：经管审核→财务处理"),
     (2301, ["售后"],               "业务保障：张华先指派售后人员，再由所选人员分诊（L2 四选一）"),
     (2302, ["平台运维组", "售后"], "应用平台处理后由售后致电反馈"),
     (2310, ["星座大系统负责人"],   "售后分诊到此，负责人在此再判断（L3 三选一）"),
@@ -536,13 +548,17 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
         await db.execute(
             text("""
                 INSERT INTO ticket_categories
-                (id, parent_id, name, level, sort_order, is_active, created_at, updated_at)
-                VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active, :created_at, :updated_at)
+                (id, parent_id, name, level, sort_order, is_active, requires_callback,
+                 direct_assign, created_at, updated_at)
+                VALUES (:id, :parent_id, :name, :level, :sort_order, :is_active,
+                        :requires_callback, :direct_assign, :created_at, :updated_at)
                 ON CONFLICT (id) DO UPDATE SET
                     parent_id = EXCLUDED.parent_id,
                     name = EXCLUDED.name,
                     sort_order = EXCLUDED.sort_order,
                     is_active = EXCLUDED.is_active,
+                    requires_callback = EXCLUDED.requires_callback,
+                    direct_assign = EXCLUDED.direct_assign,
                     updated_at = EXCLUDED.updated_at
             """),
             [
@@ -550,10 +566,21 @@ async def seed_phase9_base_data(session_factory: async_sessionmaker | None = Non
                     "id": cid, "parent_id": parent, "name": name,
                     "level": level, "sort_order": sort, "is_active": True,
                     "requires_callback": cid in CALLBACK_REQUIRED_CATEGORY_IDS,
+                    "direct_assign": cid in DIRECT_ASSIGN_CATEGORY_IDS,
                     "created_at": now, "updated_at": now,
                 }
                 for (cid, parent, name, level, sort) in V2_CATEGORIES
             ],
+        )
+        # 分类规则可能后补：把标记为直指派的分类幂等置真，其余置假。
+        # 只动规则标记，不触碰存量工单上已记录的人员与状态事实。
+        await db.execute(
+            text("""
+                UPDATE ticket_categories
+                SET direct_assign = (id = ANY(:ids)), updated_at = :now
+                WHERE direct_assign IS DISTINCT FROM (id = ANY(:ids))
+            """),
+            {"ids": sorted(DIRECT_ASSIGN_CATEGORY_IDS), "now": now},
         )
         # 分类规则可能后补：把标记为要求回访的分类幂等置真，其余置假。
         # 只动规则标记，不触碰存量工单已记录的 tickets.callback_required。

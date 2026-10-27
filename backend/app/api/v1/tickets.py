@@ -1,4 +1,4 @@
-"""Tickets router — CRUD, batch update, cancel, state logs, duplicate check."""
+"""Tickets router — CRUD, batch update, cancel, state logs."""
 
 import csv
 import io
@@ -25,6 +25,7 @@ from app.models.group import SkillGroup, UserSkillGroup
 from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
 from app.services.sla import start_round, replace_running_deadline, root_category
+from app.services.reconciliation import reconciliation_steps, reconciliation_assignment
 from app.models.ticket import Article, ArticleAttachment, Ticket, TicketStateLog
 from app.models.node_form import FormDefinition, TicketNodeSubmission
 from app.models.user import User
@@ -62,6 +63,7 @@ from app.services.state_machine import (
     transition_precondition_error,
 )
 from app.services.callback_policy import resolve_callback_required
+from app.services.direct_assign import resolve_direct_assign, assign_chain_owners
 from app.services.node_context import NodeContext, NodeContextConflict, resolve_node_context
 from app.services.node_form import resolve_form, present_form, validate_submission
 
@@ -280,18 +282,6 @@ def _ticket_to_detail(
     )
 
 
-async def _is_dispatcher_anywhere(db: AsyncSession, user_id: int) -> bool:
-    """检查用户是否为任意对接部门的部门对接人（用于列表可见性判断）。"""
-    from app.models.group import UserSkillGroup
-    result = await db.execute(
-        select(func.count()).select_from(UserSkillGroup).where(
-            UserSkillGroup.user_id == user_id,
-            UserSkillGroup.is_dispatcher == True,
-        )
-    )
-    return (result.scalar() or 0) > 0
-
-
 async def _get_terminal_operators(
     db: AsyncSession, ticket_ids: list[int]
 ) -> dict[tuple[int, str], tuple[int, str]]:
@@ -365,14 +355,8 @@ async def list_tickets(
         selectinload(Ticket.dispatcher),
     ).where(Ticket.is_draft == False)
     if user.role == "handler":
-        # 对接人：看派给自己的待受理工单(dispatcher_id) + 已分派给自己处理的(owner_id)
-        # 处理人：只看已分派给自己的(owner_id)
-        if await _is_dispatcher_anywhere(db, user.id):
-            query = query.where(
-                (Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id)
-            )
-        else:
-            query = query.where(Ticket.owner_id == user.id)
+        # 可见性按工单当前明确指向的责任人判断，不依赖部门全局对接人身份。
+        query = query.where((Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id))
     elif user.role == "agent":
         if not user.is_group_leader:
             query = query.where(
@@ -496,12 +480,7 @@ async def export_tickets(
 
     # 角色过滤（与 list_tickets 一致）
     if user.role == "handler":
-        if await _is_dispatcher_anywhere(db, user.id):
-            query = query.where(
-                (Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id)
-            )
-        else:
-            query = query.where(Ticket.owner_id == user.id)
+        query = query.where((Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id))
     elif user.role == "agent":
         if not user.is_group_leader:
             query = query.where((Ticket.owner_id == user.id) | (Ticket.group_id == user.group_id))
@@ -699,6 +678,12 @@ async def submit_draft(
         raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
 
     is_instant_consult = ticket.category_id == INSTANT_CONSULT_CATEGORY_ID
+    is_direct_assign_draft = (
+        not ticket.is_opportunity
+        and not is_instant_consult
+        and ticket.category_id is not None
+        and await resolve_direct_assign(db, ticket.category_id)
+    )
     if is_instant_consult:
         if ticket.is_opportunity:
             raise HTTPException(422, detail="即时办结咨询不能作为线索工单")
@@ -712,17 +697,33 @@ async def submit_draft(
         ticket.dispatch_chain_steps = None
         ticket.dispatch_step_index = None
 
-    if not is_instant_consult and (ticket.is_opportunity or ticket.category_id == 2204):
+    if not is_instant_consult and ticket.category_id == 2204 and not ticket.is_opportunity:
+        rx = await reconciliation_assignment(db, "经营管理部")
+        ticket.skill_group_id = ticket.handler_skill_group_id = rx["skill_group_id"]
+        ticket.owner_id = rx["owner_id"]
+        ticket.dispatcher_id = rx["dispatcher_id"]
+        ticket.dispatch_chain_steps = reconciliation_steps()
+        ticket.dispatch_step_index = 0
+    elif not is_instant_consult and ticket.is_opportunity:
         sales_group = await _sales_group_for_owner(db, ticket.owner_id)
         ticket.skill_group_id = sales_group.id
         ticket.handler_skill_group_id = sales_group.id
         ticket.dispatcher_id = None
-        if ticket.category_id == 2204:
-            ticket.dispatch_chain_steps = [
-                {"order": 1, "department_code": "销售"},
-                {"order": 2, "department_code": "财务"},
-            ]
-            ticket.dispatch_step_index = 0
+    elif not is_instant_consult and is_direct_assign_draft:
+        # 直指派草稿：责任部门按分派链确定，处理人是客服建单时选定的；
+        # 提交时直接进入「处理中」，不经过部门对接人分派。
+        saved_choices = {step["department_code"]: step["assigned_owner_id"]
+                         for step in ticket.dispatch_chain_steps or [] if step.get("assigned_owner_id")}
+        from app.services.dispatch_chain import resolve_responsibility
+        resp = await resolve_responsibility(db, ticket.category_id)
+        steps = await assign_chain_owners(db, resp.get("chain_steps") or [], saved_choices,
+                                          first_owner_id=ticket.owner_id)
+        ticket.owner_id = steps[0]["assigned_owner_id"] if steps else ticket.owner_id
+        ticket.dispatch_chain_steps = steps
+        ticket.dispatch_step_index = 0 if steps else None
+        ticket.skill_group_id = resp.get("dispatcher_skill_group_id") or ticket.skill_group_id
+        ticket.handler_skill_group_id = resp.get("handler_skill_group_id") or ticket.handler_skill_group_id
+        ticket.dispatcher_id = resp.get("dispatcher_id") or ticket.dispatcher_id
     elif not is_instant_consult and not ticket.dispatcher_id:
         raise HTTPException(422, detail="提交前必须指定部门对接人")
 
@@ -750,7 +751,11 @@ async def submit_draft(
         ticket.first_response_at = ticket.closed_at
     elif ticket.is_opportunity or ticket.category_id == 2204:
         await apply_transition(db, ticket, to_state="open", operator=user,
-                               owner_id=ticket.owner_id, allow_sales_intake=True)
+                               owner_id=ticket.owner_id, allow_sales_intake=True,
+                               action_type="auto_assign" if not ticket.is_opportunity else None)
+    elif is_direct_assign_draft:
+        await apply_transition(db, ticket, to_state="open", operator=user,
+                               owner_id=ticket.owner_id, action_type="direct_assign")
     await db.commit()
 
     result = await db.execute(
@@ -828,13 +833,33 @@ async def update_draft(
     ticket.skill_group_id = body.skill_group_id
     ticket.handler_skill_group_id = body.handler_skill_group_id
     ticket.dispatcher_id = None if body.is_opportunity or body.category_id == 2204 else body.dispatcher_id
-    ticket.owner_id = body.sales_owner_id if body.is_opportunity or body.category_id == 2204 else None
+    is_direct_assign_draft = (
+        not body.is_opportunity
+        and body.category_id is not None
+        and await resolve_direct_assign(db, body.category_id)
+    )
+    ticket.owner_id = (
+        body.owner_id if is_direct_assign_draft
+        else body.sales_owner_id if body.is_opportunity else None
+    )
     if body.category_id == 2204 and not body.is_opportunity:
-        ticket.dispatch_chain_steps = [
-            {"order": 1, "department_code": "销售"},
-            {"order": 2, "department_code": "财务"},
-        ]
-        ticket.dispatch_step_index = 0
+        # 草稿尚未进入审核节点；正式提交时再确定部门和链快照。
+        ticket.dispatch_chain_steps = None
+        ticket.dispatch_step_index = None
+        ticket.skill_group_id = ticket.handler_skill_group_id = None
+        ticket.owner_id = None
+    elif is_direct_assign_draft:
+        # 直指派草稿：链快照与责任部门按分类链确定，提交时直接进入「处理中」
+        from app.services.dispatch_chain import resolve_responsibility
+        resp = await resolve_responsibility(db, body.category_id)
+        steps = await assign_chain_owners(db, resp.get("chain_steps") or [], body.dispatch_owner_ids,
+                                          first_owner_id=body.owner_id, draft=True)
+        ticket.owner_id = steps[0]["assigned_owner_id"] if steps else body.owner_id
+        ticket.dispatch_chain_steps = steps
+        ticket.dispatch_step_index = 0 if steps else None
+        ticket.skill_group_id = resp.get("dispatcher_skill_group_id") or body.skill_group_id
+        ticket.handler_skill_group_id = resp.get("handler_skill_group_id") or body.handler_skill_group_id
+        ticket.dispatcher_id = resp.get("dispatcher_id") or ticket.dispatcher_id
     else:
         ticket.dispatch_chain_steps = None
         ticket.dispatch_step_index = None
@@ -885,6 +910,9 @@ async def _compose_node_form(
     此时仍走既有回访记录入口，闭环表单不得用来绕过不满意限制。
     """
     node_type = context.node_type
+    form = await resolve_form(db, context)
+    # 节点名称来自已发布定义；只读查看者也应看到同一个名称，而非动作提示。
+    node_context["node_name"] = form.definition.name if form else None
     if node_type == "triage":
         article_actions["can_reply"] = False
     if node_type == "closure":
@@ -896,7 +924,6 @@ async def _compose_node_form(
         # 「要求回访但未回访」的工单需要先通过本表单记录回访事实。
         if await transition_permission_error(db, ticket, "archived", user) is not None:
             return None
-        form = await resolve_form(db, context)
         # 回访要求是只读事实：随表单一起下发，供界面展示且驱动字段可见性。
         return (await present_form(db, form, ticket, values=closure_condition_context(ticket))
                 if form else None)
@@ -904,7 +931,6 @@ async def _compose_node_form(
         return None
     if not (refine["can_refine"] or article_actions["can_reply"]):
         return None
-    form = await resolve_form(db, context)
     if not form:
         return None
     if node_type in ("processing", "response_plan", "response_confirmation", "analysis", "phone_feedback", "sales_opportunity") and article_actions["can_reply"]:
@@ -1219,6 +1245,9 @@ async def submit_node_form(
         if finance_person is None:
             raise HTTPException(422, detail="所选财务人员不是当前有效的财务部门成员")
         finance_owner_id = finance_person.id
+    if ticket.category_id == 2204 and context.department_code == "经营管理部":
+        finance_rx = await reconciliation_assignment(db, "财务")
+        finance_owner_id = finance_rx["owner_id"]
     if context.node_type == "response_plan":
         planned = data.get("planned_completion_at")
         if planned:
@@ -1328,7 +1357,7 @@ async def submit_node_form(
         if finance_owner_id is not None:
             await apply_transition(db, ticket, to_state="open", operator=user,
                                    owner_id=finance_owner_id, dispatcher_id=finance_owner_id,
-                                   allow_reconciliation_handoff=True)
+                                   allow_processing_handoff=True, action_type="auto_assign")
         if context.node_type == "sales_opportunity":
             log = await apply_transition(db, ticket, to_state="archived", operator=user,
                                          allow_sales_completion=True)
@@ -1499,6 +1528,8 @@ async def submit_closure(
         db, form, ticket, None, body.values,
         context=closure_condition_context(ticket),
     )
+    if ticket.callback_required and ticket_updates.get("is_callbacked", ticket.is_callbacked) is not True:
+        raise HTTPException(422, detail="请先完成回访，再关单归档")
     previous_satisfaction = ticket.satisfaction
     for key, value in ticket_updates.items():
         setattr(ticket, key, value)
@@ -1521,7 +1552,7 @@ async def submit_closure(
     )
     db.add(submission)
     # 归档前置用「应用本次表单后」的工单判定：已完成回访则一步闭环，
-    # 未完成 / 客户不满意则只固化回访事实、不流转状态，等下一次提交再关单。
+    # 客户不满意则只固化回访事实、不流转状态；需要回访但未完成的提交已在上面拒绝。
     if transition_precondition_error(ticket, "archived") is None:
         log = await apply_transition(db, ticket, to_state="archived", operator=user)
         submission.state_log_id = log.id if log else None
@@ -1538,8 +1569,7 @@ async def create_ticket(
     cat_idx: CategoryIndexes = Depends(get_category_indexes),
     user: User = Depends(require_role("admin", "agent")),
 ):
-    """Create a new ticket."""
-    warnings = None
+    """Create an independent ticket; customer-service intake does not check duplicates."""
     if body.category_id is not None and not await is_valid_ticket_category(db, body.category_id):
         raise HTTPException(422, detail="当前问题分类还需继续细化，或不能由客服建单选择")
     is_instant_consult = body.category_id == INSTANT_CONSULT_CATEGORY_ID
@@ -1630,7 +1660,15 @@ async def create_ticket(
                 body.expected_result = None
 
     is_reconciliation = body.category_id == 2204 and not body.is_opportunity
-    if (body.is_opportunity or is_reconciliation) and not body.is_draft:
+    # 直指派分类（services/direct_assign.py）：该类别工单免部门对接人分派，
+    # 由建单人（客服）在建单时直接指定处理人，工单直接进入「处理中」。
+    is_direct_assign = (
+        not body.is_opportunity
+        and not is_instant_consult
+        and body.category_id is not None
+        and await resolve_direct_assign(db, body.category_id)
+    )
+    if body.is_opportunity and not body.is_draft:
         sales_group = await _sales_group_for_owner(db, body.sales_owner_id)
         body.skill_group_id = sales_group.id
         body.handler_skill_group_id = sales_group.id
@@ -1645,10 +1683,15 @@ async def create_ticket(
     # 是否需要回访由分类规则决定，与「是否已完成回访」无关（callback_policy）。
     callback_required = await resolve_callback_required(db, body.category_id)
     if is_reconciliation:
-        chain_steps = [
-            {"order": 1, "department_code": "销售"},
-            {"order": 2, "department_code": "财务"},
-        ]
+        if body.is_draft:
+            body.skill_group_id = body.handler_skill_group_id = None
+            body.owner_id = body.dispatcher_id = None
+        else:
+            chain_steps = reconciliation_steps()
+            rx = await reconciliation_assignment(db, "经营管理部")
+            body.skill_group_id = body.handler_skill_group_id = rx["skill_group_id"]
+            body.dispatcher_id = rx["dispatcher_id"]
+            body.owner_id = rx["owner_id"]
 
     if body.category_id is not None and not is_reconciliation and not is_instant_consult:
         from app.services.dispatch_chain import resolve_responsibility
@@ -1677,8 +1720,23 @@ async def create_ticket(
             body.handler_skill_group_id = resp.get("handler_skill_group_id")
             body.dispatcher_id = resp.get("dispatcher_id")
 
+        # 直指派分类：责任部门由分派链决定（客服不选对接部门），建单时
+        # 直接指定该部门的处理人。对接人仍按链预填，仅保留部门可见性与
+        # 兜底分派，不再是必经环节。
+        if is_direct_assign and resp.get("via") == "chain":
+            body.skill_group_id = resp.get("dispatcher_skill_group_id")
+            body.handler_skill_group_id = resp.get("handler_skill_group_id")
+            if body.dispatcher_id is None and resp.get("dispatcher_id"):
+                body.dispatcher_id = resp["dispatcher_id"]
+
+    if is_direct_assign:
+        chain_steps = await assign_chain_owners(db, chain_steps or [], body.dispatch_owner_ids,
+                                               first_owner_id=body.owner_id, draft=body.is_draft)
+        if chain_steps:
+            body.owner_id = chain_steps[0]["assigned_owner_id"]
+
     if body.is_draft:
-        # Draft: no number, no SLA, no duplicate check, relaxed validation
+        # Draft: no number, no SLA, relaxed validation
         ticket = Ticket(
             number=None, description=body.description,
             priority=body.priority, channel=body.channel,
@@ -1696,7 +1754,8 @@ async def create_ticket(
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
             handler_skill_group_id=body.handler_skill_group_id,
-            owner_id=body.sales_owner_id if (body.is_opportunity or is_reconciliation) else None,
+            owner_id=(body.owner_id if is_direct_assign
+                      else body.sales_owner_id if body.is_opportunity else None),
             creator_id=user.id, first_owner_id=None,
             dispatcher_id=None if (body.is_opportunity or is_reconciliation) else body.dispatcher_id,
             is_duplicate=body.is_duplicate,
@@ -1711,7 +1770,7 @@ async def create_ticket(
             is_draft=True,
         )
     else:
-        # Formal ticket: generate number, SLA, duplicate check
+        # Formal ticket: generate number and SLA
         # Generate ticket number: YYYYMMDD-XXXX (daily counter from 0001)
         today = datetime.now().strftime("%Y%m%d")
         max_q = (
@@ -1728,30 +1787,15 @@ async def create_ticket(
         # Calculate SLA deadline
         solution_deadline = None
 
-        # Check duplicates
-        dup_result = await db.execute(
-            select(Ticket).where(
-                Ticket.customer_phone == body.customer_phone,
-                Ticket.state.in_(["pending", "open", "resolved", "on_hold"]),
-                Ticket.is_draft == False,
-            ).limit(5)
-        )
-        dup_tickets = dup_result.scalars().all()
-        if body.category_id:
-            dup_tickets = [t for t in dup_tickets if t.category_id == body.category_id]
-        if dup_tickets:
-            warnings = {
-                "duplicate_detected": True,
-                "duplicate_tickets": [
-                    {"id": t.id, "number": t.number, "state": t.state, "created_at": t.created_at.isoformat()}
-                    for t in dup_tickets
-                ],
-            }
-
         # Dispatcher required for formal tickets
-        if not body.dispatcher_id and not (body.is_opportunity or is_reconciliation or is_instant_consult):
+        if not body.dispatcher_id and not (body.is_opportunity or is_reconciliation or is_instant_consult
+                                           or is_direct_assign):
             detail = "所选分类尚未配置对接人，请联系管理员" if body.intake_form else "建单时必须指定部门对接人"
             raise HTTPException(422, detail=detail)
+
+        # 直指派分类：处理人必选（客服建单时直接指派，免对接人分派）
+        if is_direct_assign and not body.owner_id:
+            raise HTTPException(422, detail="该分类由建单时直接指派处理人，请选择处理人")
 
         ticket = Ticket(
             number=number, description=body.description,
@@ -1770,9 +1814,9 @@ async def create_ticket(
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
             handler_skill_group_id=body.handler_skill_group_id,
-            owner_id=None,
+            owner_id=body.owner_id if is_direct_assign else None,
             creator_id=user.id, first_owner_id=None,
-            dispatcher_id=None if is_reconciliation else body.dispatcher_id,
+            dispatcher_id=body.dispatcher_id,
             is_duplicate=body.is_duplicate,
             duplicate_reason=body.duplicate_reason,
             root_cause=body.root_cause,
@@ -1800,7 +1844,15 @@ async def create_ticket(
             ticket.first_response_at = ticket.closed_at
         elif body.is_opportunity or is_reconciliation:
             await apply_transition(db, ticket, to_state="open", operator=user,
-                                   owner_id=body.sales_owner_id, allow_sales_intake=True)
+                                   owner_id=body.owner_id if is_reconciliation else body.sales_owner_id,
+                                   allow_sales_intake=True,
+                                   action_type="auto_assign" if is_reconciliation else None)
+        elif is_direct_assign:
+            # 直指派分类：建单即指派处理人，工单直接进入「处理中」——
+            # 不经过部门对接人分派。动作记为 direct_assign（建单指派），
+            # 与真正的「分派」在 Flow Log 上区分开。
+            await apply_transition(db, ticket, to_state="open", operator=user,
+                                   owner_id=body.owner_id, action_type="direct_assign")
 
     await db.flush()
     await db.refresh(ticket)
@@ -1821,11 +1873,7 @@ async def create_ticket(
 
     return TicketCreateResponse(
         data=_ticket_to_detail(ticket, lineage=cat_idx.lineage, responsibility=cat_idx.responsibility),
-        warnings=DuplicateWarning(
-            duplicate_detected=bool(warnings and warnings.get("duplicate_detected")),
-            duplicate_tickets=(warnings or {}).get("duplicate_tickets", []),
-            auto_match_warning=auto_match_warning,
-        ) if (warnings or auto_match_warning) else None,
+        warnings=DuplicateWarning(auto_match_warning=auto_match_warning) if auto_match_warning else None,
     )
 
 

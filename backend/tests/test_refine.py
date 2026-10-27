@@ -18,7 +18,7 @@ from app.main import app
 from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
 from app.models.group import SkillGroup, UserSkillGroup
-from app.models.ticket import TicketStateLog
+from app.models.ticket import Ticket, TicketStateLog
 from app.models.user import User
 
 from test_workflow_regression import _next_phone, action_sequence, as_user
@@ -208,7 +208,8 @@ async def test_only_assigned_aftersale_person_can_judge(renv):
 
 
 @pytest.mark.asyncio
-async def test_phone_feedback_dispatch_returns_to_problem_judger(renv):
+@pytest.mark.parametrize("inactive", [False, True])
+async def test_phone_feedback_directly_returns_to_problem_judger(renv, inactive):
     factory = async_sessionmaker_for(renv["engine"])
     async with factory() as db:
         judger = User(username="rf-feedback-judger", name="问题判断人员", password_hash="x", role="handler")
@@ -229,25 +230,37 @@ async def test_phone_feedback_dispatch_returns_to_problem_judger(renv):
             f"/api/v1/tickets/{ticket['id']}/refine", json={"category_id": 2302},
         )
         assert refined.status_code == 200, refined.text
+    if inactive:
+        async with factory() as db:
+            person = await db.get(User, judger_id)
+            person.is_active = False
+            await db.commit()
     with as_user(renv["platform_user"], "handler"):
         transferred = await renv["client"].post(f"/api/v1/tickets/{ticket['id']}/articles", data={
             "type": "reply", "body": "平台处理完成",
         })
+        if inactive:
+            assert transferred.status_code == 422, transferred.text
+            unchanged = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
+            assert unchanged["state"] == "open" and unchanged["owner_id"] == renv["platform_user"]
+            assert unchanged["dispatch_step_index"] == 0
+            return
         assert transferred.status_code == 201, transferred.text
 
-    pending = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
-    assert pending["state"] == "pending"
-    assert pending["dispatcher_id"] == judger_id
-    with as_user(renv["aftersale_user"], "handler"):
-        default_dispatcher = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
-        assert "dispatch" not in {action["action"] for action in default_dispatcher["allowed_actions"]}
+    feedback = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert feedback["state"] == "open"
+    assert feedback["owner_id"] == judger_id
+    assert feedback["dispatcher_id"] is None
     with as_user(judger_id, "handler"):
         detail = (await renv["client"].get(f"/api/v1/tickets/{ticket['id']}")).json()
-        assert "dispatch" in {action["action"] for action in detail["allowed_actions"]}
-        dispatched = await renv["client"].patch(f"/api/v1/tickets/{ticket['id']}", json={
-            "state": "open", "owner_id": renv["aftersale_user"],
-        })
-        assert dispatched.status_code == 200, dispatched.text
+        assert "dispatch" not in {action["action"] for action in detail["allowed_actions"]}
+        listed = await renv["client"].get("/api/v1/tickets", params={"keyword": feedback["number"]})
+        assert ticket["id"] in [row["id"] for row in listed.json()["data"]]
+        exported = await renv["client"].get("/api/v1/tickets/export", params={"keyword": feedback["number"]})
+        assert feedback["number"] in exported.text
+    with as_user(renv["aftersale_user"], "handler"):
+        listed = await renv["client"].get("/api/v1/tickets", params={"keyword": feedback["number"]})
+        assert ticket["id"] not in [row["id"] for row in listed.json()["data"]]
 
 
 async def test_refine_switches_chain_and_dept(renv):
@@ -331,7 +344,7 @@ async def test_refine_continue_rule_same_dept(renv):
     feedback_response = await renv["client"].get(f"/api/v1/tickets/{t['id']}")
     assert feedback_response.status_code == 200, feedback_response.text
     feedback = feedback_response.json()
-    assert feedback["state"] == "pending"
+    assert feedback["state"] == "open"
     assert feedback["dispatch_step_index"] == 2
     assert feedback["skill_group_name"] == "售后"
 
@@ -377,3 +390,36 @@ async def test_refine_denied_in_terminal_state(renv):
         await db.commit()
     resp = await renv["refine"](t["id"], 2302, expect=403)
     assert "仅待受理/处理中" in resp.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_ticket_specific_contact_visible_without_department_dispatcher_role(renv):
+    """A ticket's explicit contact is visible without granting a global department role."""
+    factory = async_sessionmaker_for(renv['engine'])
+    async with factory() as db:
+        contact = User(username='specific-feedback-contact', name='指定反馈人', password_hash='x', role='handler')
+        db.add(contact)
+        await db.flush()
+        contact_id = contact.id
+        db.add(UserSkillGroup(user_id=contact_id, skill_group_id=renv['sg_aftersale'], is_dispatcher=False))
+        await db.commit()
+    ticket = await renv['create_ticket']()
+    async with factory() as db:
+        stored = await db.get(Ticket, ticket['id'])
+        stored.category_id = 2302
+        stored.dispatch_chain_steps = [{'order': 1, 'department_code': '平台运维组'},
+                                       {'order': 2, 'department_code': '售后', 'stage': 'phone_feedback'}]
+        stored.dispatch_step_index = 1
+        stored.skill_group_id = stored.handler_skill_group_id = renv['sg_aftersale']
+        stored.owner_id = None
+        stored.dispatcher_id = contact_id
+        await db.commit()
+    with as_user(contact_id, 'handler'):
+        response = await renv['client'].get('/api/v1/tickets', params={'keyword': ticket['number']})
+        assert response.status_code == 200, response.text
+        assert [row['id'] for row in response.json()['data']] == [ticket['id']]
+        exported = await renv['client'].get('/api/v1/tickets/export', params={'keyword': ticket['number']})
+        assert ticket['number'] in exported.text
+    with as_user(renv['platform_user'], 'handler'):
+        response = await renv['client'].get('/api/v1/tickets', params={'keyword': ticket['number']})
+        assert response.json()['data'] == []
