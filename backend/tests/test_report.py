@@ -87,3 +87,33 @@ async def test_service_analysis_uses_real_tickets_and_separates_opportunities(cl
     assert {row["name"]: row["count"] for row in data["by_category"]} == {
         "业务保障": 1, "线索工单": 1,
     }
+
+
+async def test_report_closure_rate_counts_only_archived_service_tickets(client):
+    c, _dispatcher_id, engine = client
+    when = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+    async with AsyncSession(engine) as session:
+        session.add_all([
+            Ticket(number="CLOSED-SERVICE", customer_phone="13900000001", creator_id=1,
+                   state="archived", is_opportunity=False, customer_recognized=True, created_at=when),
+            Ticket(number="OPEN-SERVICE", customer_phone="13900000002", creator_id=1,
+                   state="open", is_opportunity=False, satisfaction="satisfied", created_at=when),
+            Ticket(number="CANCELLED-SERVICE", customer_phone="13900000003", creator_id=1,
+                   state="cancelled", is_opportunity=False, created_at=when),
+            Ticket(number="CLOSED-LEAD", customer_phone="13900000004", creator_id=1,
+                   state="archived", is_opportunity=True, customer_recognized=True, created_at=when),
+        ])
+        await session.commit()
+
+    response = await c.get("/api/v1/stats/service-analysis", params={
+        "date_from": "2026-07-15", "date_to": "2026-07-15",
+    })
+    assert response.status_code == 200, response.text
+    metrics = response.json()["data"]["metrics"]
+    assert metrics["total"] == 4
+    assert metrics["service_count"] == 3
+    assert metrics["closed_count"] == 1
+    assert metrics["closure_rate"] == 0.3333
+    assert metrics["satisfied_count"] == 1
+    assert metrics["rated_count"] == 1
+    assert metrics["satisfaction_rate"] == 0.3333

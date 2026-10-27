@@ -110,7 +110,7 @@
             </div>
           </section>
         </div>
-        <p class="metric-note">统计口径：不含草稿；工单总量包含线索，线索量单独列示。闭环率以所选周期内创建的工单为分母；超时率只统计配置了解决时限且未撤销的非线索工单；满意/认可率仅统计已记录相应结果的工单。</p>
+        <p class="metric-note">统计口径：不含草稿；工单总量包含线索，线索量单独列示。闭环率为已归档非线索工单数除以非线索工单数；超时率只统计配置了解决时限且未撤销的非线索工单；客户满意率为认可工单数除以非线索工单数。</p>
       </template>
       <el-empty v-else-if="!loading" description="暂无统计数据" />
     </div>
@@ -175,7 +175,7 @@ const kpis = computed(() => [
   { label: '线索量', value: formatNumber(metrics.value.opportunity_count), foot: comparison('opportunity_count'), tone: 'blue', icon: DataLine },
   { label: '闭环率', value: rate(metrics.value.closure_rate), foot: comparison('closure_rate', true), tone: 'green', icon: CircleCheck },
   { label: '超时率', value: rate(metrics.value.overdue_rate), foot: comparison('overdue_rate', true), tone: 'orange', icon: Clock },
-  { label: '客户满意/认可率', value: rate(metrics.value.satisfaction_rate), foot: `已评价 ${formatNumber(metrics.value.rated_count)} 件`, tone: 'sky', icon: CircleCheck },
+  { label: '客户满意率', value: rate(metrics.value.satisfaction_rate), foot: `非线索工单 ${formatNumber(metrics.value.service_count)} 件`, tone: 'sky', icon: CircleCheck },
 ])
 
 function selectThisMonth() {
@@ -244,7 +244,7 @@ function exportCsv() {
     ['线索工单量', metrics.value.opportunity_count, report.value.prev_metrics.opportunity_count],
     ['闭环率', rate(metrics.value.closure_rate), rate(report.value.prev_metrics.closure_rate)],
     ['超时率', rate(metrics.value.overdue_rate), rate(report.value.prev_metrics.overdue_rate)],
-    ['客户满意/认可率', rate(metrics.value.satisfaction_rate), rate(report.value.prev_metrics.satisfaction_rate)],
+    ['客户满意率', rate(metrics.value.satisfaction_rate), rate(report.value.prev_metrics.satisfaction_rate)],
     ['已评价工单量', metrics.value.rated_count, report.value.prev_metrics.rated_count],
     [], ['工单趋势'], ['日期', '新增工单', '闭环工单'],
     ...report.value.trend.map(day => [day.date, day.new, day.closed]),

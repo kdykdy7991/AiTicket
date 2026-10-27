@@ -219,10 +219,6 @@ function relativeWidth(value: number, rows: any[]) {
 const TOTAL_ICON = () => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
   h('path', { d: 'M22 12h-4l-3 9L9 3l-3 9H2' }),
 ])
-const JUDGED_ICON = () => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
-  h('path', { d: 'M9 11l3 3L22 4' }),
-  h('path', { d: 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' }),
-])
 const VALID_ICON = () => h('svg', { width: 22, height: 22, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, [
   h('polygon', { points: '12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2' }),
 ])
@@ -296,11 +292,6 @@ const kpiList = computed<KpiItem[]>(() => {
       display: formatNumber(k.total ?? 0), unit: '',
       icon: TOTAL_ICON, tone: 'mint',
     }, countDelta(k.total, p.total, true)),
-    withDelta({
-      key: 'judged', label: '已完成销售判断',
-      display: formatNumber(k.judged ?? 0), unit: '',
-      icon: JUDGED_ICON, tone: 'blue',
-    }, countDelta(k.judged, p.judged, true)),
     withDelta({
       key: 'valid', label: '有效线索数',
       display: formatNumber(k.valid ?? 0), unit: '',
@@ -555,7 +546,7 @@ onBeforeUnmount(() => {
 .page-subtitle { font-size: 14px; color: #718098; margin: 0; }
 .header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; max-width: min(100%, 950px); }
 .header-actions :deep(.date-picker) { width: 252px; }
-.kpi-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 17px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 17px; }
 .kpi-card { display: flex; align-items: flex-start; gap: 15px; min-width: 0; min-height: 112px; padding: 18px 16px; border: 1px solid #eef0f4; border-radius: 8px; background: #fff; }
 .kpi-card.mint { background: linear-gradient(115deg, #f0f9f5, #fff); }
 .kpi-card.blue { background: linear-gradient(115deg, #f0f6fb, #fff); }

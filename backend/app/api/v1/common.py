@@ -1364,14 +1364,12 @@ async def service_analysis_stats(
         ))
 
     def satisfaction(ticket: Ticket) -> bool | None:
-        if ticket.customer_recognized is not None:
-            return ticket.customer_recognized
-        if ticket.satisfaction in {"satisfied", "average", "dissatisfied"}:
-            return ticket.satisfaction == "satisfied"
-        return None
+        return ticket.customer_recognized
 
     def metrics(tickets: list[Ticket]) -> dict:
-        rated = [satisfaction(ticket) for ticket in tickets]
+        service_tickets = [ticket for ticket in tickets if ticket.is_opportunity is not True]
+        closed_service_count = sum(ticket.state == "archived" for ticket in service_tickets)
+        rated = [satisfaction(ticket) for ticket in service_tickets]
         rated = [value for value in rated if value is not None]
         count = len(tickets)
         sla_tickets = [ticket for ticket in tickets if ticket.solution_deadline is not None
@@ -1379,17 +1377,17 @@ async def service_analysis_stats(
         overdue_count = sum(is_overdue(ticket) for ticket in sla_tickets)
         return {
             "total": count,
-            "service_count": sum(ticket.is_opportunity is not True for ticket in tickets),
+            "service_count": len(service_tickets),
             "opportunity_count": sum(ticket.is_opportunity is True for ticket in tickets),
-            "closed_count": sum(is_closed(ticket) for ticket in tickets),
-            "closure_rate": round(sum(is_closed(ticket) for ticket in tickets) / count, 4) if count else 0,
+            "closed_count": closed_service_count,
+            "closure_rate": round(closed_service_count / len(service_tickets), 4) if service_tickets else 0,
             "overdue_count": overdue_count,
             "overdue_rate": round(overdue_count / len(sla_tickets), 4) if sla_tickets else 0,
             "satisfied_count": sum(value is True for value in rated),
             "rated_count": len(rated),
-            "satisfaction_rate": round(sum(value is True for value in rated) / len(rated), 4) if rated else None,
+            "satisfaction_rate": round(sum(value is True for value in rated) / len(service_tickets), 4) if service_tickets else 0,
             "long_open_count": sum(not is_closed(ticket) and now - ticket.created_at >= timedelta(hours=72) for ticket in tickets),
-            "dissatisfied_count": sum(satisfaction(ticket) is False for ticket in tickets),
+            "dissatisfied_count": sum(satisfaction(ticket) is False for ticket in service_tickets),
         }
 
     lineage = await build_lineage_index(db)
