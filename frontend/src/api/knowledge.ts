@@ -45,7 +45,7 @@ export interface RagPresentation {
 export interface KnowledgeSearchPayload { citations: RagCitation[] }
 
 export const knowledgeApi = {
-  status: () => api.get('/knowledge/status') as unknown as Promise<{ mode: 'mock' | 'rag' }>,
+  status: () => api.get('/knowledge/status') as unknown as Promise<{ mode: 'rag' }>,
   collections: (cursor?: string) => api.get('/knowledge/collections', { params: { limit: 20, cursor } }) as unknown as Promise<Page<KnowledgeCollection>>,
   documents: (collectionId: string, params: { q?: string; file_type?: string; cursor?: string }) =>
     api.get(`/knowledge/collections/${encodeURIComponent(collectionId)}/documents`, { params: { limit: 20, ...params } }) as unknown as Promise<Page<KnowledgeDocument>>,

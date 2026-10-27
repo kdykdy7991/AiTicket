@@ -36,7 +36,7 @@ async def test_observer_can_read_global_data_but_cannot_write(client):
         response = await http.get(path, headers=headers)
         assert response.status_code == 200, (path, response.text)
     knowledge = await http.get("/api/v1/knowledge/status", headers=headers)
-    assert knowledge.status_code in {200, 503}  # 503 when the mock knowledge service is disabled
+    assert knowledge.status_code == 503  # No RAG service is configured for tests.
     tickets = await http.get("/api/v1/tickets", headers=headers)
     assert tickets.json()["data"][0]["number"] == "OBS-001"
     detail = await http.get("/api/v1/tickets/1", headers=headers)

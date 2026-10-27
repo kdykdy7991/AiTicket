@@ -81,3 +81,11 @@ async def test_rag_service_unauthorized_is_not_local_login_failure(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         await knowledge._json("GET", "/collections", SimpleNamespace(id=7))
     assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_knowledge_service_returns_503(monkeypatch):
+    monkeypatch.setattr(settings, "RAG_SERVICE_TOKEN", "")
+    with pytest.raises(HTTPException) as exc:
+        await knowledge.collections(user=SimpleNamespace(id=7))
+    assert exc.value.status_code == 503

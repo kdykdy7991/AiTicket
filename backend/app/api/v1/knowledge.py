@@ -83,6 +83,7 @@ def _document(row: dict) -> dict:
 
 @router.get("/status")
 async def status(user: User = Depends(require_role("admin", "observer"))):
+    _url("/collections")
     return {"mode": "rag"}
 
 

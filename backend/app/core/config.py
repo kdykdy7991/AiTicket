@@ -45,8 +45,7 @@ class Settings(BaseSettings):
     CASDOOR_CLIENT_SECRET: str = ""
     CASDOOR_REDIRECT_ORIGINS: str = ""
 
-    # Isolated UI/contract prototype. Never serves RAG content.
-    KNOWLEDGE_MOCK_ENABLED: bool = False
+    # Real RAG knowledge service.
     RAG_API_URL: str = ""
     RAG_SERVICE_TOKEN: str = ""
 
