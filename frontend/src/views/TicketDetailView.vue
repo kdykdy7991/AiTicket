@@ -285,7 +285,7 @@
           </div>
 
           <!-- 当前判断人的正常处理动作，选分类后按分派链流转。 -->
-          <div v-if="canRefine && currentForm" class="refine-card">
+          <div v-if="canRefine && currentForm" class="refine-card" :class="{ 'refine-card--compact': isCompactTriage }">
             <div class="refine-card-title">{{ currentForm.name }}</div>
             <p class="refine-card-hint">选择下一层问题分类，填写核查信息后一起提交；责任部门由系统确定。</p>
             <el-select popper-class="ticket-dark-select-popper" v-model="triageTargetCategoryId" placeholder="选择下一层问题分类" @change="loadTriageForm">
@@ -301,12 +301,14 @@
                 <el-option v-for="person in triageHandlers" :key="person.id" :label="person.name" :value="person.id" />
               </el-select>
             </div>
-            <div v-for="field in currentForm.fields.filter((item: any) => item.visible)" :key="field.field_key" class="triage-field">
-              <label>{{ field.label }}<span v-if="field.required"> *</span></label>
-              <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="triageValues[field.field_key]" clearable>
-                <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
-              </el-select>
-              <el-input v-else v-model="triageValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? 3 : undefined" />
+            <div :class="{ 'triage-fields-grid': isCompactTriage }">
+              <div v-for="field in triageDisplayFields" :key="field.field_key" class="triage-field" :class="{ 'triage-field--wide': triageFieldIsWide(field) }">
+                <label>{{ field.label }}<span v-if="field.required"> *</span></label>
+                <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="triageValues[field.field_key]" clearable>
+                  <el-option v-for="option in field.options" :key="option" :label="option" :value="option" />
+                </el-select>
+                <el-input v-else v-model="triageValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? (isCompactTriage && !triageFieldIsWide(field) ? 2 : 3) : undefined" />
+              </div>
             </div>
             <el-button type="primary" :loading="refining" :disabled="!triageTargetCategoryId || (isConstellationRoute && !triageAssignedOwnerId)" @click="submitTriageForm">{{ isConstellationRoute ? '确认并流转' : '提交分诊并重新派单' }}</el-button>
           </div>
@@ -704,6 +706,29 @@ const refineOptions = computed<
 >(() => (ticket.value as any)?.refine_options ?? [])
 const refining = ref(false)
 const currentForm = ref<any>(null)
+const isCompactTriage = computed(() => currentForm.value?.code === 'after_sales_triage')
+const compactTriageOrder = [
+  'proposer', 'proposer_department', 'test_scenario', 'test_device',
+  'terminal_firmware_version', 'host_software', 'terminal_configuration',
+  'satellite_selection_rule', 'data_frequency_packet_length', 'obstruction_assessment',
+  'investigation_notes', 'deployment_environment', 'closure_requirement',
+]
+const compactTriageTextareas = new Set([
+  'terminal_configuration', 'satellite_selection_rule',
+  'data_frequency_packet_length', 'obstruction_assessment',
+])
+const triageDisplayFields = computed<any[]>(() => {
+  const fields = (currentForm.value?.fields || []).filter((field: any) => field.visible)
+  if (!isCompactTriage.value) return fields
+  const position = (field: any) => {
+    const index = compactTriageOrder.indexOf(field.field_key)
+    return index < 0 ? compactTriageOrder.length + (field.sort_order || 0) : index
+  }
+  return [...fields].sort((left: any, right: any) => position(left) - position(right))
+})
+function triageFieldIsWide(field: any): boolean {
+  return field.field_type === 'textarea' && !compactTriageTextareas.has(field.field_key)
+}
 const triageTargetCategoryId = ref<number | null>(null)
 const triageValues = ref<Record<string, string>>({})
 const triageAssignedOwnerId = ref<number | null>(null)
@@ -2047,4 +2072,13 @@ async function confirmCancel() {
 .ticket-detail-view :deep(.attachment-area), .ticket-detail-view :deep(.addition-reason) { padding-left: 26px; padding-right: 26px; }
 .ticket-detail-view :deep(.attachment-hint), .ticket-detail-view :deep(.addition-hint), .ticket-detail-view :deep(.disabled-hint) { color: #9bbbd7; }
 @media (max-width: 700px) { .resubmit-card, .refine-card, .dispatch-card, .archive-card, .sales-submission-card { padding: 17px; } .resubmit-selects { grid-template-columns: 1fr; } .dispatch-card-body { flex-wrap: wrap; } .dispatch-select { min-width: 100%; } .ticket-detail-view :deep(.reply-input-area) { margin: 14px 16px 0; } .ticket-detail-view :deep(.reply-actions) { padding: 16px; } }
+/* 仅初步判断依据采用紧凑布局，其余处理表单保持原有排布。 */
+.refine-card--compact { container: triage-form / inline-size; }
+.triage-fields-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; margin: 18px 0; }
+.triage-fields-grid > .triage-field { min-width: 0; margin: 0; }
+.triage-fields-grid > .triage-field--wide { grid-column: 1 / -1; }
+.triage-fields-grid :deep(.el-select), .triage-fields-grid :deep(.el-input) { width: 100%; }
+@container triage-form (max-width: 620px) {
+  .triage-fields-grid { grid-template-columns: minmax(0, 1fr); }
+}
 </style>
