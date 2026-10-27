@@ -1610,10 +1610,8 @@ async function confirmCancel() {
   width: min(360px, 34%);
   flex-shrink: 0;
   align-self: flex-start;
-  position: sticky;
-  top: 20px;
-  max-height: calc(100vh - 40px);
-  overflow-y: auto;
+  /* 侧栏不再自带滚动：卡片按内容自然撑高（处理时间流条目多时也不压缩、
+     不溢出边框），整列随页面一起滚动，不产生侧边滚动条。 */
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -1624,6 +1622,8 @@ async function confirmCancel() {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-xs);
   padding: 20px;
+  /* 保持自然高度，避免被父级 flex 压缩导致内容溢出卡片边框 */
+  flex-shrink: 0;
 }
 .flow-card :deep(.timeline-item) { padding-bottom: 22px; }
 .flow-card :deep(.action-operator) { margin-top: 4px; }
@@ -1635,7 +1635,7 @@ async function confirmCancel() {
 
 @media (max-width: 900px) {
   .detail-body { flex-direction: column; }
-  .detail-sidebar { width: auto; position: static; max-height: none; overflow: visible; }
+  .detail-sidebar { width: auto; }
 }
 
 .timeline-card {
@@ -1934,7 +1934,7 @@ async function confirmCancel() {
 .dissatisfied-hint { color: #ffc76e; }
 .ticket-detail-view :deep(.el-textarea__inner) { background: #061b34; color: #e5f2ff; border: 1px solid #1b547f; box-shadow: none; }
 .ticket-detail-view :deep(.el-textarea__inner:focus) { border-color: #37a7e7; box-shadow: 0 0 0 2px #2188d140; }
-@media (max-width: 900px) { .detail-body { flex-direction: column; } .detail-sidebar { width: auto; position: static; max-height: none; } }
+@media (max-width: 900px) { .detail-body { flex-direction: column; } .detail-sidebar { width: auto; } }
 /* 详情页采用参考稿的卡片节奏、摘要行和高亮时间轴。 */
 .detail-header { margin-bottom: 20px; padding: 0; border: 0; }
 .detail-header::after { display: none; }
@@ -1950,7 +1950,7 @@ async function confirmCancel() {
 .header-facts span { color: #9ac3e3; }
 .header-facts strong { color: #f3f8ff; font-weight: 500; white-space: nowrap; }
 .detail-body { gap: 16px; align-items: flex-start; }
-.detail-sidebar { width: min(416px, 31%); max-height: calc(100vh - 80px); }
+.detail-sidebar { width: min(416px, 31%); }
 .ticket-content-flow :deep(.form-section) { padding: 20px 27px 22px; margin-bottom: 14px; border-color: #14649c; border-radius: 9px; background: linear-gradient(110deg, #082646, #061d39 78%); }
 .ticket-content-flow :deep(.section-heading) { position: relative; margin-bottom: 10px; padding-bottom: 15px; border-color: #17527d; font-size: 19px; }
 .ticket-content-flow :deep(.section-heading::after) { content: ''; position: absolute; left: 0; bottom: -2px; width: 48px; height: 3px; border-radius: 3px; background: #159df5; box-shadow: 0 0 12px #189cff; }
@@ -1971,7 +1971,7 @@ async function confirmCancel() {
 .flow-card :deep(.action-operator) { margin-top: 4px; color: #9bbddd; font-size: 13px; }
 .flow-card :deep(.current-tag) { border: 1px solid #1371b4; border-radius: 5px; background: #093a68; color: #4db5ff; padding: 3px 7px; }
 @media (max-width: 1100px) { .header-facts > div { padding: 0 14px; } .detail-sidebar { width: 34%; } .timeline-section-title small { display: none; } }
-@media (max-width: 900px) { .detail-sidebar { width: auto; max-height: none; } .flow-card { min-height: 0; } }
+@media (max-width: 900px) { .detail-sidebar { width: auto; } .flow-card { min-height: 0; } }
 @media (max-width: 600px) { .ticket-number { font-size: 24px; } .header-actions { width: 100%; margin-left: 0; } .header-action-btn { min-width: 0; flex: 1; } .header-facts > div { width: 50%; padding: 6px 10px 6px 0; border: 0; gap: 6px; flex-wrap: wrap; } .ticket-content-flow :deep(.section-eyebrow) { display: none; } }
 /* 流程操作与记录统一使用详情卡片的视觉层级。 */
 .resubmit-card, .refine-card, .dispatch-card, .archive-card, .sales-submission-card, .terminal-notice {
