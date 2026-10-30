@@ -200,6 +200,10 @@ async def test_successful_hold_keeps_routing_facts(tenv):
     # 暂缓原因落在 Flow Log，不新增 Ticket 列
     factory = factory_of(tenv)
     async with factory() as s:
+    history = (await tenv["client"].get(f"/api/v1/tickets/{t['id']}/state-logs")).json()["data"]
+    hold_log = next(log for log in history if log["action_type"] == "hold")
+    assert datetime.fromisoformat(hold_log["hold_until_snapshot"]) == datetime.fromisoformat(d["hold_until"])
+    assert hold_log["reason"] == "等待客户提供登录日志"
         logs = (await s.execute(select(TicketStateLog).where(
             TicketStateLog.ticket_id == t["id"],
             TicketStateLog.action_type == "hold"))).scalars().all()
@@ -307,6 +311,8 @@ async def test_resume_returns_to_same_node_and_clears_hold(tenv):
     assert d["category_id"] == before["category_id"]
     assert d["skill_group_id"] == before["skill_group_id"]
     assert d["owner_id"] == before["owner_id"]
+    history = (await tenv["client"].get(f"/api/v1/tickets/{t['id']}/state-logs")).json()["data"]
+    assert next(log for log in history if log["action_type"] == "hold")["hold_until_snapshot"] is not None
     assert d["dispatch_step_index"] == before["dispatch_step_index"]
     assert d["dispatch_chain_steps"] == before["dispatch_chain_steps"]
     detail = (await tenv["client"].get("/api/v1/tickets/" + str(t["id"]))).json()

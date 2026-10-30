@@ -76,6 +76,7 @@ function adaptStateLogs(logs: any[]): any[] {
       left_at: leftAt,
       duration_seconds: durationSeconds,
       reason: log.reason,
+      hold_until_snapshot: log.hold_until_snapshot,
       // 是否"退回类"动作：由后端 Flow Log 的 action_type 决定（唯一事实来源）。
       // return=退回/打回，reopen=已处理退回重开；resume(恢复处理) 不算退回。
       is_return: ['return', 'reopen'].includes(log.action_type || ''),

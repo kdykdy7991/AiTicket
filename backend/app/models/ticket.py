@@ -214,6 +214,7 @@ class TicketStateLog(Base):
     to_state: Mapped[str] = mapped_column(String(30), nullable=False)
     operator_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
+    hold_until_snapshot: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Flow Log 动作类型：由 (from_state, to_state) 经 state_machine.action_for 推导
     # （create/dispatch/hold/resume/resolve/reopen/return/resubmit/archive/cancel/
     #  instant_resolve）。历史日志为 NULL（不回填）。

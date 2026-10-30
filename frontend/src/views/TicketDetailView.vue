@@ -50,6 +50,7 @@
                   <div><span>回访</span><strong>{{ ticket.is_callbacked ? '已回访' : '未回访' }}</strong></div>
                   <div v-if="ticket.satisfaction"><span>满意度</span><strong>{{ ticket.satisfaction }}</strong></div>
                   <div v-if="ticket.callback_details" class="sales-submission-opinion"><span>回访记录</span><strong>{{ ticket.callback_details }}</strong></div>
+                  <div v-if="ticket.unsatisfied_reason" class="sales-submission-opinion"><span>不满意原因</span><strong>{{ ticket.unsatisfied_reason }}</strong></div>
                   <div v-if="ticket.archive_notes" class="sales-submission-opinion"><span>归档说明</span><strong>{{ ticket.archive_notes }}</strong></div>
                 </template>
                 <template v-if="card.showLegacyResult">
@@ -584,7 +585,7 @@ function submissionFields(submission: any): Array<{ key: string; label: string; 
     const label = ['sales_opportunity_v1', 'sales_opportunity_v2'].includes(submission.form_code) && field.key === 'valid_opportunity'
       ? '是否为有效线索' : field.label
     return [{ key: field.key, label, type: field.type,
-      value: typeof value === 'boolean' ? (value ? '是' : '否') : String(value) }]
+      value: typeof value === 'boolean' ? (value ? '是' : '否') : (field.validation?.option_labels?.[String(value)] || String(value)) }]
   })
 }
 function normalizeOpportunityForm(form: any) {
@@ -643,7 +644,7 @@ const timelineCards = computed(() => {
   return logs
     .sort((a: any, b: any) => new Date(a.entered_at).getTime() - new Date(b.entered_at).getTime())
     .flatMap((log: any) => {
-      const nodeSubmissions = submissions.filter((entry: any) => entry.state_log_id === log.id)
+      const nodeSubmissions = submissions.filter((entry: any) => entry.state_log_id === log.id || (!entry.state_log_id && entry.action_type === 'callback_record' && [...logs].sort((a: any, b: any) => new Date(a.entered_at).getTime() - new Date(b.entered_at).getTime()).filter((item: any) => new Date(item.entered_at).getTime() <= new Date(entry.submitted_at).getTime()).at(-1)?.id === log.id))
       const articles = (articlePlacement.value.get(log.id) || []).filter((entry: any) => !linkedArticleIds.has(entry.id))
       // 建单节点通常由工单信息卡展示；有补充时仍需显示沟通记录。
       if (log.action_type === 'create' && !articles.length) return []

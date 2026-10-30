@@ -23,6 +23,11 @@
         <div v-if="responsibleName(node.log)" class="action-operator">
           {{ responsibleLabel(node.log) }}：{{ responsibleName(node.log) }}
         </div>
+        <template v-if="node.log.action_type === 'hold'">
+          <div v-if="node.log.reason" class="action-operator">暂缓原因：{{ node.log.reason }}</div>
+          <div class="action-operator">预计恢复时间：{{ (node.log as any).hold_until_snapshot ? new Date((node.log as any).hold_until_snapshot).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未记录' }}</div>
+          <div v-if="node.log.reason?.startsWith('需要寄回维修：')" class="action-operator">是否需要寄回：是</div>
+        </template>
       </div>
     </div>
     <div v-if="currentStage" class="timeline-item is-current">

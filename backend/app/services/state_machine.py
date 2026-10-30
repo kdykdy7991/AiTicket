@@ -1221,3 +1221,4 @@ async def apply_transition(
     db.add(log)
     await db.flush()
     return log
+        hold_until_snapshot=hold_until_at,

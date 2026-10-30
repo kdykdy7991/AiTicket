@@ -376,7 +376,7 @@ async def list_tickets(
     if group_id:
         query = query.where(Ticket.group_id == group_id)
     if category_id:
-        query = query.where(Ticket.category_id == category_id)
+        query = query.where(Ticket.category_id.in_([category_id, *[cid for cid, lineage in cat_idx.lineage.items() if any(c.id == category_id for c in lineage.path)]]))
     if customer_type:
         query = query.where(Ticket.customer_type == customer_type)
     if is_duplicate is not None:
@@ -498,7 +498,7 @@ async def export_tickets(
     if group_id:
         query = query.where(Ticket.group_id == group_id)
     if category_id:
-        query = query.where(Ticket.category_id == category_id)
+        query = query.where(Ticket.category_id.in_([category_id, *[cid for cid, lineage in cat_idx.lineage.items() if any(c.id == category_id for c in lineage.path)]]))
     if customer_type:
         query = query.where(Ticket.customer_type == customer_type)
     if is_duplicate is not None:
@@ -2186,3 +2186,4 @@ async def get_state_logs(
             "created_at": log.created_at.isoformat() if log.created_at else None,
         })
     return {"data": data}
+            "hold_until_snapshot": log.hold_until_snapshot.isoformat() if log.hold_until_snapshot else None,

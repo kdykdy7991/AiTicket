@@ -58,6 +58,7 @@
       title="导出工单"
       width="680px"
       align-center
+      append-to-body
       class="ticket-list-export-dialog"
     >
       <div class="export-dialog">
