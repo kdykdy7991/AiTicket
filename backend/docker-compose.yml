@@ -5,6 +5,8 @@ services:
     build:
       context: .
       dockerfile: db.Dockerfile
+    ports:
+      - "127.0.0.1:5545:5432"
     environment:
       POSTGRES_USER: skdy
       POSTGRES_PASSWORD: skdy123
@@ -32,7 +34,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://skdy:skdy123@db:5432/skdy_ticket
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET_KEY: change-me-in-production
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in backend/.env}
       MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
       AGENT_EMBED_URL: ${AGENT_EMBED_URL:-}
       AGENT_EMBED_API_URL: ${AGENT_EMBED_API_URL:-}
