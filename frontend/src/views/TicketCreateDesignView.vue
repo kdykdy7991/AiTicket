@@ -27,6 +27,10 @@
         <div v-if="!isOpportunity && !isInstantConsult" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
         <div v-if="!isOpportunity" class="field"><label for="category" class="required">一级分类</label><select id="category" v-model="form.category" :class="{ invalid: errors.category }" @change="onCategoryChange"><option value="" disabled hidden>请选择一级分类</option><option v-for="v in categoryNames" :key="v">{{ v }}</option></select><small v-if="errors.category" class="error">{{ errors.category }}</small></div>
         <div v-if="!isOpportunity && !rootCategory?.create_selectable" class="field"><label for="subcategory" class="required">细分分类</label><select id="subcategory" v-model="form.subcategory" :disabled="!form.category" :class="{ invalid: errors.subcategory }"><option value="" disabled hidden>{{ form.category ? '请选择可提交的分类' : '请先选择一级分类' }}</option><option v-for="v in subcategoryOptions" :key="v.id" :value="v.label">{{ v.label }}</option></select><small v-if="errors.subcategory" class="error">{{ errors.subcategory }}</small></div>
+        <template v-if="isComplaint">
+          <div class="field"><label class="required" for="complaint-department">责任部门</label><select id="complaint-department" v-model="complaintChoice"><option value="" disabled>请选择责任部门</option><option v-for="item in complaintOptions" :key="item.label" :value="item.label">{{ item.label }}</option></select><small v-if="complaintChoice && !complaintPeople.length" class="help">{{ selectedComplaintOption?.department }} · {{ selectedComplaintOption?.name }}：账号或职责尚未配置，请联系管理员</small></div>
+          <div class="field"><label class="required" for="complaint-owner">负责人</label><input v-if="complaintPeople.length <= 1" id="complaint-owner" :value="complaintPeople[0]?.name || ''" placeholder="选择责任部门后自动带出" readonly /><select v-else id="complaint-owner" v-model="complaintTarget"><option value="" disabled>请选择负责人</option><option v-for="person in complaintPeople" :key="person.key" :value="person.key">{{ person.name }}（{{ person.department }}）</option></select></div>
+        </template>
         <fieldset v-if="!isOpportunity && !isInstantConsult && isAssurance" class="field radio-field priority-field"><legend class="required">优先级</legend><div class="priority-options"><label v-for="v in priorities" :key="v" :class="{ chosen: form.priority === v }"><input v-model="form.priority" type="radio" :value="v" />{{ v }}</label></div><small v-if="errors.priority" class="error">{{ errors.priority }}</small></fieldset>
         <div class="field full"><label for="description" class="required">{{ isInstantConsult ? '咨询内容' : '客户问题详情' }}</label><div class="textarea-wrap"><textarea id="description" v-model="form.description" maxlength="1000" rows="5" placeholder="请尽量记录客户原始描述" :class="{ invalid: errors.description }"></textarea><span>{{ form.description.length }}/1000</span></div><small v-if="errors.description" class="error">{{ errors.description }}</small></div>
         <div v-if="isInstantConsult" class="field full"><label for="instantAnswer" class="required">即时答复内容</label><div class="textarea-wrap"><textarea id="instantAnswer" v-model="form.instantAnswer" maxlength="4000" rows="5" placeholder="记录客服当场提供的答复" :class="{ invalid: errors.instantAnswer }"></textarea><span>{{ form.instantAnswer.length }}/4000</span></div><small v-if="errors.instantAnswer" class="error">{{ errors.instantAnswer }}</small></div>
@@ -119,6 +123,31 @@ const numberRequired = computed(() => form.category === '业务运营' || form.c
 const isAssurance = computed(() => form.category === '业务保障')
 const isOpportunity = computed(() => form.businessOpportunity === 'yes')
 const isInstantConsult = computed(() => !isOpportunity.value && selectedCategoryId.value === 1205)
+const isComplaint = computed(() => !isOpportunity.value && [2102, 2103, 2104].includes(selectedCategoryId.value || 0))
+const complaintOptions = ref<{label: string; department: string; name: string}[]>([])
+const complaintDepartments = ref<{id: number; name: string; people: {id: number; name: string; responsibilities: string[]}[]}[]>([])
+const complaintChoice = ref('')
+const complaintTarget = ref('')
+const selectedComplaintOption = computed(() => complaintOptions.value.find(option => option.label === complaintChoice.value))
+const complaintPeople = computed(() => !complaintChoice.value ? [] : complaintDepartments.value.flatMap(group => group.people
+  .filter(person => selectedCategoryId.value !== 2103 || person.responsibilities.includes(complaintChoice.value))
+  .map(person => ({ ...person, department: group.name, groupId: group.id, key: `${group.id}:${person.id}` }))))
+const selectedComplaintPerson = computed(() => complaintPeople.value.find(person => person.key === complaintTarget.value))
+const complaintDepartment = computed(() => selectedComplaintPerson.value?.groupId ?? null)
+const complaintOwner = computed(() => selectedComplaintPerson.value?.id ?? null)
+watch([complaintChoice, complaintPeople], () => { complaintTarget.value = complaintChoice.value && complaintPeople.value.length === 1 ? complaintPeople.value[0]!.key : '' }, { flush: 'sync' })
+watch([selectedCategoryId, isOpportunity], async () => {
+  complaintChoice.value = ''; complaintTarget.value = ''
+  complaintOptions.value = []; complaintDepartments.value = []
+  if (!isComplaint.value) return
+  const id = selectedCategoryId.value
+  try {
+    const response: any = await api.get(`/complaint-assignment-options/${id}`)
+    if (selectedCategoryId.value !== id || !isComplaint.value) return
+    complaintOptions.value = response.data.responsibilities
+    complaintDepartments.value = response.data.departments
+  } catch { ElMessage.error('投诉负责人加载失败，请刷新后重试') }
+})
 async function loadAssignments() {
   const request = ++assignmentRequest
   assignmentDepartments.value = []
@@ -200,6 +229,14 @@ onMounted(async () => {
       form.batchFault = ticket.is_batch_fault == null ? '' : ticket.is_batch_fault ? 'yes' : 'no'
       // 等分类 watch 执行完，再恢复草稿里已选定的各部门处理人。
       await Promise.resolve()
+      if (isComplaint.value) {
+        const selectedId = selectedCategoryId.value
+        const response: any = await api.get(`/complaint-assignment-options/${selectedId}`)
+        complaintOptions.value = response.data.responsibilities
+        complaintDepartments.value = response.data.departments
+        complaintChoice.value = ticket.dispatch_chain_steps?.[0]?.complaint_responsibility || ''
+        complaintTarget.value = ticket.skill_group_id && ticket.owner_id ? `${ticket.skill_group_id}:${ticket.owner_id}` : ''
+      }
       savedAssignments = Object.fromEntries((ticket.dispatch_chain_steps || [])
         .filter((step: any) => step.assigned_owner_id)
         .map((step: any) => [step.department_code, step.assigned_owner_id]))
@@ -236,6 +273,9 @@ function validate(): boolean {
       return false
     }
   }
+  if (isComplaint.value && (!complaintChoice.value || !selectedComplaintPerson.value)) {
+    ElMessage.warning('请选择责任部门和负责人'); return false
+  }
   return !Object.keys(errors).length
 }
 function payload(isDraft: boolean) {
@@ -250,10 +290,11 @@ function payload(isDraft: boolean) {
     contact_phone: form.contactPhone.trim() || null, customer_email: null,
     channel: channelCodes[form.channel] || 'phone', priority: isOpportunity.value || isInstantConsult.value || !isAssurance.value ? 'p4_enterprise' : priorityCodes[form.priority] || 'p4_enterprise',
     category_id: isOpportunity.value ? null : selectedCategoryId.value || null, description: form.description.trim(),
-    skill_group_id: isOpportunity.value ? salesGroupId.value : null,
+    skill_group_id: isOpportunity.value ? salesGroupId.value : isComplaint.value ? complaintDepartment.value : null,
     sales_owner_id: isOpportunity.value ? form.salesUserId : null,
     dispatcher_id: null,
-    owner_id: assignmentDepartments.value.length ? assignmentChoices[assignmentDepartments.value[0]!.department_code] : null,
+    owner_id: isComplaint.value ? complaintOwner.value : assignmentDepartments.value.length ? assignmentChoices[assignmentDepartments.value[0]!.department_code] : null,
+    complaint_responsibility: isComplaint.value ? complaintChoice.value || null : null,
     dispatch_owner_ids: Object.fromEntries(Object.entries(assignmentChoices).filter(([, id]) => id != null)),
     complaint_level: !isOpportunity.value && form.category === '投诉' ? ({ 一般投诉: '一般', 重要投诉: '重要', 重大投诉: '重大' } as Record<string, string>)[form.subcategory] || null : null,
     satellite_number: isOpportunity.value || isInstantConsult.value ? null : form.satelliteNumber.trim() || null,

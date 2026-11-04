@@ -16,6 +16,8 @@
         <el-option label="管理员" value="admin" />
         <el-option label="客服坐席" value="agent" />
         <el-option label="处理人" value="handler" />
+        <el-option label="部门负责人" value="department_leader" />
+        <el-option label="分管领导" value="division_leader" />
         <el-option label="只读观察员" value="observer" />
       </el-select>
       <el-select v-model="filterSkillGroup" popper-class="ticket-dark-select-popper" placeholder="全部对接部门" clearable size="default" style="width: 160px" @change="loadUsers">
@@ -30,7 +32,7 @@
       <el-table :data="users">
         <el-table-column label="用户名" prop="username" width="130" />
         <el-table-column label="姓名" prop="name" width="110" />
-        <el-table-column label="角色" width="100">
+        <el-table-column label="角色" min-width="190">
           <template #default="{ row }">
             <el-tag size="small" :type="roleTagType(row.role)">{{ roleLabel(row.role) }}</el-tag>
           </template>
@@ -52,7 +54,7 @@
                 :plain="!m.is_dispatcher"
                 style="margin-right: 4px"
               >
-                {{ skillGroupName(m.skill_group_id) }}{{ m.is_dispatcher ? '·对接' : '' }}
+                {{ skillGroupName(m.skill_group_id) }}{{ m.is_dispatcher ? '·对接' : '' }}{{ m.complaint_leader && row.role !== 'department_leader' ? '·负责人' : '' }}{{ m.complaint_division_leader && row.role !== 'division_leader' ? '·分管领导' : '' }}
               </el-tag>
             </span>
             <span v-else class="muted">{{ row.role === 'handler' ? '未配置所属组' : '—' }}</span>
@@ -94,6 +96,8 @@
             <el-option label="管理员" value="admin" />
             <el-option label="客服坐席" value="agent" />
             <el-option label="处理人" value="handler" />
+            <el-option label="部门负责人" value="department_leader" />
+            <el-option label="分管领导" value="division_leader" />
             <el-option label="只读观察员" value="observer" />
           </el-select>
         </el-form-item>
@@ -109,14 +113,24 @@
           </el-form-item>
         </template>
         <!-- 处理人：选对接部门 + 对接人标记 -->
-        <el-form-item v-else-if="form.role === 'handler'" label="对接部门" prop="skill_groups">
+        <el-form-item v-else-if="['handler', 'department_leader', 'division_leader'].includes(form.role)" label="对接部门" prop="skill_groups">
           <el-checkbox-group v-model="form.skill_group_ids" @change="onSkillGroupSelect" style="width: 100%">
             <el-checkbox v-for="g in skillGroups" :key="g.id" :label="g.id">{{ g.name }}</el-checkbox>
           </el-checkbox-group>
           <div v-if="form.skill_groups.length" class="dispatcher-list">
             <div v-for="m in form.skill_groups" :key="m.skill_group_id" class="dispatcher-row">
               <span class="dispatcher-name">{{ skillGroupName(m.skill_group_id) }}</span>
-              <el-checkbox v-model="m.is_dispatcher">部门对接人</el-checkbox>
+              <div v-if="form.role === 'handler'" class="dispatcher-options">
+                <el-checkbox v-model="m.is_dispatcher">部门对接人</el-checkbox>
+                <el-checkbox v-model="m.complaint_leader">部门负责人</el-checkbox>
+                <el-checkbox v-model="m.complaint_division_leader">分管领导</el-checkbox>
+              </div>
+              <div v-if="m.complaint_leader" class="dispatcher-responsibilities">
+                <label :for="`complaint-responsibilities-${m.skill_group_id}`">负责的投诉类别</label>
+                <el-select :id="`complaint-responsibilities-${m.skill_group_id}`" v-model="m.complaint_responsibilities" popper-class="ticket-dark-select-popper" multiple collapse-tags placeholder="请选择负责的投诉类别">
+                  <el-option v-for="item in complaintTopics" :key="item" :label="item" :value="item" />
+                </el-select>
+              </div>
             </div>
           </div>
         </el-form-item>
@@ -165,10 +179,11 @@ const form = reactive({
   role: 'agent',
   group_id: null as number | null,
   skill_group_ids: [] as number[],
-  skill_groups: [] as { skill_group_id: number; is_dispatcher: boolean }[],
+  skill_groups: [] as { skill_group_id: number; is_dispatcher: boolean; complaint_leader: boolean; complaint_division_leader: boolean; complaint_responsibilities: string[] }[],
   is_group_leader: false,
   dingtalk_id: '',
 })
+const complaintTopics = ['渠道相关的重要投诉', '媒体相关的重要投诉', '产品中心重要投诉', '售前与解决方案业务投诉', '交付&售后业务投诉', '海洋应用业务投诉', '政企业务投诉', '产品线投诉', '车载应用投诉', '高精定位应用投诉']
 
 const rules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -178,7 +193,7 @@ const rules: FormRules = {
 }
 
 function roleLabel(role: string) {
-  return role === 'admin' ? '管理员' : role === 'agent' ? '客服坐席' : role === 'handler' ? '处理人' : role === 'observer' ? '只读观察员' : role
+  return role === 'admin' ? '管理员' : role === 'agent' ? '客服坐席' : role === 'handler' ? '处理人' : role === 'department_leader' ? '部门负责人' : role === 'division_leader' ? '分管领导' : role === 'observer' ? '只读观察员' : role
 }
 function roleTagType(role: string) {
   return role === 'admin' ? 'danger' : role === 'agent' ? '' : 'info'
@@ -191,10 +206,13 @@ function skillGroupName(id: number) {
 }
 // 勾选对接部门时，同步 skill_groups 数组（保留已有对接人标记）
 function onSkillGroupSelect(selected: number[]) {
-  const existing = new Map(form.skill_groups.map(m => [m.skill_group_id, m.is_dispatcher]))
+  const existing = new Map(form.skill_groups.map(m => [m.skill_group_id, m]))
   form.skill_groups = selected.map(id => ({
     skill_group_id: id,
-    is_dispatcher: existing.get(id) ?? false,
+    is_dispatcher: existing.get(id)?.is_dispatcher ?? false,
+    complaint_leader: form.role === 'department_leader' ? true : form.role === 'division_leader' ? false : existing.get(id)?.complaint_leader ?? false,
+    complaint_division_leader: form.role === 'division_leader' ? true : form.role === 'department_leader' ? false : existing.get(id)?.complaint_division_leader ?? false,
+    complaint_responsibilities: existing.get(id)?.complaint_responsibilities ?? [],
   }))
 }
 // 切换角色时，清空另一种组（客服组与对接部门互斥）
@@ -202,9 +220,14 @@ function onRoleChange() {
   if (form.role === 'agent') {
     form.skill_group_ids = []
     form.skill_groups = []
-  } else if (form.role === 'handler') {
+  } else if (['handler', 'department_leader', 'division_leader'].includes(form.role)) {
     form.group_id = null
     form.is_group_leader = false
+    if (form.role !== 'handler') form.skill_groups.forEach(m => {
+      m.is_dispatcher = false
+      m.complaint_leader = form.role === 'department_leader'
+      m.complaint_division_leader = form.role === 'division_leader'
+    })
   } else {
     form.group_id = null
     form.is_group_leader = false
@@ -262,7 +285,7 @@ function openEdit(row: UserItem) {
   form.role = row.role
   form.group_id = row.group_id
   form.skill_group_ids = (row.skill_groups || []).map(m => m.skill_group_id)
-  form.skill_groups = (row.skill_groups || []).map(m => ({ skill_group_id: m.skill_group_id, is_dispatcher: m.is_dispatcher }))
+  form.skill_groups = (row.skill_groups || []).map(m => ({ skill_group_id: m.skill_group_id, is_dispatcher: m.is_dispatcher, complaint_leader: m.complaint_leader, complaint_division_leader: m.complaint_division_leader, complaint_responsibilities: m.complaint_responsibilities || [] }))
   form.is_group_leader = row.is_group_leader
   form.dingtalk_id = row.dingtalk_id || ''
   dialogVisible.value = true
@@ -271,6 +294,10 @@ function openEdit(row: UserItem) {
 async function onSubmit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  if (['department_leader', 'division_leader'].includes(form.role) && !form.skill_groups.length) {
+    ElMessage.warning('请选择所属部门')
+    return
+  }
   saving.value = true
   try {
     const payload: UserPayload = {
@@ -346,9 +373,15 @@ onMounted(async () => {
 }
 .list-card { border-radius: var(--radius-lg); }
 .muted { color: var(--color-text-tertiary); }
-.dispatcher-list { margin-top: 8px; border-top: 1px solid var(--color-border-light); padding-top: 8px; }
-.dispatcher-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; font-size: 13px; }
-.dispatcher-name { color: var(--color-text-secondary); }
+.dispatcher-list { width: 100%; min-width: 0; margin-top: 8px; border-top: 1px solid var(--color-border-light); padding-top: 8px; }
+.dispatcher-row { display: flex; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px 0; font-size: 13px; }
+.dispatcher-row + .dispatcher-row { border-top: 1px solid #1a5077; }
+.dispatcher-name { color: var(--color-text-secondary); line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.dispatcher-options { display: flex; flex-wrap: wrap; column-gap: 16px; }
+.dispatcher-options :deep(.el-checkbox) { margin-right: 0; }
+.dispatcher-responsibilities { display: flex; flex-direction: column; gap: 6px; width: 100%; margin-top: 4px; line-height: 1.5; }
+.dispatcher-responsibilities label { color: #d8eafa; font-weight: 600; }
+.dispatcher-responsibilities :deep(.el-select) { width: 100%; }
 .users-view { min-width: 0; color: #eaf4ff; }
 .page-header { align-items: center; margin: 4px 0 20px; }
 .page-title { color: #f1f8ff; font-size: 28px; text-shadow: 0 0 17px #40aaff38; }

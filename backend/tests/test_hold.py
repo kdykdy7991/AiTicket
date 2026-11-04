@@ -1,4 +1,4 @@
-"""暂缓处理（on_hold）：processing 下的领域动作，不涉及任何 SLA 语义。
+"""暂缓处理（on_hold）：仅业务保障 / 硬件故障的 processing 节点可发起，不涉及任何 SLA 语义。
 
 模型：
     processing ──hold──▶ on_hold ──resume──▶ processing
@@ -28,6 +28,7 @@ from app.services import notification as notification_module
 from app.services.sla_scanner import scan_hold_expiries
 from test_refine import set_existing_open_ticket
 from test_transfer import tenv
+from hardware_helpers import use_hardware_category
 from test_workflow_regression import as_user
 
 FUTURE = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S")
@@ -43,11 +44,14 @@ def factory_of(env):
     return async_sessionmaker(env["engine"], class_=AsyncSession, expire_on_commit=False)
 
 
-async def opened(env, category_id=LEAF):
+async def opened(env, category_id=LEAF, *, hardware=True):
     """分派后走到 open 的处理中工单，返回 (工单 dict, owner_id)。"""
     t = await env["create_ticket"](category_id=category_id)
     owner_id = env["platform_user"]
     t = await env["patch"](t["id"], {"state": "open", "owner_id": owner_id})
+    if hardware and category_id in (LEAF, FEEDBACK):
+        await use_hardware_category(env, t["id"])
+        t = await env["get"](t["id"])
     return t, owner_id
 
 
@@ -130,7 +134,7 @@ async def test_triage_cannot_hold(tenv):
         denied = await tenv["client"].patch("/api/v1/tickets/" + str(t["id"]),
                                            json=hold_payload())
     assert denied.status_code == 422
-    assert "分诊" in denied.text or "细化" in denied.text
+    assert "仅业务保障 / 硬件故障" in denied.text
     assert (await tenv["get"](t["id"]))["state"] == "open"
 
 
@@ -196,14 +200,14 @@ async def test_successful_hold_keeps_routing_facts(tenv):
     # on_hold 期间 NodeContext 仍按 processing 解释
     detail = (await tenv["client"].get("/api/v1/tickets/" + str(t["id"]))).json()
     assert detail["node_context"]["node_type"] == "processing"
-    assert detail["node_context"]["dispatch_step_index"] == before["dispatch_step_index"]
-    # 暂缓原因落在 Flow Log，不新增 Ticket 列
-    factory = factory_of(tenv)
-    async with factory() as s:
     history = (await tenv["client"].get(f"/api/v1/tickets/{t['id']}/state-logs")).json()["data"]
     hold_log = next(log for log in history if log["action_type"] == "hold")
     assert datetime.fromisoformat(hold_log["hold_until_snapshot"]) == datetime.fromisoformat(d["hold_until"])
     assert hold_log["reason"] == "等待客户提供登录日志"
+    assert detail["node_context"]["dispatch_step_index"] == before["dispatch_step_index"]
+    # 暂缓原因落在 Flow Log，不新增 Ticket 列
+    factory = factory_of(tenv)
+    async with factory() as s:
         logs = (await s.execute(select(TicketStateLog).where(
             TicketStateLog.ticket_id == t["id"],
             TicketStateLog.action_type == "hold"))).scalars().all()
@@ -307,12 +311,12 @@ async def test_resume_returns_to_same_node_and_clears_hold(tenv):
     d = r.json()
     assert d["state"] == "open"
     assert d["hold_until"] is None
+    history = (await tenv["client"].get(f"/api/v1/tickets/{t['id']}/state-logs")).json()["data"]
+    assert next(log for log in history if log["action_type"] == "hold")["hold_until_snapshot"] is not None
     # 路由事实全部保持
     assert d["category_id"] == before["category_id"]
     assert d["skill_group_id"] == before["skill_group_id"]
     assert d["owner_id"] == before["owner_id"]
-    history = (await tenv["client"].get(f"/api/v1/tickets/{t['id']}/state-logs")).json()["data"]
-    assert next(log for log in history if log["action_type"] == "hold")["hold_until_snapshot"] is not None
     assert d["dispatch_step_index"] == before["dispatch_step_index"]
     assert d["dispatch_chain_steps"] == before["dispatch_chain_steps"]
     detail = (await tenv["client"].get("/api/v1/tickets/" + str(t["id"]))).json()
@@ -523,3 +527,39 @@ async def test_switch_on_success_writes_reminded_at_once(tenv, monkeypatch):
     assert len(sent) == 1
     async with factory() as s:
         assert (await s.get(Ticket, t["id"])).hold_reminded_at is not None
+
+
+@pytest.mark.parametrize("admin", [False, True])
+@pytest.mark.parametrize("category_id", [1203, 2102, 2203, 2302, 2321, 2311, None])
+async def test_other_categories_have_no_hold_action_and_reject_api(tenv, admin, category_id):
+    t, owner = await opened(tenv, hardware=False)
+    async with factory_of(tenv)() as db:
+        if category_id and await db.get(TicketCategory, category_id) is None:
+            db.add(TicketCategory(id=category_id, name=f"非硬件分类{category_id}", level=1))
+            await db.flush()
+        ticket = await db.get(Ticket, t["id"])
+        ticket.category_id = category_id
+        await db.commit()
+    from contextlib import nullcontext
+    with nullcontext() if admin else as_user(owner, "handler"):
+        detail = await tenv["get"](t["id"])
+        assert "hold" not in {a["action"] for a in detail["allowed_actions"]}
+        denied = await tenv["client"].patch(f"/api/v1/tickets/{t['id']}", json=hold_payload())
+        assert denied.status_code == 422, denied.text
+        assert "仅业务保障 / 硬件故障" in denied.text
+    if admin:
+        batch = await tenv["client"].post("/api/v1/tickets/batch-update", json={
+            "ticket_ids": [t["id"]], "updates": hold_payload(),
+        })
+        assert batch.status_code == 422, batch.text
+        assert "仅业务保障 / 硬件故障" in batch.text
+    unchanged = await tenv["get"](t["id"])
+    assert unchanged["state"] == "open" and unchanged["hold_until"] is None
+
+
+async def test_legacy_other_category_can_resume(tenv):
+    t, _ = await opened(tenv, hardware=False)
+    await set_hold_state(tenv, t["id"], datetime.now(timezone.utc) + timedelta(days=1))
+    resumed = await tenv["client"].patch(f"/api/v1/tickets/{t['id']}", json={"state": "open", "reason": "恢复历史暂缓"})
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["hold_until"] is None

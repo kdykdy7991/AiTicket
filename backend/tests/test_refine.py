@@ -423,3 +423,51 @@ async def test_ticket_specific_contact_visible_without_department_dispatcher_rol
     with as_user(renv['platform_user'], 'handler'):
         response = await renv['client'].get('/api/v1/tickets', params={'keyword': ticket['number']})
         assert response.json()['data'] == []
+
+
+@pytest.mark.parametrize("assign_self", [False, True])
+async def test_hardware_keeps_assigned_after_sales_handler_through_hold_and_feedback(renv, assign_self):
+    factory = async_sessionmaker_for(renv["engine"])
+    handler_id = renv["aftersale_user"]
+    if not assign_self:
+        async with factory() as db:
+            handler = User(username="hardware-handler", name="被指派的售后人员", password_hash="x", role="handler")
+            db.add(handler)
+            await db.flush()
+            handler_id = handler.id
+            db.add(UserSkillGroup(user_id=handler_id, skill_group_id=renv["sg_aftersale"], is_dispatcher=False))
+            await db.commit()
+    ticket = await renv["create_ticket"]()
+    c = renv["client"]
+    with as_user(renv["aftersale_user"], "handler"):
+        assigned = await c.patch(f"/api/v1/tickets/{ticket['id']}", json={
+            "state": "open", "owner_id": handler_id, "reason": "指派售后人员",
+        })
+        assert assigned.status_code == 200, assigned.text
+    with as_user(handler_id, "handler"):
+        refined = await c.post(f"/api/v1/tickets/{ticket['id']}/refine", json={"category_id": 2322})
+        assert refined.status_code == 200, refined.text
+        processing = refined.json()["data"]
+        assert processing["owner_id"] == handler_id
+        assert processing["dispatcher_id"] is None
+        assert processing["dispatch_step_index"] == 1
+        from datetime import timedelta
+        held = await c.patch(f"/api/v1/tickets/{ticket['id']}", json={
+            "state": "on_hold", "reason": "需要寄回维修",
+            "hold_until": (datetime.now(timezone.utc) + timedelta(days=3)).isoformat(),
+        })
+        assert held.status_code == 200, held.text
+        assert held.json()["owner_id"] == handler_id
+        resumed = await c.patch(f"/api/v1/tickets/{ticket['id']}", json={
+            "state": "open", "reason": "寄修完成",
+        })
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json()["owner_id"] == handler_id
+        completed = await c.post(f"/api/v1/tickets/{ticket['id']}/articles", data={
+            "type": "reply", "body": "硬件已修复，交致电反馈",
+        })
+        assert completed.status_code == 201, completed.text
+    feedback = (await c.get(f"/api/v1/tickets/{ticket['id']}")).json()
+    assert feedback["owner_id"] == handler_id
+    assert feedback["dispatcher_id"] is None
+    assert feedback["dispatch_step_index"] == 2

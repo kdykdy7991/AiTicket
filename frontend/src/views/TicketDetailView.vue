@@ -263,6 +263,10 @@
           <!-- 暂缓中：只展示事实 + 恢复入口，不提供「完成本节点处理」 -->
           <div v-if="isOnHold" class="archive-card">
             <div class="archive-card-title">暂缓处理中</div>
+            <div v-if="isHardwareProcessing && holdReason.startsWith('需要寄回维修：')" class="triage-field">
+              <label class="triage-field-label">是否需要寄回</label>
+              <p class="archive-readonly">是</p>
+            </div>
             <div class="triage-field">
               <label class="triage-field-label">暂缓原因</label>
               <p class="archive-readonly">{{ holdReason || '—' }}</p>
@@ -311,7 +315,7 @@
                 <el-input v-else v-model="triageValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? (isCompactTriage && !triageFieldIsWide(field) ? 2 : 3) : undefined" />
               </div>
             </div>
-            <el-button type="primary" :loading="refining" :disabled="!triageTargetCategoryId || (isConstellationRoute && !triageAssignedOwnerId)" @click="submitTriageForm">{{ isConstellationRoute ? '确认并流转' : '提交分诊并重新派单' }}</el-button>
+            <el-button type="primary" :loading="refining" :disabled="!triageTargetCategoryId || (isConstellationRoute && !triageAssignedOwnerId)" @click="submitTriageForm">{{ isConstellationRoute ? '确认并流转' : '提交' }}</el-button>
           </div>
           <div v-else-if="canRefine" class="refine-card">
             <div class="refine-card-title">下一级问题判断</div>
@@ -335,6 +339,24 @@
           <div v-if="processingForm" class="refine-card">
             <div class="refine-card-title">{{ isAnalysis ? '提交分析验证' : isResponsePlan ? '提交响应措施' : isSalesOpportunity ? '完成销售线索处理' : processingForm.code === 'reconciliation_review_v1' ? processingForm.name : '完成本节点处理' }}</div>
             <p class="refine-card-hint">{{ isAnalysis ? '按原因分类填写分析与验证内容，提交后交售后致电反馈。' : isResponsePlan ? '填写初步排查结论和临时响应措施，提交后交售后确认响应效果。' : isSalesOpportunity ? '提交本表单会完成线索处理并归档。' : '填写处理意见后提交本表单，完成当前部门的处理并按流程流转。' }}</p>
+            <div v-if="isHardwareProcessing" class="triage-field">
+              <label>是否需要寄回<span> *</span></label>
+              <el-radio-group v-model="hardwareReturnRequired">
+                <el-radio :label="true">是</el-radio><el-radio :label="false">否</el-radio>
+              </el-radio-group>
+            </div>
+            <template v-if="isHardwareProcessing && hardwareReturnRequired === true">
+              <p class="refine-card-hint">提交后暂缓处理；寄修完成后请恢复处理，再填写根因和处理结论。</p>
+              <div class="triage-field">
+                <label>暂缓原因<span> *</span></label>
+                <el-input v-model="holdReasonInput" type="textarea" :rows="3" maxlength="1900" show-word-limit placeholder="请填写寄回维修的说明" />
+              </div>
+              <div class="triage-field">
+                <label>预计恢复时间<span> *</span></label>
+                <el-date-picker v-model="holdUntilInput" type="datetime" value-format="YYYY-MM-DDTHH:mm:ss" :disabled-date="disabledHoldDate" placeholder="请选择预计恢复时间" />
+              </div>
+            </template>
+            <template v-if="!isHardwareProcessing || hardwareReturnRequired === false">
             <div v-for="field in processingForm.fields.filter(processingFieldVisible)" :key="field.field_key" class="triage-field">
               <label>{{ field.label }}<span v-if="processingFieldRequired(field)"> *</span></label>
               <el-select popper-class="ticket-dark-select-popper" v-if="field.field_type === 'select'" v-model="processingValues[field.field_key]" clearable
@@ -351,9 +373,10 @@
                               value-format="YYYY-MM-DDTHH:mm:ssZ" style="width:100%" />
               <el-input v-else v-model="processingValues[field.field_key]" :type="field.field_type === 'textarea' ? 'textarea' : 'text'" :rows="field.field_type === 'textarea' ? 3 : undefined" />
             </div>
+            </template>
             <div class="archive-actions">
-              <el-button type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isAnalysis ? '提交分析验证' : isResponsePlan ? '提交响应措施' : isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
-              <el-button v-if="canHold" :loading="holding" @click="holdDialogVisible = true">暂缓处理</el-button>
+              <el-button v-if="isHardwareProcessing" type="primary" :loading="processingSubmitting || holding" :disabled="hardwareReturnRequired === null || (hardwareReturnRequired === true && (!canHold || holdSubmitDisabled))" @click="submitProcessingForm">{{ hardwareReturnRequired === true ? '提交并暂缓处理' : '提交' }}</el-button>
+              <el-button v-else type="primary" :loading="processingSubmitting" @click="submitProcessingForm">{{ isAnalysis ? '提交分析验证' : isResponsePlan ? '提交响应措施' : isSalesOpportunity ? '提交并归档' : '完成本节点处理' }}</el-button>
             </div>
           </div>
 
@@ -737,17 +760,20 @@ const triageHandlers = ref<{ id: number; name: string }[]>([])
 const isConstellationRoute = computed(() => (ticket.value as any)?.category_id === 2310 && currentForm.value?.code === 'constellation_triage_v2')
 const processingValues = ref<Record<string, any>>({})
 const processingFiles = ref<File[]>([])
+const hardwareReturnRequired = ref<boolean | null>(null)
+const isHardwareProcessing = computed(() => (ticket.value as any)?.category_id === 2322
+  && (ticket.value as any)?.node_context?.node_type === 'processing')
 const processingSubmitting = ref(false)
 const isSalesOpportunity = computed(() => (ticket.value as any)?.node_context?.node_type === 'sales_opportunity')
 // 暂缓期间不提供「完成本节点处理」：主流程是先恢复处理再完成，避免绕过 resume。
 const processingForm = computed(() =>
   ['processing', 'response_plan', 'analysis', 'sales_opportunity'].includes((ticket.value as any)?.node_context?.node_type)
-    && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+    && (ticket.value as any)?.state_key !== 'on_hold' ? currentForm.value : null)
 const isResponsePlan = computed(() => (ticket.value as any)?.node_context?.node_type === 'response_plan')
 const isAnalysis = computed(() => (ticket.value as any)?.node_context?.node_type === 'analysis')
 const responseConfirmationForm = computed(() =>
   (ticket.value as any)?.node_context?.node_type === 'response_confirmation'
-    && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+    && (ticket.value as any)?.state_key !== 'on_hold' ? currentForm.value : null)
 const confirmationComment = ref('')
 const confirmationReturnReason = ref('')
 const confirmationSubmitting = ref(false)
@@ -790,7 +816,7 @@ function processingOptions(field: any): string[] {
 }
 const phoneFeedbackForm = computed(() =>
   (ticket.value as any)?.node_context?.node_type === 'phone_feedback'
-    && (ticket.value as any)?.state !== 'on_hold' ? currentForm.value : null)
+    && (ticket.value as any)?.state_key !== 'on_hold' ? currentForm.value : null)
 const phoneFeedbackValues = ref<Record<string, string>>({})
 const phoneFeedbackSubmitting = ref(false)
 
@@ -844,6 +870,16 @@ function onProcessingFiles(event: Event) {
 
 async function submitProcessingForm() {
   if (!ticket.value || !processingForm.value) return
+  if (isHardwareProcessing.value) {
+    if (hardwareReturnRequired.value === null) {
+      ElMessage.warning('请选择是否需要寄回')
+      return
+    }
+    if (hardwareReturnRequired.value) {
+      if (canHold.value) await submitHold()
+      return
+    }
+  }
   for (const field of processingForm.value.fields) {
     if (!processingFieldVisible(field) || !processingFieldRequired(field)) continue
     const value = processingValues.value[field.field_key]
@@ -880,8 +916,8 @@ async function submitProcessingForm() {
 
 // ── 暂缓处理（processing 下的领域动作，on_hold 是 Ticket 主状态） ──────────
 // 权限沿用现有状态机：当前 owner + admin；不按部门名称硬编码。
-const isOnHold = computed(() => (ticket.value as any)?.state === 'on_hold')
-const canHold = computed(() => !!findAction('hold'))
+const isOnHold = computed(() => (ticket.value as any)?.state_key === 'on_hold')
+const canHold = computed(() => isHardwareProcessing.value && !!findAction('hold'))
 
 const holdDialogVisible = ref(false)
 const holding = ref(false)
@@ -927,7 +963,8 @@ async function submitHold() {
   try {
     await ticketStore.updateTicket(t.id, {
       state: 'on_hold',
-      reason: holdReasonInput.value.trim(),
+      reason: isHardwareProcessing.value && hardwareReturnRequired.value === true
+        ? `需要寄回维修：${holdReasonInput.value.trim()}` : holdReasonInput.value.trim(),
       hold_until: holdUntilInput.value,
     } as any)
     ElMessage.success('已暂缓，恢复后继续处理')
@@ -1174,6 +1211,10 @@ async function loadTicket() {
     currentForm.value = normalizeOpportunityForm((ticket.value as any)?.current_form ?? null)
     confirmationComment.value = ''
     confirmationReturnReason.value = ''
+    hardwareReturnRequired.value = null
+    holdReasonInput.value = ''
+    holdUntilInput.value = ''
+    processingFiles.value = []
     processingValues.value = {}
     for (const field of currentForm.value?.fields || []) {
       if (field.value != null) processingValues.value[field.field_key] = field.value

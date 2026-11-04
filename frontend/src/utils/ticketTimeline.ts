@@ -4,7 +4,7 @@ const actionNames: Record<string, string> = {
   create: '创建工单', instant_resolve: '即办结归档', dispatch: '分派处理人',
   direct_assign: '建单指派处理人', auto_assign: '自动交接',
   refine: '问题判断', transfer: '转派下一部门', hold: '暂缓处理',
-  resume: '恢复处理', return: '退回', reopen: '退回重开',
+  resume: '恢复处理', return: '退回', reopen: '退回',
   resubmit: '重新提交', resolve: '提交处理结果', archive: '归档', cancel: '撤销',
 }
 

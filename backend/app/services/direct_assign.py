@@ -54,6 +54,8 @@ async def resolve_direct_assign(db: AsyncSession, category_id: int | None) -> bo
 
 async def is_direct_assign_ticket(db: AsyncSession, ticket: Ticket) -> bool:
     """工单当前分类是否走直指派通道。"""
+    if ticket.dispatch_chain_steps and ticket.dispatch_chain_steps[0].get("complaint_direct"):
+        return True
     return await resolve_direct_assign(db, ticket.category_id)
 
 
@@ -92,7 +94,7 @@ async def assignment_departments(db: AsyncSession, steps: list[dict]) -> list[di
         members = []
         if group:
             members = (await db.execute(select(User).join(UserSkillGroup).where(
-                UserSkillGroup.skill_group_id == group.id, User.is_active.is_(True),
+                UserSkillGroup.skill_group_id == group.id, User.is_active.is_(True), User.role.notin_(["department_leader", "division_leader"]),
                 or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
                 or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
             ).order_by(User.id))).scalars().all()

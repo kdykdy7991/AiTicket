@@ -10,6 +10,8 @@
 本文件按"业务闭环链路"组织，覆盖跨阶段串联回归。
 """
 
+from hardware_helpers import use_hardware_category
+
 from contextlib import contextmanager
 
 import pytest_asyncio
@@ -153,6 +155,7 @@ async def test_exception_branch_chain(env, monkeypatch):
     """异常分支链：暂缓 → 恢复 → 打回 → 退回 → 重新提交 → 撤销。"""
     import app.services.state_machine as state_machine
     t = await env["create_ticket"]()
+    await use_hardware_category(env, t["id"])
     await env["patch"](t["id"], {"state": "open", "owner_id": env["handler_id"]})
 
     # 暂缓 / 恢复（处理人执行）

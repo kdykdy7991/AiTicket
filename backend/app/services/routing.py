@@ -55,9 +55,10 @@ async def _validate_owner(
             400, detail="owner_id 已填写时必须同时指定 handler_skill_group_id"
         )
     link = await db.execute(
-        select(UserSkillGroup).where(
+        select(UserSkillGroup).join(User, User.id == UserSkillGroup.user_id).where(
             UserSkillGroup.user_id == owner_id,
             UserSkillGroup.skill_group_id == handler_skill_group_id,
+            User.role.notin_(["department_leader", "division_leader"]),
         )
     )
     if not link.scalar_one_or_none():

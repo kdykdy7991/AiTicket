@@ -17,6 +17,8 @@
   不为旧的错误行为背书；修复后移除 xfail 标记转为普通用例。
 """
 
+from hardware_helpers import use_hardware_category
+
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 
@@ -346,6 +348,70 @@ async def test_return_requires_reason(env):
     assert "需要填写原因" in r.text
 
 
+@pytest.mark.parametrize("cycles", [0, 1, 2, 3])
+async def test_dispatcher_can_return_to_creator_after_repeated_handler_returns(env, cycles):
+    t = await env["create_ticket"]()
+    c = env["client"]
+    # Repeat after resubmission too: the previous participant is still creator.
+    for round_number in range(2):
+        for _ in range(cycles):
+            with as_user(env["dispatcher_id"], "agent"):
+                await env["dispatch"](t["id"], env["handler_id"])
+            with as_user(env["handler_id"], "agent"):
+                r = await c.patch(f"/api/v1/tickets/{t['id']}", json={
+                    "state": "pending", "reason": "请对接人补充材料",
+                })
+            assert r.status_code == 200, r.text
+            assert r.json()["state"] == "pending"
+        with as_user(env["dispatcher_id"], "agent"):
+            r = await c.patch(f"/api/v1/tickets/{t['id']}", json={
+                "state": "returned", "reason": "请创建人补充材料",
+            })
+        assert r.status_code == 200, r.text
+        assert r.json()["state"] == "returned"
+        assert r.json()["owner_id"] == t["creator_id"]
+        assert r.json()["returned_to_user_id"] == t["creator_id"]
+        if round_number == 0:
+            r = await c.patch(f"/api/v1/tickets/{t['id']}", json={"state": "pending"})
+            assert r.status_code == 200, r.text
+
+
+@pytest.mark.parametrize("confirmed_pair", [True, False])
+async def test_legacy_redispatch_return_requires_confirmed_audit_pair(env, confirmed_pair):
+    t = await env["create_ticket"]()
+    for _ in range(2):
+        with as_user(env["dispatcher_id"], "agent"):
+            await env["dispatch"](t["id"], env["handler_id"])
+        with as_user(env["handler_id"], "agent"):
+            r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+                "state": "pending", "reason": "材料仍不齐",
+            })
+        assert r.status_code == 200, r.text
+    logs = await db_logs(env, t["id"])
+    async with env["factory"]() as s:
+        ticket = await s.get(Ticket, t["id"])
+        # Reproduce 0014's old cursor: points to second dispatch rather than
+        # the already-restored initial node. Original audit records stay intact.
+        ticket.return_checkpoints = []
+        ticket.legacy_return_cursor_log_id = logs[-2].id
+        if not confirmed_pair:
+            first_return = await s.get(TicketStateLog, logs[2].id)
+            first_return.operator_id = env["dispatcher_id"]
+        await s.commit()
+    with as_user(env["dispatcher_id"], "agent"):
+        r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
+            "state": "returned", "reason": "请创建人补充材料",
+        })
+    if confirmed_pair:
+        assert r.status_code == 200, r.text
+        assert r.json()["owner_id"] == t["creator_id"]
+        assert r.json()["state"] == "returned"
+    else:
+        assert r.status_code == 422, r.text
+        assert "无法安全退回" in r.text
+        assert (await db_ticket(env, t["id"])).state == "pending"
+
+
 # ── 6. returned → pending（重新提交） ───────────────────
 
 
@@ -371,6 +437,7 @@ async def test_resubmit_returned_to_pending(env):
 
 async def test_hold_open_to_on_hold(env):
     t = await env["create_ticket"]()
+    await use_hardware_category(env, t["id"])
     await env["dispatch"](t["id"], env["handler_id"])
     r = await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "on_hold", "reason": "等待备件", "hold_until": "2027-03-01T00:00:00",
@@ -387,6 +454,7 @@ async def test_hold_open_to_on_hold(env):
 
 async def test_resume_on_hold_to_open(env):
     t = await env["create_ticket"]()
+    await use_hardware_category(env, t["id"])
     await env["dispatch"](t["id"], env["handler_id"])
     await env["client"].patch(f"/api/v1/tickets/{t['id']}", json={
         "state": "on_hold", "reason": "等待备件", "hold_until": "2027-03-01T00:00:00",
@@ -655,6 +723,7 @@ async def test_action_type_full_chain(env, monkeypatch):
     """一条工单走完常规链路，每步 Flow Log 的 action_type 正确。"""
     import app.services.state_machine as state_machine
     t = await env["create_ticket"]()
+    await use_hardware_category(env, t["id"])
 
     async def last_action():
         logs = await db_logs(env, t["id"])
@@ -768,8 +837,8 @@ async def test_allowed_actions_open_owner_and_capabilities(env):
         d = (await env["client"].get(f"/api/v1/tickets/{t['id']}")).json()
     acts = _action_map(d)
     # 当前处理人：可处理 / 打回 / 暂缓；撤销只给创建者。
-    assert set(acts) == {"resolve", "return", "hold"}
-    assert acts["hold"]["requires_reason"] is True
+    assert set(acts) == {"resolve", "return"}
+    assert "hold" not in acts
     assert acts["resolve"]["requires_reason"] is False
     assert acts["return"]["requires_reason"] is True
     # 文章能力位（owner 身份）

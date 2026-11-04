@@ -11,7 +11,7 @@ code 不进入 URL 或浏览器存储。离开页面或退出登录时清理 ifr
 
 ## 配置
 
-`.env` 中设置：
+在仓库根目录的 `.env` 中设置（可从根目录 `.env.example` 创建）：
 
 - `AGENT_EMBED_URL`：浏览器可访问的 Debussy 发布地址，含 `/embed/pub_...`。
 - `AGENT_EMBED_API_URL`：**工单 API 进程可访问**的 Debussy 服务端基础地址。
@@ -23,18 +23,23 @@ code 不进入 URL 或浏览器存储。离开页面或退出登录时清理 ifr
 Debussy，由发布应用及受信任系统的允许来源决定是否接受，并据此生成
 iframe 的嵌入策略。当前用户仍须通过工单系统的管理员鉴权。
 
-从仓库根目录启动开发后端时，使用 `make backend`（已显式加载根目录
-`.env`）。直接调用 Compose 时需写成
-`docker compose --env-file .env -f backend/docker-compose.yml up -d --no-deps --force-recreate api`；
-省略 `--env-file` 会让本仓库的 Embed 地址和换票凭据以空值进入容器，
-智能助手接口返回“尚未完成配置”。
+开发 Compose 的 API 服务直接读取根目录 `.env`，因此无论从哪个目录调用
+Compose，Embed 配置都会进入容器。修改配置后需重新创建 API：从仓库根目录执行
+`docker compose --env-file .env -f backend/docker-compose.yml up -d --no-deps --force-recreate api`。
+其他服务及 Compose 插值仍使用命令指定的 `--env-file`；推荐通过 `make backend`
+启动完整开发环境。智能助手可选；未配置时 API 仍可启动，但访问助手会提示尚未完成配置。
 
 当前发布应用的公开配置允许 `http://localhost:5173`、
 `http://127.0.0.1:5173` 和 `http://10.113.114.88:5173`。实际允许来源
 以 Debussy 发布应用的配置为准；协议、主机和端口共同决定 Origin。
 其他开发地址需由平台侧先配置支持。
 
-当前 Debussy Vite 监听 `127.0.0.1:5176`，并将 `/api/embed` 代理到
+当前开发环境的浏览器 Embed 地址应配置为 `http://10.113.114.88:5176/embed/pub_...`，
+不能使用 `127.0.0.1`，否则其他机器会连接到各自的本机。客户端需能访问 5176，
+并使用已获平台授权的工单页面来源（例如 `http://10.113.114.88:5173`）。
+其他主机名、端口或 HTTPS 来源仍需加入平台允许来源。
+
+当前 Debussy Vite 监听 `0.0.0.0:5176`，公开 Embed 路径并将 `/api/embed` 代理到
 只监听本机回环地址的 `127.0.0.1:8768`。工单 API 容器无法直接访问这两个地址，
 开发 Compose 中的 `agent-bridge` 只转发换票接口。因此
 `AGENT_EMBED_API_URL` 使用 `http://10.113.114.88:8767`。

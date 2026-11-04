@@ -74,6 +74,7 @@ async def prescribe_dept(db: AsyncSession, department_code: str) -> dict | None:
             .where(
                 UserSkillGroup.skill_group_id == sg.id,
                 User.is_active == True,  # noqa: E712
+                User.role.notin_(["department_leader", "division_leader"]),
                 or_(
                     UserSkillGroup.effective_from.is_(None),
                     UserSkillGroup.effective_from <= now,

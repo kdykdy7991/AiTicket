@@ -3,6 +3,9 @@ import api from './index'
 export interface SkillGroupMembership {
   skill_group_id: number
   is_dispatcher: boolean
+  complaint_leader: boolean
+  complaint_division_leader: boolean
+  complaint_responsibilities: string[]
 }
 
 export interface UserItem {

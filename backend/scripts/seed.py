@@ -87,7 +87,7 @@ USERS = [
     # 对接人
     (10, 'zhongmengxi', '钟梦茜', 'handler', 1, False, _SKDY_HASH),
     (11, 'xiezhipeng', '谢志鹏', 'handler', 1, False, _SKDY_HASH),
-    (12, 'zhangzhaojuan', '张朝娟', 'handler', 1, False, _SKDY_HASH),
+    (12, 'zhangchaojuan', '张朝娟', 'handler', 1, False, _SKDY_HASH),
     (13, 'lianlu', '练露', 'handler', 1, False, _SKDY_HASH),
     (14, 'zhanghua', '张华', 'handler', 1, False, _SKDY_HASH),
     (15, 'qiuwenwei', '丘文伟', 'handler', 1, False, _SKDY_HASH),

@@ -48,6 +48,7 @@ class TicketCreate(BaseModel):
     # Phase 8: 投诉级别（仅对服务投诉类工单有意义）
     # 取值: "一般" / "重要" / "重大"
     complaint_level: str | None = None
+    complaint_responsibility: str | None = None
     # 即时办结咨询由专用分类决定；旧客户端标记只用于拒绝误用。
     is_instant_resolve: bool = False
     instant_resolution: str | None = Field(default=None, max_length=4000)

@@ -29,6 +29,10 @@ services:
 
   api:
     build: .
+    # Resolve the shared configuration relative to this Compose file, regardless
+    # of the directory or command used to start the development stack.
+    env_file:
+      - ../.env
     ports:
       - "8001:8000"
     environment:
@@ -36,10 +40,6 @@ services:
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in backend/.env}
       MCP_INTERNAL_TOKEN: ${MCP_INTERNAL_TOKEN:-}
-      AGENT_EMBED_URL: ${AGENT_EMBED_URL:-}
-      AGENT_EMBED_API_URL: ${AGENT_EMBED_API_URL:-}
-      AGENT_EMBED_CLIENT_ID: ${AGENT_EMBED_CLIENT_ID:-}
-      AGENT_EMBED_CLIENT_SECRET: ${AGENT_EMBED_CLIENT_SECRET:-}
       CASDOOR_ISSUER: ${CASDOOR_ISSUER:-}
       CASDOOR_CLIENT_ID: ${CASDOOR_CLIENT_ID:-}
       CASDOOR_CLIENT_SECRET: ${CASDOOR_CLIENT_SECRET:-}
@@ -53,6 +53,7 @@ services:
         condition: service_healthy
     volumes:
       - ./app:/app/app  # dev: hot reload
+      - ./alembic:/app/alembic  # dev: migration scripts follow the checkout
       - uploads:/app/uploads
 
   mcp:

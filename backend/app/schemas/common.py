@@ -11,9 +11,12 @@ from pydantic import BaseModel, Field
 class SkillGroupMembership(BaseModel):
     skill_group_id: int
     is_dispatcher: bool = False
+    complaint_leader: bool = False
+    complaint_division_leader: bool = False
+    complaint_responsibilities: list[str] = Field(default_factory=list)
 
 
-UserRole = Literal["admin", "agent", "handler", "observer"]
+UserRole = Literal["admin", "agent", "handler", "department_leader", "division_leader", "observer"]
 
 
 class UserCreate(BaseModel):
@@ -29,6 +32,7 @@ class UserCreate(BaseModel):
 
 
 class UserUpdate(BaseModel):
+    username: str | None = Field(default=None, min_length=1, max_length=50)
     name: str | None = None
     phone: str | None = None
     password: str | None = None

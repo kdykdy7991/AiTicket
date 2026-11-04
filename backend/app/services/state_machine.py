@@ -129,7 +129,7 @@ ACTION_LABELS: dict[str, str] = {
     "resolve": "标记已处理",
     "hold": "暂缓处理",
     "resume": "恢复处理",
-    "reopen": "退回重开",
+    "reopen": "退回",
     "resubmit": "重新提交",
     "archive": "归档",
     "refine": "分诊",     # 判断人细化分类一级（域动作，不改状态）
@@ -335,6 +335,7 @@ def snapshot_node(ticket: Ticket, *, state: str | None = None) -> dict:
         "returned_to_user_id": ticket.returned_to_user_id,
         "dispatch_chain_steps": ticket.dispatch_chain_steps,
         "dispatch_step_index": ticket.dispatch_step_index,
+        "legacy_return_cursor_log_id": ticket.legacy_return_cursor_log_id,
         "resolved": False if state == "open" else ticket.resolved,
         "solved_at": None if state == "open" else (ticket.solved_at.isoformat() if ticket.solved_at else None),
     }
@@ -369,6 +370,25 @@ async def _legacy_previous_node(db: AsyncSession, ticket: Ticket) -> tuple[dict 
     if ticket.legacy_return_cursor_log_id is not None:
         query = query.where(TicketStateLog.id < ticket.legacy_return_cursor_log_id)
     logs = list((await db.execute(query.order_by(TicketStateLog.id.desc()).limit(50))).scalars().all())
+    # Older checkpoints lost the return cursor on redispatch. Only discard a
+    # completed dispatch/return pair when the adjacent audit records prove that
+    # the assigned handler returned to this same dispatcher. Keep ambiguous
+    # history subject to the existing safety checks below.
+    while ticket.state == "pending" and len(logs) >= 2:
+        returned, dispatched = logs[:2]
+        if not (
+            returned.action_type == "return"
+            and (returned.from_state, returned.to_state) == ("open", "pending")
+            and returned.owner_id_snapshot is None
+            and dispatched.action_type == "dispatch"
+            and (dispatched.from_state, dispatched.to_state) == ("pending", "open")
+            and dispatched.owner_id_snapshot == returned.operator_id
+            and ticket.dispatcher_id is not None
+            and dispatched.operator_id == ticket.dispatcher_id
+            and dispatched.dispatcher_id_snapshot == returned.dispatcher_id_snapshot == ticket.dispatcher_id
+        ):
+            break
+        logs = logs[2:]
     latest = next((log for log in logs if log.action_type not in ("return", "reopen")), None)
     if latest is None or latest.action_type in ("create", "resubmit"):
         return None, latest.id if latest else None
@@ -445,7 +465,10 @@ async def apply_return(db: AsyncSession, ticket: Ticket, *, operator: User, reas
         ticket.return_checkpoints = checkpoints[:-1]
         restore_node(ticket, node)
         if not ticket.return_checkpoints:
-            ticket.legacy_return_cursor_log_id = node.get("previous_log_id", 0) + 1
+            cursor = node.get("legacy_return_cursor_log_id")
+            ticket.legacy_return_cursor_log_id = (
+                cursor if cursor is not None else node.get("previous_log_id", 0) + 1
+            )
     else:
         node, cursor = await _legacy_previous_node(db, ticket)
         if node is not None:
@@ -490,13 +513,21 @@ async def is_dispatcher(db: AsyncSession, user_id: int, skill_group_id: int | No
     if not skill_group_id:
         return False
     result = await db.execute(
-        select(UserSkillGroup).where(
+        select(UserSkillGroup).join(User, User.id == UserSkillGroup.user_id).where(
             UserSkillGroup.user_id == user_id,
             UserSkillGroup.skill_group_id == skill_group_id,
+            User.role.notin_(["department_leader", "division_leader"]),
             UserSkillGroup.is_dispatcher == True,
         )
     )
     return result.scalar_one_or_none() is not None
+
+
+def hold_scope_error(ticket: Ticket, node_type: str | None) -> str | None:
+    """只有业务保障/硬件故障的处理节点允许发起暂缓。"""
+    if ticket.category_id != 2322 or node_type != "processing":
+        return "仅业务保障 / 硬件故障的处理节点可暂缓处理"
+    return None
 
 
 async def transition_permission_error(
@@ -522,6 +553,12 @@ async def transition_permission_error(
             or (node_type == "sales_opportunity" and to_state == "open" and allow_sales_intake)
         ):
             return node_error
+    if action_for(ticket.state, to_state) == "hold":
+        from app.services.node_context import derive_node_type
+        hold_node, _, _ = await derive_node_type(db, ticket)
+        scope_error = hold_scope_error(ticket, hold_node)
+        if scope_error is not None:
+            return scope_error
     if user.role == "admin":
         return None  # admin 全权限
 
@@ -640,9 +677,10 @@ async def _assert_user_in_department(
     实测就出现过工单责任部门=经营管理部、处理人=网运部成员的错配。
     """
     link = await db.execute(
-        select(UserSkillGroup).where(
+        select(UserSkillGroup).join(User, User.id == UserSkillGroup.user_id).where(
             UserSkillGroup.user_id == user_id,
             UserSkillGroup.skill_group_id == skill_group_id,
+            User.role.notin_(["department_leader", "division_leader"]),
         )
     )
     if link.scalar_one_or_none() is None:
@@ -859,7 +897,12 @@ async def apply_refine(
     ticket.dispatch_chain_steps = steps or ticket.dispatch_chain_steps
     ticket.dispatch_step_index = step_index if steps else ticket.dispatch_step_index
 
-    if move_dept is not None:
+    # 同部门接续仍由已指派的判断人办理，不能用部门默认负责人覆盖。
+    # 特别是硬件故障：售后判断 → 售后处理属于同一处理人的两个节点。
+    if move_dept == judging_dept and ticket.state == "open" and ticket.owner_id is not None:
+        await _assert_user_in_department(db, ticket.owner_id, ticket.skill_group_id, "售后处理人")
+        ticket.dispatcher_id = None
+    elif move_dept is not None:
         rx = await prescribe_dept(db, move_dept)
         if rx is not None:
             ticket.skill_group_id = rx["skill_group_id"]
@@ -1046,6 +1089,10 @@ async def apply_transition(
     steps = ticket.dispatch_chain_steps or []
     from app.services.node_context import derive_node_type, node_action_error
     node_type, _, _ = await derive_node_type(db, ticket)
+    if action_for(ticket.state, to_state) == "hold":
+        scope_error = hold_scope_error(ticket, node_type)
+        if scope_error is not None:
+            raise HTTPException(422, detail=scope_error)
     action_error = node_action_error(node_type, action_for(ticket.state, to_state, action_type) or "")
     if action_error is not None and action_type != "transfer" and not (
         (node_type == "phone_feedback" and to_state == "resolved" and allow_intermediate_transfer)
@@ -1215,10 +1262,10 @@ async def apply_transition(
     log = TicketStateLog(
         ticket_id=ticket.id, from_state=old_state, to_state=to_state,
         operator_id=operator.id, reason=reason, duration_minutes=duration,
+        hold_until_snapshot=hold_until_at,
         action_type=action,
         **snapshot_people(ticket),
     )
     db.add(log)
     await db.flush()
     return log
-        hold_until_snapshot=hold_until_at,

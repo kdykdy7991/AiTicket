@@ -153,6 +153,10 @@ async def test_professional_submits_response_measures_to_after_sales(renv, confi
     assert next_ticket["owner_id"] == users[2311]
     assert next_ticket["dispatch_step_index"] == (2 if confirmation_action == "confirm" else 0)
     if confirmation_action == "return":
+        async with factory() as db:
+            saved = await db.get(Ticket, ticket_id)
+            assert saved.has_returned is True
+            assert saved.return_checkpoints[-1]["category_id"] == 2310
         with as_user(users[2311], "handler"):
             revision_form = (await renv["client"].get(f"/api/v1/tickets/{ticket_id}/current-form")).json()
             assert revision_form["code"] == "constellation_response_plan_v1"
@@ -211,6 +215,55 @@ async def test_professional_submits_response_measures_to_after_sales(renv, confi
             })
             assert feedback.status_code == 200, feedback.text
         assert feedback.json()["data"]["state"] == "resolved"
+        resolved_detail = (await renv["client"].get(f"/api/v1/tickets/{ticket_id}")).json()
+        assert next(a for a in resolved_detail["allowed_actions"] if a["action"] == "reopen")["label"] == "退回"
+        # Reproduce two completed-feedback returns, then the after-sales
+        # handler's return. It must restore analysis, not skip to triage.
+        for round_index in range(2):
+            reopened = await renv["client"].patch(f"/api/v1/tickets/{ticket_id}", json={
+                "state": "open", "reason": "客户要求重新处理",
+            })
+            assert reopened.status_code == 200, reopened.text
+            reopened_ticket = (await renv["client"].get(f"/api/v1/tickets/{ticket_id}")).json()
+            assert reopened_ticket["node_context"]["node_type"] == "phone_feedback"
+            assert reopened_ticket["owner_id"] == result["owner_id"]
+            assert next(a for a in reopened_ticket["allowed_actions"] if a["action"] == "return")["label"] == "退回"
+            if round_index == 0:
+                with as_user(result["owner_id"], "handler"):
+                    feedback = await renv["client"].post(
+                        f"/api/v1/tickets/{ticket_id}/node-submit", data={
+                            "payload": json.dumps({
+                                "form_definition_id": feedback_form["form_definition_id"],
+                                "form_version": feedback_form["version"],
+                                "expected_category_id": reopened_ticket["category_id"],
+                                "expected_department_id": reopened_ticket["skill_group_id"],
+                                "expected_dispatch_step_index": 3, "expected_state": "open",
+                                "values": {"phone_feedback_result": "再次反馈处理结果"},
+                            }),
+                        },
+                    )
+                    assert feedback.status_code == 200, feedback.text
+                    assert feedback.json()["data"]["state"] == "resolved"
+        with as_user(result["owner_id"], "handler"):
+            returned = await renv["client"].patch(f"/api/v1/tickets/{ticket_id}", json={
+                "state": "pending", "reason": "请重新分析验证",
+            })
+        assert returned.status_code == 200, returned.text
+        restored = (await renv["client"].get(f"/api/v1/tickets/{ticket_id}")).json()
+        assert restored["state"] == "open"
+        assert restored["node_context"]["node_type"] == "analysis"
+        assert restored["dispatch_step_index"] == 2
+        assert restored["owner_id"] == users[2311]
+        assert restored["skill_group_id"] == next_ticket["skill_group_id"]
+        assert restored["category_id"] == next_ticket["category_id"]
+        async with factory() as db:
+            saved = await db.get(Ticket, ticket_id)
+            assert [node["dispatch_step_index"] for node in saved.return_checkpoints[-2:]] == [0, 1]
+        with as_user(users[2311], "handler"):
+            restored_form = (await renv["client"].get(
+                f"/api/v1/tickets/{ticket_id}/current-form",
+            )).json()
+            assert restored_form["code"] == "constellation_analysis_v1"
     async with factory() as db:
         submission = (await db.execute(select(TicketNodeSubmission).where(
             TicketNodeSubmission.ticket_id == ticket_id,
@@ -321,10 +374,12 @@ async def test_constellation_triage_routes_each_direct_child(renv, target_id, ca
         held = await renv["client"].patch(f"/api/v1/tickets/{ticket_id}", json={
             "state": "on_hold", "reason": "等待处理窗口",
             "hold_until": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()})
-        assert held.status_code == 200, held.text
-        resumed = await renv["client"].patch(f"/api/v1/tickets/{ticket_id}", json={
-            "state": "open", "reason": "继续处理"})
-        assert resumed.status_code == 200, resumed.text
+        # The existing hardware-only hold policy also applies to these routes.
+        assert held.status_code == 422, held.text
+        assert "仅业务保障 / 硬件故障" in held.json()["detail"]
+        unchanged = (await renv["client"].get(f"/api/v1/tickets/{ticket_id}")).json()
+        assert unchanged["state"] == "open"
+        assert unchanged["owner_id"] == users[target_id]
 
 
 @pytest.mark.asyncio

@@ -54,6 +54,7 @@ from app.services.state_machine import (
     apply_initial_state,
     apply_refine,
     apply_transition,
+    push_node,
     compute_allowed_actions,
     compute_article_actions,
     refine_capability,
@@ -64,10 +65,15 @@ from app.services.state_machine import (
 )
 from app.services.callback_policy import resolve_callback_required
 from app.services.direct_assign import resolve_direct_assign, assign_chain_owners
+from app.services.complaint_assignment import OPTIONS as COMPLAINT_OPTIONS, ROSTER as COMPLAINT_ROSTER, departments as complaint_departments, validate_assignment as validate_complaint_assignment
 from app.services.node_context import NodeContext, NodeContextConflict, resolve_node_context
 from app.services.node_form import resolve_form, present_form, validate_submission
 
 router = APIRouter(tags=["tickets"])
+
+@router.get("/complaint-assignment-options/{category_id}")
+async def complaint_assignment_options(category_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    return {"data": {"responsibilities": [{"label": label, "department": COMPLAINT_ROSTER[label][0], "name": COMPLAINT_ROSTER[label][1]} for label in COMPLAINT_OPTIONS.get(category_id, [])], "departments": await complaint_departments(db, category_id) if category_id in COMPLAINT_OPTIONS else []}}
 
 
 async def _sales_group_for_owner(db: AsyncSession, owner_id: int | None) -> SkillGroup:
@@ -684,6 +690,10 @@ async def submit_draft(
         and ticket.category_id is not None
         and await resolve_direct_assign(db, ticket.category_id)
     )
+    complaint_step = None
+    if ticket.category_id in COMPLAINT_OPTIONS and not ticket.is_opportunity:
+        saved = (ticket.dispatch_chain_steps or [{}])[0]
+        complaint_step = await validate_complaint_assignment(db, ticket.category_id, saved.get("complaint_responsibility"), ticket.skill_group_id, ticket.owner_id)
     if is_instant_consult:
         if ticket.is_opportunity:
             raise HTTPException(422, detail="即时办结咨询不能作为线索工单")
@@ -697,7 +707,10 @@ async def submit_draft(
         ticket.dispatch_chain_steps = None
         ticket.dispatch_step_index = None
 
-    if not is_instant_consult and ticket.category_id == 2204 and not ticket.is_opportunity:
+    if complaint_step:
+        ticket.dispatch_chain_steps = [complaint_step]
+        ticket.dispatch_step_index = 0
+    elif not is_instant_consult and ticket.category_id == 2204 and not ticket.is_opportunity:
         rx = await reconciliation_assignment(db, "经营管理部")
         ticket.skill_group_id = ticket.handler_skill_group_id = rx["skill_group_id"]
         ticket.owner_id = rx["owner_id"]
@@ -753,7 +766,7 @@ async def submit_draft(
         await apply_transition(db, ticket, to_state="open", operator=user,
                                owner_id=ticket.owner_id, allow_sales_intake=True,
                                action_type="auto_assign" if not ticket.is_opportunity else None)
-    elif is_direct_assign_draft:
+    elif complaint_step or is_direct_assign_draft:
         await apply_transition(db, ticket, to_state="open", operator=user,
                                owner_id=ticket.owner_id, action_type="direct_assign")
     await db.commit()
@@ -828,21 +841,31 @@ async def update_draft(
     ticket.region_id = body.region_id
     ticket.region_name = body.region_name
     ticket.category_id = body.category_id
+    ticket.complaint_level = ({2102: "一般", 2103: "重要", 2104: "重大"}.get(body.category_id)
+                              if not body.is_opportunity else None)
     ticket.callback_required = await resolve_callback_required(db, body.category_id)
     ticket.group_id = body.group_id or user.group_id
     ticket.skill_group_id = body.skill_group_id
     ticket.handler_skill_group_id = body.handler_skill_group_id
     ticket.dispatcher_id = None if body.is_opportunity or body.category_id == 2204 else body.dispatcher_id
+    complaint_step = None
+    if body.category_id in COMPLAINT_OPTIONS and not body.is_opportunity:
+        complaint_step = await validate_complaint_assignment(db, body.category_id, body.complaint_responsibility, body.skill_group_id, body.owner_id, draft=True)
     is_direct_assign_draft = (
         not body.is_opportunity
         and body.category_id is not None
         and await resolve_direct_assign(db, body.category_id)
     )
     ticket.owner_id = (
-        body.owner_id if is_direct_assign_draft
+        body.owner_id if is_direct_assign_draft or complaint_step
         else body.sales_owner_id if body.is_opportunity else None
     )
-    if body.category_id == 2204 and not body.is_opportunity:
+    if complaint_step:
+        ticket.dispatch_chain_steps = [complaint_step]
+        ticket.dispatch_step_index = 0
+        ticket.handler_skill_group_id = body.skill_group_id
+        ticket.dispatcher_id = None
+    elif body.category_id == 2204 and not body.is_opportunity:
         # 草稿尚未进入审核节点；正式提交时再确定部门和链快照。
         ticket.dispatch_chain_steps = None
         ticket.dispatch_step_index = None
@@ -1327,6 +1350,18 @@ async def submit_node_form(
                              else next_step.get("assigned_owner_id"))
             if group is None or not next_owner_id:
                 raise HTTPException(409, detail="下一节点责任人未配置")
+            if confirmation_action == "return":
+                # Returning a plan consumes its forward checkpoint. Older
+                # tickets may not have one; never consume an earlier triage.
+                checkpoints = ticket.return_checkpoints or []
+                if (checkpoints and checkpoints[-1].get("category_id") == ticket.category_id
+                        and checkpoints[-1].get("dispatch_step_index") == next_index):
+                    ticket.return_checkpoints = checkpoints[:-1]
+                ticket.has_returned = True
+            else:
+                # Same-state form handoffs are real workflow nodes too.
+                # Capture the source before changing the stage and assignee.
+                await push_node(db, ticket)
             ticket.dispatch_step_index = next_index
             ticket.skill_group_id = group.id
             ticket.handler_skill_group_id = group.id
@@ -1425,6 +1460,7 @@ async def submit_triage(
             ).where(
                 User.id == body.assigned_owner_id,
                 User.is_active.is_(True),
+                User.role.notin_(["department_leader", "division_leader"]),
                 UserSkillGroup.skill_group_id == target_group.id,
                 or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
                 or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
@@ -1662,6 +1698,9 @@ async def create_ticket(
     is_reconciliation = body.category_id == 2204 and not body.is_opportunity
     # 直指派分类（services/direct_assign.py）：该类别工单免部门对接人分派，
     # 由建单人（客服）在建单时直接指定处理人，工单直接进入「处理中」。
+    complaint_step = None
+    if body.category_id in COMPLAINT_OPTIONS and not body.is_opportunity and body.intake_form:
+        complaint_step = await validate_complaint_assignment(db, body.category_id, body.complaint_responsibility, body.skill_group_id, body.owner_id, draft=body.is_draft)
     is_direct_assign = (
         not body.is_opportunity
         and not is_instant_consult
@@ -1693,7 +1732,7 @@ async def create_ticket(
             body.dispatcher_id = rx["dispatcher_id"]
             body.owner_id = rx["owner_id"]
 
-    if body.category_id is not None and not is_reconciliation and not is_instant_consult:
+    if body.category_id is not None and not is_reconciliation and not is_instant_consult and not complaint_step:
         from app.services.dispatch_chain import resolve_responsibility
         resp = await resolve_responsibility(db, body.category_id)
         chain_steps = resp.get("chain_steps")
@@ -1729,6 +1768,10 @@ async def create_ticket(
             if body.dispatcher_id is None and resp.get("dispatcher_id"):
                 body.dispatcher_id = resp["dispatcher_id"]
 
+    if complaint_step:
+        chain_steps = [complaint_step]
+        body.handler_skill_group_id = body.skill_group_id
+        body.dispatcher_id = None
     if is_direct_assign:
         chain_steps = await assign_chain_owners(db, chain_steps or [], body.dispatch_owner_ids,
                                                first_owner_id=body.owner_id, draft=body.is_draft)
@@ -1754,7 +1797,7 @@ async def create_ticket(
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
             handler_skill_group_id=body.handler_skill_group_id,
-            owner_id=(body.owner_id if is_direct_assign
+            owner_id=(body.owner_id if is_direct_assign or complaint_step
                       else body.sales_owner_id if body.is_opportunity else None),
             creator_id=user.id, first_owner_id=None,
             dispatcher_id=None if (body.is_opportunity or is_reconciliation) else body.dispatcher_id,
@@ -1789,7 +1832,7 @@ async def create_ticket(
 
         # Dispatcher required for formal tickets
         if not body.dispatcher_id and not (body.is_opportunity or is_reconciliation or is_instant_consult
-                                           or is_direct_assign):
+                                           or is_direct_assign or complaint_step):
             detail = "所选分类尚未配置对接人，请联系管理员" if body.intake_form else "建单时必须指定部门对接人"
             raise HTTPException(422, detail=detail)
 
@@ -1814,7 +1857,7 @@ async def create_ticket(
             group_id=body.group_id or user.group_id,
             skill_group_id=body.skill_group_id,
             handler_skill_group_id=body.handler_skill_group_id,
-            owner_id=body.owner_id if is_direct_assign else None,
+            owner_id=body.owner_id if is_direct_assign or complaint_step else None,
             creator_id=user.id, first_owner_id=None,
             dispatcher_id=body.dispatcher_id,
             is_duplicate=body.is_duplicate,
@@ -1847,7 +1890,7 @@ async def create_ticket(
                                    owner_id=body.owner_id if is_reconciliation else body.sales_owner_id,
                                    allow_sales_intake=True,
                                    action_type="auto_assign" if is_reconciliation else None)
-        elif is_direct_assign:
+        elif is_direct_assign or complaint_step:
             # 直指派分类：建单即指派处理人，工单直接进入「处理中」——
             # 不经过部门对接人分派。动作记为 direct_assign（建单指派），
             # 与真正的「分派」在 Flow Log 上区分开。
@@ -2179,6 +2222,7 @@ async def get_state_logs(
             "owner_id_snapshot": log.owner_id_snapshot,
             "owner_name_snapshot": _name(log.owner_id_snapshot),
             "reason": log.reason, "duration_minutes": log.duration_minutes,
+            "hold_until_snapshot": log.hold_until_snapshot.isoformat() if log.hold_until_snapshot else None,
             # 动作类型：create/dispatch/hold/resume/resolve/reopen/return/
             # resubmit/archive/cancel/instant_resolve。
             # 历史日志列值为 null 时按真实流转表推导（前端不再自算流转规则）
@@ -2186,4 +2230,3 @@ async def get_state_logs(
             "created_at": log.created_at.isoformat() if log.created_at else None,
         })
     return {"data": data}
-            "hold_until_snapshot": log.hold_until_snapshot.isoformat() if log.hold_until_snapshot else None,

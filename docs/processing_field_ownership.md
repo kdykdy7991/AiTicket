@@ -37,3 +37,11 @@
 `ticket_node_submissions.article_id` 指向本次 Article；外键阻止删除仍被 Submission 引用的 Article。当前没有删除 Submission 的业务 API。相关材料首版沿用现有存储目录和大小限制，允许图片/PDF；既有 ArticleAttachment 记录保持原样。
 
 **后续技术债（暂不实施）**：现有 CSV“解决方案内容”仍只读 `Ticket.resolution`，而新 processing 的处理意见以 `Article.body` 为权威。待 `triage → processing → phone_feedback → closure` 主链跑通后，再统一核定查询、导出和统计口径；不得为修补 CSV 而在 processing 中另写一份 `resolution`。
+
+
+## 暂缓处理范围（2026-10-28）
+
+仅“业务保障 / 硬件故障”（分类 2322）的 processing 节点允许发起暂缓。
+页面通过“是否需要寄回”分支提交暂缓原因与预计恢复时间；其他分类没有暂缓入口。
+规则同时约束 allowed_actions、单条和批量接口，管理员不能绕过。
+历史其他分类的暂缓工单保留恢复处理能力；硬件故障的指派、分诊、致电反馈等节点不允许发起暂缓。

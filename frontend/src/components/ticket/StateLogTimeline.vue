@@ -96,7 +96,7 @@ function responsibleLabel(log: TicketStateLog): string {
     hold: '暂缓人',
     resume: '恢复人',
     return: '退回人',
-    reopen: '重开人',
+    reopen: '退回人',
     resubmit: '提交人',
     instant_resolve: '操作人',
   }

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, func
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -38,6 +38,9 @@ class UserSkillGroup(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     skill_group_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("skill_groups.id", ondelete="CASCADE"), primary_key=True)
     is_dispatcher: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    complaint_leader: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    complaint_division_leader: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    complaint_responsibilities: Mapped[list] = mapped_column(JSON, nullable=False, default=list, server_default="[]")
     # 生效区间（分派设计表B）：调岗/离职填 effective_to，不删行以保留审计历史。
     # NULL = 当前生效中（向后兼容存量数据）。
     effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -76,13 +76,16 @@ async def list_users(
     skill_groups_map: dict[int, list[dict]] = {}
     if user_ids:
         sg_result = await db.execute(
-            select(UserSkillGroup.user_id, UserSkillGroup.skill_group_id, UserSkillGroup.is_dispatcher)
+            select(UserSkillGroup.user_id, UserSkillGroup.skill_group_id, UserSkillGroup.is_dispatcher, UserSkillGroup.complaint_leader, UserSkillGroup.complaint_division_leader, UserSkillGroup.complaint_responsibilities)
             .where(UserSkillGroup.user_id.in_(user_ids))
         )
-        for uid, sgid, is_disp in sg_result.all():
+        for uid, sgid, is_disp, leader, division_leader, responsibilities in sg_result.all():
             skill_groups_map.setdefault(uid, []).append({
                 "skill_group_id": sgid,
                 "is_dispatcher": is_disp,
+                "complaint_leader": leader,
+                "complaint_division_leader": division_leader,
+                "complaint_responsibilities": responsibilities,
             })
 
     data = []
@@ -111,6 +114,8 @@ async def create_user(
         raise HTTPException(422, detail="客服坐席必须选择客服组")
     if body.role == "handler" and not body.skill_groups:
         raise HTTPException(422, detail="处理人必须选择所属对接部门")
+    if body.role in {"department_leader", "division_leader"} and (body.group_id is not None or body.is_group_leader or not body.skill_groups or any(m.is_dispatcher or m.complaint_leader != (body.role == "department_leader") or m.complaint_division_leader != (body.role == "division_leader") for m in body.skill_groups)):
+        raise HTTPException(422, detail="负责人须选择部门和对应的负责人身份，不能设置为部门对接人")
     if body.role == "observer" and (body.group_id is not None or body.skill_groups or body.is_group_leader):
         raise HTTPException(422, detail="观察员不能加入客服组或对接部门")
 
@@ -126,7 +131,7 @@ async def create_user(
     # Add skill groups（对接部门，含对接人标记）
     from app.models.group import UserSkillGroup
     for m in body.skill_groups:
-        db.add(UserSkillGroup(user_id=u.id, skill_group_id=m.skill_group_id, is_dispatcher=m.is_dispatcher))
+        db.add(UserSkillGroup(user_id=u.id, skill_group_id=m.skill_group_id, is_dispatcher=m.is_dispatcher, complaint_leader=m.complaint_leader, complaint_division_leader=m.complaint_division_leader, complaint_responsibilities=m.complaint_responsibilities))
     await db.flush()
     return {"data": {"id": u.id, "username": u.username, "name": u.name, "role": u.role}}
 
@@ -144,6 +149,14 @@ async def update_user(
     if not u:
         raise NotFoundError("用户", user_id)
 
+    if body.username is not None and body.username != u.username:
+        existing_username = await db.scalar(select(User.id).where(User.username == body.username, User.id != u.id))
+        if existing_username is not None:
+            raise HTTPException(409, detail="用户名已存在")
+        if u.casdoor_subject and not u.casdoor_login_username:
+            u.casdoor_login_username = u.username
+        u.username = body.username
+
     next_role = body.role if body.role is not None else u.role
     if next_role == "agent" and (body.group_id if body.group_id is not None else u.group_id) is None:
         raise HTTPException(422, detail="客服坐席必须选择客服组")
@@ -153,16 +166,24 @@ async def update_user(
         )).scalar_one_or_none())
         if not has_membership:
             raise HTTPException(422, detail="处理人必须选择所属对接部门")
+    if next_role in {"department_leader", "division_leader"}:
+        if body.group_id is not None or body.is_group_leader:
+            raise HTTPException(422, detail="部门负责人不能加入客服组")
+        memberships = body.skill_groups
+        if memberships is None:
+            memberships = (await db.execute(select(UserSkillGroup).where(UserSkillGroup.user_id == user_id))).scalars().all()
+        if not memberships or any(m.is_dispatcher or m.complaint_leader != (next_role == "department_leader") or m.complaint_division_leader != (next_role == "division_leader") for m in memberships):
+            raise HTTPException(422, detail="负责人须选择部门和对应的负责人身份，不能设置为部门对接人")
     if next_role == "observer" and (body.group_id is not None or body.skill_groups or body.is_group_leader):
         raise HTTPException(422, detail="观察员不能加入客服组或对接部门")
-    if next_role == "observer" and u.role != "observer":
+    if next_role in {"observer", "department_leader", "division_leader"} and u.role != next_role:
         active_assignment = (await db.execute(select(Ticket.id).where(
             Ticket.state.notin_(["archived", "cancelled"]),
             or_(Ticket.owner_id == user_id, Ticket.dispatcher_id == user_id,
                 Ticket.creator_id == user_id),
         ).limit(1))).scalar_one_or_none()
         if active_assignment is not None:
-            raise HTTPException(409, detail="该用户仍关联在途工单，请先移交后再改为观察员")
+            raise HTTPException(409, detail="该用户仍关联在途工单，请先移交后再更改角色")
 
     # 不能禁用/降级最后一个管理员
     if body.role is not None and body.role != "admin" and u.role == "admin":
@@ -182,6 +203,9 @@ async def update_user(
             u.local_login_enabled = True
     if body.role is not None:
         u.role = body.role
+        if body.role in {"department_leader", "division_leader"}:
+            u.group_id = None
+            u.is_group_leader = False
         if body.role == "observer":
             u.group_id = None
             u.is_group_leader = False
@@ -201,7 +225,7 @@ async def update_user(
             UserSkillGroup.__table__.delete().where(UserSkillGroup.user_id == user_id)
         )
         for m in body.skill_groups:
-            db.add(UserSkillGroup(user_id=user_id, skill_group_id=m.skill_group_id, is_dispatcher=m.is_dispatcher))
+            db.add(UserSkillGroup(user_id=user_id, skill_group_id=m.skill_group_id, is_dispatcher=m.is_dispatcher, complaint_leader=m.complaint_leader, complaint_division_leader=m.complaint_division_leader, complaint_responsibilities=m.complaint_responsibilities))
 
     await db.flush()
     return {"data": {"id": u.id, "username": u.username, "name": u.name, "role": u.role}}
@@ -366,6 +390,7 @@ async def list_handlers(group_id: int, db: AsyncSession = Depends(get_db), user:
         select(User).join(UserSkillGroup, UserSkillGroup.user_id == User.id).where(
             UserSkillGroup.skill_group_id == group_id,
             User.is_active == True,
+            User.role.notin_(["department_leader", "division_leader"]),
             or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
             or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
         ).order_by(User.id)

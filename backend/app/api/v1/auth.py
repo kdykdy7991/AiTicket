@@ -23,6 +23,21 @@ from app.schemas.auth import LoginRequest, LoginResponse, RefreshRequest, Change
 router = APIRouter(tags=["auth"])
 
 
+async def verify_bound_password(user: User, password: str) -> bool:
+    """Check both the current and retained provider username against the bound subject."""
+    usernames = list(dict.fromkeys(name for name in (user.username, user.casdoor_login_username) if name))
+    for username in usernames:
+        try:
+            subject = await verify_password_subject(username, password)
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                continue
+            raise
+        if subject == user.casdoor_subject:
+            return True
+    return False
+
+
 @router.post("/auth/login", response_model=LoginResponse)
 async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """用户登录，返回 JWT access + refresh token。"""
@@ -40,8 +55,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     if _configured() and user.role != "admin" and not user.local_login_enabled:
         if not user.casdoor_subject or user.casdoor_issuer != settings.CASDOOR_ISSUER.rstrip("/"):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
-        subject = await verify_password_subject(body.username, body.password)
-        if subject != user.casdoor_subject:
+        if not await verify_bound_password(user, body.password):
             raise HTTPException(status_code=401, detail="用户名或密码错误")
     elif not verify_password(body.password, user.password_hash):
         raise HTTPException(status_code=401, detail="用户名或密码错误")

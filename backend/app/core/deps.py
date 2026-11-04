@@ -39,6 +39,11 @@ async def get_current_user(
     # A viewer can inspect data but cannot take part in any business or
     # administration workflow. Keep the guard here so new write endpoints
     # cannot accidentally grant access through a permissive dependency.
+    if user.role in {"department_leader", "division_leader"} and request.url.path not in {
+        "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/change-password",
+    }:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="负责人业务权限尚未配置")
+
     if user.role == "observer" and request.method not in {"GET", "HEAD", "OPTIONS"}:
         path = request.url.path
         read_only_post = (
