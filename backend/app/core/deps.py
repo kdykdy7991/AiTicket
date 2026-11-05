@@ -1,5 +1,7 @@
 """FastAPI dependencies: current user, database session."""
 
+import re
+
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
@@ -39,10 +41,26 @@ async def get_current_user(
     # A viewer can inspect data but cannot take part in any business or
     # administration workflow. Keep the guard here so new write endpoints
     # cannot accidentally grant access through a permissive dependency.
-    if user.role in {"department_leader", "division_leader"} and request.url.path not in {
-        "/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/change-password",
-    }:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="负责人业务权限尚未配置")
+    if user.role in {"department_leader", "division_leader"}:
+        path, method = request.url.path, request.method
+        account = path in {"/api/v1/auth/me", "/api/v1/auth/logout", "/api/v1/auth/change-password"}
+        listing = method == "GET" and path in {"/api/v1/tickets", "/api/v1/tickets/export", "/api/v1/categories"}
+        match = re.fullmatch(r"/api/v1/tickets/(\d+)(?:/(current-form|node-submissions|node-submit|state-logs|articles))?", path)
+        allowed = {("GET", None), ("PATCH", None), ("GET", "current-form"),
+                   ("GET", "node-submissions"), ("GET", "state-logs"),
+                   ("GET", "articles"), ("POST", "articles"), ("POST", "node-submit")}
+        if match and (method, match.group(2)) in allowed:
+            from app.models.ticket import Ticket
+            ticket = await db.get(Ticket, int(match.group(1)))
+            steps = ticket.dispatch_chain_steps or [] if ticket else []
+            index = (ticket.dispatch_step_index or 0) if ticket else 0
+            own_complaint = (ticket is not None and not ticket.is_draft and ticket.owner_id == user.id
+                             and ticket.category_id in (2102, 2103, 2104)
+                             and 0 <= index < len(steps) and steps[index].get("complaint_direct"))
+            if own_complaint:
+                return user
+        if not account and not listing:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅可访问本人负责的投诉工单")
 
     if user.role == "observer" and request.method not in {"GET", "HEAD", "OPTIONS"}:
         path = request.url.path

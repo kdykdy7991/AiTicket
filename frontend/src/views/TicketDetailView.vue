@@ -551,6 +551,7 @@ import { useTicketStore } from '@/stores/ticket'
 import { useAuthStore } from '@/stores/auth'
 import { metaApi } from '@/api/overviews'
 import { ticketApi } from '@/api/tickets'
+import api from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { Group, AllowedAction, TicketCategory } from '@/types'
 import StateTag from '@/components/common/StateTag.vue'
@@ -1249,7 +1250,16 @@ watch([ticket, () => ticket.value?.skill_group_id, () => route.params.id, canDis
   if (!visible || current?.id !== Number(routeId) || !current?.skill_group_id) return
   handlersLoading.value = true
   try {
-    const handlers = await metaApi.getHandlers(current.skill_group_id)
+    const step = (current as any).dispatch_chain_steps?.[(current as any).dispatch_step_index || 0]
+    let handlers
+    if (step?.complaint_direct) {
+      const response = await api.get(`/complaint-assignment-options/${(current as any).category_id}`)
+      const group = response.data.departments.find((item: any) => item.id === current.skill_group_id)
+      handlers = (group?.people || []).filter((person: any) =>
+        (current as any).category_id !== 2103 || person.responsibilities.includes(step.complaint_responsibility))
+    } else {
+      handlers = await metaApi.getHandlers(current.skill_group_id)
+    }
     if (active) dispatchHandlers.value = handlers
   } catch {
     if (active) dispatchHandlers.value = []

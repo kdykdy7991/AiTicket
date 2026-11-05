@@ -90,6 +90,8 @@ async def assignment_departments(db: AsyncSession, steps: list[dict]) -> list[di
     now = datetime.now(timezone.utc)
     departments = []
     for code in dict.fromkeys(step['department_code'] for step in steps):
+        fixed_username = next((step.get('fixed_owner_username') for step in steps
+                               if step['department_code'] == code and step.get('fixed_owner_username')), None)
         group = await db.scalar(select(SkillGroup).where(SkillGroup.name == code))
         members = []
         if group:
@@ -98,8 +100,11 @@ async def assignment_departments(db: AsyncSession, steps: list[dict]) -> list[di
                 or_(UserSkillGroup.effective_from.is_(None), UserSkillGroup.effective_from <= now),
                 or_(UserSkillGroup.effective_to.is_(None), UserSkillGroup.effective_to >= now),
             ).order_by(User.id))).scalars().all()
+        if fixed_username:
+            members = [member for member in members if member.username == fixed_username]
         departments.append({'department_code': code, 'skill_group_id': group.id if group else None,
-                            'handlers': [{'id': u.id, 'name': u.name} for u in members]})
+                            'handlers': [{'id': u.id, 'name': u.name} for u in members],
+                            'fixed_owner_username': fixed_username})
     return departments
 
 
@@ -113,6 +118,10 @@ async def assign_chain_owners(db: AsyncSession, steps: list[dict], choices: dict
         code = department['department_code']
         handlers = department['handlers']
         owner = choices.get(code) or (first_owner_id if index == 0 else None)
+        if department['fixed_owner_username']:
+            if not handlers:
+                raise HTTPException(422, detail=f'责任部门「{code}」的固定处理人无效，请联系管理员')
+            owner = handlers[0]['id']
         if owner is not None and owner not in {u['id'] for u in handlers}:
             raise HTTPException(422, detail=f'处理人不属于责任部门「{code}」的有效成员')
         if owner is None and len(handlers) == 1:

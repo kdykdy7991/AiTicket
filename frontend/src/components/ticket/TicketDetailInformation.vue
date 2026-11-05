@@ -14,7 +14,7 @@
 
     <TicketFormSection title="工单内容" icon="Document" eyebrow="TICKET CONTENT">
       <div class="fields content-fields">
-        <div v-for="field in contentFields" :key="field.label" class="field" :class="{ full: field.full, 'description-field': field.description }"><span class="field-icon"><component :is="field.icon" /></span><div class="field-copy"><span>{{ field.label }}</span><strong>{{ field.value }}</strong></div></div>
+        <div v-for="field in contentFields" :key="field.label" class="field" :class="{ full: field.full, 'description-field': field.description, 'complaint-type-field': field.label === '投诉细分类型' }"><span class="field-icon"><component :is="field.icon" /></span><div class="field-copy"><span>{{ field.label }}</span><strong>{{ field.value }}</strong></div></div>
       </div>
     </TicketFormSection>
 
@@ -41,6 +41,9 @@ const regionText = computed(() => t.value.region_name || [t.value.region?.provin
 const channelText = computed(() => ({ phone: '语音', web: '在线客服', internal: '内部转办', email: '邮件' } as Record<string, string>)[t.value.channel] || t.value.channel || '—')
 const priorityText = computed(() => ({ p1_urgent: 'P1', p2_high: 'P2', p3_normal: 'P3', p4_enterprise: 'P4' } as Record<string, string>)[t.value.priority?.key || t.value.priority] || t.value.priority?.name || '—')
 const hasFaultInfo = computed(() => !!(t.value.fault_occurred_at || t.value.fault_recurrence || t.value.fault_location || t.value.is_batch_fault != null))
+const complaintType = computed(() => t.value.category_id === 2103
+  ? t.value.dispatch_chain_steps?.find((step: any) => step.complaint_direct && step.complaint_responsibility)?.complaint_responsibility
+  : null)
 const systemFields = computed(() => [
   { label: '工单号', value: t.value.number || '—', icon: Tickets },
   { label: '受理工号', value: t.value.creator_username || t.value.creator_account || '—', icon: Connection },
@@ -69,6 +72,7 @@ const contentFields = computed(() => isOpportunity.value ? [
   { label: '卫星物联网码号', value: t.value.satellite_number || '—', icon: Connection },
   { label: '一级分类', value: t.value.category_l1?.name || '—', icon: Grid },
   { label: '二级分类', value: t.value.category_l2?.name || '—', icon: Grid },
+  ...(complaintType.value ? [{ label: '投诉细分类型', value: complaintType.value, icon: Collection }] : []),
   { label: '是否为线索工单', value: yesNo(t.value.is_opportunity), icon: Warning },
   { label: '客户期望结果', value: t.value.expected_result || '—', icon: Document },
   { label: '优先级', value: priorityText.value, icon: Flag },
@@ -92,6 +96,7 @@ function yesNo(value?: boolean | null): string { return value == null ? '—' : 
 .system-fields, .content-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .customer-fields, .fault-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .field { min-width: 0; min-height: 60px; display: flex; align-items: center; gap: 14px; border-bottom: 1px solid #17466d; }
+.complaint-type-field { padding: 8px 0; }
 .field-icon { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border: 1px solid #164e78; border-radius: 8px; background: linear-gradient(135deg, #0a3d68, #092a4b); color: #8fd1ff; }
 .field-icon :deep(svg) { width: 19px; height: 19px; }
 .field-copy { min-width: 0; display: flex; flex-direction: column; gap: 4px; }

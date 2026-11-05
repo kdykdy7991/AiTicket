@@ -663,9 +663,15 @@ async def check_transition_permission(
             raise HTTPException(422, detail="分派时必须指定处理人")
         target_id = owner_id or ticket.owner_id
         if target_id and ticket.skill_group_id:
-            await _assert_user_in_department(
-                db, target_id, ticket.skill_group_id, "处理人"
-            )
+            steps = ticket.dispatch_chain_steps or []
+            index = ticket.dispatch_step_index or 0
+            step = steps[index] if 0 <= index < len(steps) else {}
+            if ticket.category_id in (2102, 2103, 2104) and step.get("complaint_direct"):
+                from app.services.complaint_assignment import validate_assignment
+                await validate_assignment(db, ticket.category_id, step.get("complaint_responsibility"),
+                                          ticket.skill_group_id, target_id)
+            else:
+                await _assert_user_in_department(db, target_id, ticket.skill_group_id, "处理人")
 
 
 async def _assert_user_in_department(

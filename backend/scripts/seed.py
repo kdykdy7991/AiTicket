@@ -471,6 +471,8 @@ def dispatch_chain_steps(category_id: int, departments: list[str]) -> list[dict]
     steps = []
     for index, department in enumerate(departments):
         step = {"order": index + 1, "department_code": department}
+        if index == 0 and category_id in (1204, 2203):
+            step["fixed_owner_username"] = {1204: "lihui", 2203: "liminxuan"}[category_id]
         if category_id in FEEDBACK_CATEGORY_IDS and index == len(departments) - 1:
             step["stage"] = "phone_feedback"
         elif category_id == 2322 and index == 0:

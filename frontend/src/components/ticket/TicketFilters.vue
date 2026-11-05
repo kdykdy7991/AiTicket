@@ -65,6 +65,7 @@
 <script setup lang="ts">
 import { reactive, computed, onMounted, ref, watch } from 'vue'
 import { metaApi } from '@/api/overviews'
+import { useAuthStore } from '@/stores/auth'
 import DateRangeFilter from '@/components/ticket/DateRangeFilter.vue'
 import type { TicketFilters, TicketPriority, User, TicketCategory, DateRangeValue } from '@/types'
 
@@ -75,6 +76,7 @@ interface L2CategoryOption {
 }
 
 const props = defineProps<{ modelValue: TicketFilters }>()
+const auth = useAuthStore()
 const emit = defineEmits<{ 'update:modelValue': [value: TicketFilters] }>()
 
 const local = reactive<TicketFilters>({})
@@ -121,7 +123,7 @@ watch(() => props.modelValue, (v) => {
 
 onMounted(async () => {
   const [p, c, cats] = await Promise.all([
-    metaApi.getPriorities(), metaApi.getCreators(), metaApi.getCategories(),
+    metaApi.getPriorities(), ['department_leader', 'division_leader'].includes(auth.userRole || '') ? Promise.resolve([]) : metaApi.getCreators(), metaApi.getCategories(),
   ])
   priorities.value = p
   creators.value = c

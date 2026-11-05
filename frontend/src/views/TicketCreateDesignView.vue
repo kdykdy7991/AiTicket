@@ -21,7 +21,8 @@
             <option v-for="person in department.handlers" :key="person.id" :value="person.id">{{ person.name }}</option>
           </select>
           <input v-else :value="department.handlers[0]?.name || '暂无有效处理人'" readonly />
-          <small v-if="department.handlers.length === 1" class="help">系统自动确定处理人</small>
+          <small v-if="department.handlers.length === 1" class="help">{{ department.fixed_owner_username ? '固定处理人' : '系统自动确定处理人' }}</small>
+          <small v-if="department.fixed_owner_username && !department.handlers.length" class="error">固定处理人无效，请联系管理员</small>
         </div>
         <small v-if="assignmentLoading || assignmentError" class="field full" :class="{ error: assignmentError }">{{ assignmentLoading ? '正在加载处理人…' : assignmentError }}</small>
         <div v-if="!isOpportunity && !isInstantConsult" class="field"><label for="satelliteNumber" :class="{ required: numberRequired }">卫星物联网码号</label><input id="satelliteNumber" v-model.trim="form.satelliteNumber" placeholder="请输入卫星物联网码号" :class="{ invalid: errors.satelliteNumber }" /><small class="help">一级分类为业务运营/业务保障时必填</small><small v-if="errors.satelliteNumber" class="error">{{ errors.satelliteNumber }}</small></div>
@@ -84,7 +85,7 @@ const salesGroupId = ref<number | null>(null)
 const salesUsers = ref<{ id: number; name: string }[]>([])
 const draftId = ref<number | null>(null)
 const busy = ref(false)
-type AssignmentDepartment = { department_code: string; handlers: { id: number; name: string }[] }
+type AssignmentDepartment = { department_code: string; handlers: { id: number; name: string }[]; fixed_owner_username?: string | null }
 const assignmentDepartments = ref<AssignmentDepartment[]>([])
 const assignmentChoices = reactive<Record<string, number | null>>({})
 const assignmentLoading = ref(false)

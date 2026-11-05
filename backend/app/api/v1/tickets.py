@@ -360,7 +360,9 @@ async def list_tickets(
         selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
         selectinload(Ticket.dispatcher),
     ).where(Ticket.is_draft == False)
-    if user.role == "handler":
+    if user.role in {"department_leader", "division_leader"}:
+        query = query.where(Ticket.owner_id == user.id, Ticket.category_id.in_((2102, 2103, 2104)))
+    elif user.role == "handler":
         # 可见性按工单当前明确指向的责任人判断，不依赖部门全局对接人身份。
         query = query.where((Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id))
     elif user.role == "agent":
@@ -485,7 +487,9 @@ async def export_tickets(
     )
 
     # 角色过滤（与 list_tickets 一致）
-    if user.role == "handler":
+    if user.role in {"department_leader", "division_leader"}:
+        query = query.where(Ticket.owner_id == user.id, Ticket.category_id.in_((2102, 2103, 2104)))
+    elif user.role == "handler":
         query = query.where((Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id))
     elif user.role == "agent":
         if not user.is_group_leader:
@@ -1933,6 +1937,16 @@ async def update_ticket(
     ticket = result.scalar_one_or_none()
     if not ticket:
         raise NotFoundError("工单", ticket_id)
+    if user.role in {"department_leader", "division_leader"}:
+        fields = body.model_dump(exclude_unset=True)
+        if set(fields) - {"state", "reason"} or fields.get("state") not in {"pending", "resolved"}:
+            raise HTTPException(403, detail="负责人仅可办理或退回本人负责的投诉工单")
+    steps = ticket.dispatch_chain_steps or []
+    step_index = ticket.dispatch_step_index or 0
+    if (ticket.state == "pending" and body.state == "open" and steps
+            and 0 <= step_index < len(steps) and steps[step_index].get("complaint_direct")
+            and body.skill_group_id is not None and body.skill_group_id != ticket.skill_group_id):
+        raise HTTPException(422, detail="投诉重新指派时不能修改责任部门")
     # callback_required 是系统维护字段：由分类规则在建单/分诊时确定（callback_policy），
     # 客户端不能人工修改——否则「是否要求回访」会和「是否已完成回访」重新混淆。
     if body.callback_required is not None:

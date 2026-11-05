@@ -9,10 +9,30 @@ from app.models.category import TicketCategory
 from app.models.dispatch import DispatchChain
 from app.models.group import SkillGroup, UserSkillGroup
 from app.models.user import User
+from app.services.direct_assign import assignment_departments, assign_chain_owners
+from fastapi import HTTPException
 from scripts.seed_package_change_review_form import seed_package_change_review_form
 from scripts.seed_package_change_execute_form import seed_package_change_execute_form
 from test_direct_assign import _setup_direct_assign
 from test_workflow_regression import as_user, _next_phone
+
+
+@pytest.mark.asyncio
+async def test_fixed_reviewer_is_enforced_and_must_be_active(client):
+    _, _, engine = client
+    ids = await _setup_direct_assign(engine)
+    steps = [{'order': 1, 'department_code': '市场生态部', 'fixed_owner_username': 'xt'}]
+    async with AsyncSession(engine, expire_on_commit=False) as db:
+        departments = await assignment_departments(db, steps)
+        assert [u['id'] for u in departments[0]['handlers']] == [ids['handler_a']]
+        assigned = await assign_chain_owners(db, steps, {'市场生态部': ids['handler_b']})
+        assert assigned[0]['assigned_owner_id'] == ids['handler_a']
+        reviewer = await db.get(User, ids['handler_a'])
+        reviewer.is_active = False
+        await db.flush()
+        assert (await assignment_departments(db, steps))[0]['handlers'] == []
+        with pytest.raises(HTTPException, match='固定处理人无效'):
+            await assign_chain_owners(db, steps, {}, draft=True)
 
 
 @pytest.mark.asyncio
