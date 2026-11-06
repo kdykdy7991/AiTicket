@@ -118,15 +118,19 @@ router.beforeEach((to) => {
     return { name: 'Login', query: { redirect: to.fullPath } }
   }
 
+  if (to.name === 'VisitRecords' && auth.userRole !== 'agent' && !auth.isObserver && !auth.extraObserverAccess) {
+    return { name: 'TicketList' }
+  }
+
   if (to.meta.requiresAdmin && !auth.isAdmin) {
     return { name: 'TicketList' }
   }
 
-  if (to.meta.requiresManagementRead && !(auth.isAdmin || auth.isObserver)) {
+  if (to.meta.requiresManagementRead && !(auth.isAdmin || auth.isObserver || auth.extraObserverAccess)) {
     return { name: 'TicketList' }
   }
 
-  if (to.meta.requiresKnowledgeAccess && !(auth.isAdmin || auth.isObserver)) {
+  if (to.meta.requiresKnowledgeAccess && !(auth.isAdmin || auth.isObserver || auth.extraObserverAccess)) {
     return { name: 'TicketList' }
   }
 

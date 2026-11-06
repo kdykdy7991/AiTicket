@@ -1,10 +1,41 @@
 """The observer sees global data and cannot mutate workflow state."""
 
 from app.core.deps import get_current_user
+from app.core.config import settings
+from app.core.security import hash_password
 from app.main import app
 from app.models.ticket import Ticket
 from app.models.user import User
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+
+async def test_extra_observer_access_preserves_role_and_limits_writes(client, monkeypatch):
+    http, _, engine = client
+    Session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with Session() as db:
+        leader = User(username='extra-reader', name='负责人', password_hash=hash_password('test-password'),
+                      role='department_leader', local_login_enabled=True)
+        db.add(leader)
+        await db.flush()
+        leader_id = leader.id
+        db.add(Ticket(number='EXTRA-READ-1', creator_id=1, owner_id=1,
+                      customer_phone='13800138000', state='open', is_draft=False))
+        await db.commit()
+    monkeypatch.setattr(settings, 'EXTRA_OBSERVER_USER_IDS', str(leader_id))
+    app.dependency_overrides.pop(get_current_user)
+    response = await http.post('/api/v1/auth/login', json={'username': 'extra-reader', 'password': 'test-password'})
+    assert response.status_code == 200, response.text
+    assert response.json()['user']['role'] == 'department_leader'
+    assert response.json()['user']['extra_observer_access'] is True
+    headers = {'Authorization': 'Bearer ' + response.json()['access_token']}
+    for path in ('/api/v1/tickets', '/api/v1/tickets/1', '/api/v1/visit-records',
+                 '/api/v1/visit-records/export', '/api/v1/users', '/api/v1/sla-policies',
+                 '/api/v1/stats/report'):
+        response = await http.get(path, headers=headers)
+        assert response.status_code == 200, (path, response.text)
+    assert (await http.post('/api/v1/visit-records', headers=headers, json={})).status_code == 403
+    assert (await http.patch('/api/v1/users/1', headers=headers, json={'name': 'changed'})).status_code == 403
+    assert (await http.patch('/api/v1/tickets/1', headers=headers, json={'state': 'resolved'})).status_code == 403
 
 
 async def test_observer_can_read_global_data_but_cannot_write(client):
@@ -29,12 +60,13 @@ async def test_observer_can_read_global_data_but_cannot_write(client):
     assert login.status_code == 200, login.text
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
-    for path in ("/api/v1/tickets", "/api/v1/visit-records", "/api/v1/users",
+    for path in ("/api/v1/tickets", "/api/v1/users",
                  "/api/v1/groups", "/api/v1/skill-groups",
                  "/api/v1/stats/report", "/api/v1/stats/opportunity-analysis",
                  "/api/v1/sla-policies"):
         response = await http.get(path, headers=headers)
         assert response.status_code == 200, (path, response.text)
+    assert (await http.get("/api/v1/visit-records", headers=headers)).status_code == 200
     knowledge = await http.get("/api/v1/knowledge/status", headers=headers)
     assert knowledge.status_code == 503  # No RAG service is configured for tests.
     tickets = await http.get("/api/v1/tickets", headers=headers)

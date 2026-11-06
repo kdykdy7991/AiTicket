@@ -98,7 +98,7 @@ const extraFields: Array<{ key: string; label: string; multiline?: boolean }> = 
 ]
 
 const auth = useAuthStore()
-const canEdit = computed(() => auth.isAgent)
+const canEdit = computed(() => auth.userRole === 'agent')
 const records = ref<VisitRecord[]>([])
 const page = ref(1)
 const total = ref(0)

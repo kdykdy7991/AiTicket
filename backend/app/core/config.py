@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # MCP 容器调用内部只读接口的专用密钥；不设置时接口不可用。
     MCP_INTERNAL_TOKEN: str = ""
 
+    # Explicit per-user additional observer access; user IDs are environment-specific.
+    EXTRA_OBSERVER_USER_IDS: str = ""
+
     # Debussy trusted-app exchange. Credentials stay on the API server.
     AGENT_EMBED_URL: str = ""
     AGENT_EMBED_API_URL: str = ""

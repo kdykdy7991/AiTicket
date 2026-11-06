@@ -24,6 +24,7 @@ class UserInfo(BaseModel):
     role: str
     group_id: int | None = None
     is_group_leader: bool = False
+    extra_observer_access: bool = False
 
     model_config = {"from_attributes": True}
 

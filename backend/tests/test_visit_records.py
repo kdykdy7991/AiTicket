@@ -7,10 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.ticket import Ticket
+from app.core.deps import get_current_user
+from app.main import app
+from types import SimpleNamespace
 
 
 async def test_create_search_and_update_visit_without_ticket(client):
     c, _dispatcher_id, engine = client
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=_dispatcher_id, role="agent")
     payload = {
         "contact_at": "2026-10-21T09:30:00+08:00",
         "contact_number": "13800000000",
@@ -48,3 +52,25 @@ async def test_create_search_and_update_visit_without_ticket(client):
     assert updated.json()["data"]["fields"]["request"] == "补充咨询内容"
     async with AsyncSession(engine) as session:
         assert (await session.execute(select(func.count()).select_from(Ticket))).scalar_one() == 0
+
+
+async def test_visit_access_limited_to_customer_service(client):
+    c, user_id, _ = client
+    payload = {"contact_at": "2026-10-21T09:30:00+08:00", "channel": "在线客服"}
+    for leader in (False, True):
+        app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=user_id, role="agent", is_group_leader=leader)
+        assert (await c.get('/api/v1/visit-records')).status_code == 200
+        assert (await c.get('/api/v1/visit-records/export')).status_code == 200
+        assert (await c.post('/api/v1/visit-records', json=payload)).status_code == 201
+        assert (await c.put('/api/v1/visit-records/1', json=payload)).status_code == 200
+    app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=user_id, role='observer')
+    assert (await c.get('/api/v1/visit-records')).status_code == 200
+    assert (await c.get('/api/v1/visit-records/export')).status_code == 200
+    assert (await c.post('/api/v1/visit-records', json=payload)).status_code == 403
+    assert (await c.put('/api/v1/visit-records/1', json=payload)).status_code == 403
+    for role in ('admin', 'handler', 'department_leader', 'division_leader'):
+        app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(id=user_id, role=role)
+        assert (await c.get('/api/v1/visit-records')).status_code == 403
+        assert (await c.get('/api/v1/visit-records/export')).status_code == 403
+        assert (await c.post('/api/v1/visit-records', json=payload)).status_code == 403
+        assert (await c.put('/api/v1/visit-records/1', json=payload)).status_code == 403

@@ -59,7 +59,11 @@ async def get_current_user(
                              and 0 <= index < len(steps) and steps[index].get("complaint_direct"))
             if own_complaint:
                 return user
-        if not account and not listing:
+        extra_read = getattr(user, "extra_observer_access", False) and (
+            (method == "GET" and path != "/api/v1/tickets/drafts")
+            or (method == "POST" and re.fullmatch(r"/api/v1/knowledge/collections/[^/]+/queries", path))
+        )
+        if not account and not listing and not extra_read:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅可访问本人负责的投诉工单")
 
     if user.role == "observer" and request.method not in {"GET", "HEAD", "OPTIONS"}:
@@ -80,8 +84,12 @@ async def get_current_user(
 
 def require_role(*roles: str):
     """Dependency factory: restrict access to specified roles."""
-    async def _check(user: User = Depends(get_current_user)):
-        if user.role not in roles:
+    async def _check(request: Request, user: User = Depends(get_current_user)):
+        observer_read = getattr(user, "extra_observer_access", False) and "observer" in roles and (
+            request.method == "GET" or (request.method == "POST" and
+            re.fullmatch(r"/api/v1/knowledge/collections/[^/]+/queries", request.url.path))
+        )
+        if user.role not in roles and not observer_read:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
         return user
     return _check

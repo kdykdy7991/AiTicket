@@ -55,7 +55,7 @@ async def list_users(
     if not show_all:
         query = query.where(User.is_active == True)
     # 非管理员只能看到本组成员（用于选负责人/筛选）
-    if user.role not in {"admin", "observer"}:
+    if user.role not in {"admin", "observer"} and not getattr(user, "extra_observer_access", False):
         query = query.where(User.group_id == user.group_id)
     if role:
         query = query.where(User.role == role)

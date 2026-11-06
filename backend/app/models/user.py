@@ -11,6 +11,11 @@ from app.core.database import Base
 class User(Base):
     __tablename__ = "users"
 
+    @property
+    def extra_observer_access(self) -> bool:
+        from app.core.config import settings
+        return str(self.id) in {value.strip() for value in settings.EXTRA_OBSERVER_USER_IDS.split(",") if value.strip()}
+
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)

@@ -360,7 +360,7 @@ async def list_tickets(
         selectinload(Ticket.category).selectinload(TicketCategory.parent), selectinload(Ticket.group),
         selectinload(Ticket.dispatcher),
     ).where(Ticket.is_draft == False)
-    if user.role in {"department_leader", "division_leader"}:
+    if user.role in {"department_leader", "division_leader"} and not getattr(user, "extra_observer_access", False):
         query = query.where(Ticket.owner_id == user.id, Ticket.category_id.in_((2102, 2103, 2104)))
     elif user.role == "handler":
         # 可见性按工单当前明确指向的责任人判断，不依赖部门全局对接人身份。
@@ -487,7 +487,7 @@ async def export_tickets(
     )
 
     # 角色过滤（与 list_tickets 一致）
-    if user.role in {"department_leader", "division_leader"}:
+    if user.role in {"department_leader", "division_leader"} and not getattr(user, "extra_observer_access", False):
         query = query.where(Ticket.owner_id == user.id, Ticket.category_id.in_((2102, 2103, 2104)))
     elif user.role == "handler":
         query = query.where((Ticket.owner_id == user.id) | (Ticket.dispatcher_id == user.id))

@@ -11,7 +11,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_role
+from app.core.deps import require_role
 from app.models.user import User
 from app.models.visit_record import VisitRecord
 
@@ -106,7 +106,7 @@ async def list_visits(
     channel: str | None = None,
     registered_ticket: bool | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("agent", "observer")),
 ):
     conditions = _conditions(keyword, channel, registered_ticket)
     total = (await db.execute(select(func.count()).select_from(VisitRecord).where(*conditions))).scalar_one()
@@ -123,7 +123,7 @@ async def export_visits(
     channel: str | None = None,
     registered_ticket: bool | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_role("agent", "observer")),
 ):
     records = (await db.execute(select(VisitRecord).where(
         *_conditions(keyword, channel, registered_ticket)
@@ -150,7 +150,7 @@ async def export_visits(
 async def create_visit(
     payload: VisitPayload,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(require_role("agent")),
 ):
     record = VisitRecord()
     _apply(record, payload)
@@ -165,7 +165,7 @@ async def update_visit(
     record_id: int,
     payload: VisitPayload,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent")),
+    user: User = Depends(require_role("agent")),
 ):
     record = await db.get(VisitRecord, record_id)
     if record is None:

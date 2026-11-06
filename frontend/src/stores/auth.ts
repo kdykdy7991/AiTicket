@@ -15,8 +15,9 @@ export const useAuthStore = defineStore('auth', () => {
   })
   const isAdmin = computed(() => userRole.value === 'admin')
   const isObserver = computed(() => userRole.value === 'observer')
+  const extraObserverAccess = computed(() => !!(user.value as any)?.extra_observer_access)
   const isAgent = computed(() => userRole.value === 'agent' || userRole.value === 'admin')
-  const canViewReports = computed(() => isAgent.value || isObserver.value)
+  const canViewReports = computed(() => isAgent.value || isObserver.value || extraObserverAccess.value)
   const displayName = computed(() => {
     if (!user.value) return ''
     const u = user.value as any
@@ -57,7 +58,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     accessToken, refreshToken, user,
-    isLoggedIn, userRole, isAdmin, isObserver, isAgent, canViewReports, displayName,
+    isLoggedIn, userRole, isAdmin, isObserver, extraObserverAccess, isAgent, canViewReports, displayName,
     login, completeLogin, logout,
   }
 })
