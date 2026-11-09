@@ -60,3 +60,29 @@ async def test_admin_exchanges_only_own_identity(client, monkeypatch):
     app.dependency_overrides[get_current_user] = lambda: type("Agent", (), {"id": 9, "role": "agent"})()
     forbidden = await http.post("/api/v1/agent/embed/code", headers={"Origin": "http://localhost:5173"})
     assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_assistant_grant_does_not_elevate_platform_role(client, monkeypatch):
+    """A granted handler must never be sent to Debussy as an admin."""
+    http, _, _ = client
+    monkeypatch.setattr(settings, "AGENT_EMBED_URL", "http://127.0.0.1:5176/embed/pub_01a11f5f-b98e-76ef-8f79-afd6a828a538")
+    monkeypatch.setattr(settings, "AGENT_EMBED_API_URL", "http://debussy.internal:8765")
+    monkeypatch.setattr(settings, "AGENT_EMBED_CLIENT_ID", "ta_test")
+    monkeypatch.setattr(settings, "AGENT_EMBED_CLIENT_SECRET", "server-only-secret")
+    fake_response = Response(
+        200, json={"data": {"code": "a" * 43, "expiresIn": 60}},
+        request=Request("POST", "http://debussy.internal:8765/api/embed/v1/auth/exchange"),
+    )
+    app.dependency_overrides[get_current_user] = lambda: type("Handler", (), {
+        "id": 7, "name": "处理人", "role": "handler",
+        "_effective_grants": {"assistant_access"}, "_has_grant_history": True,
+    })()
+    upstream = MagicMock()
+    upstream.__aenter__ = AsyncMock(return_value=upstream)
+    upstream.__aexit__ = AsyncMock(return_value=None)
+    upstream.post = AsyncMock(return_value=fake_response)
+    with patch("app.api.v1.agent_embed.httpx.AsyncClient", return_value=upstream):
+        response = await http.post("/api/v1/agent/embed/code", headers={"Origin": "http://localhost:5173"})
+    assert response.status_code == 200, response.text
+    assert upstream.post.await_args.kwargs["json"]["roles"] == ["customer_service"]

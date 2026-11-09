@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import require_role
+from app.core.permissions import VISIT_READ
 from app.models.user import User
 from app.models.visit_record import VisitRecord
 
@@ -106,7 +107,7 @@ async def list_visits(
     channel: str | None = None,
     registered_ticket: bool | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("agent", "observer")),
+    user: User = Depends(require_role("agent", "observer", allow_read_grants=(VISIT_READ,))),
 ):
     conditions = _conditions(keyword, channel, registered_ticket)
     total = (await db.execute(select(func.count()).select_from(VisitRecord).where(*conditions))).scalar_one()
@@ -123,7 +124,7 @@ async def export_visits(
     channel: str | None = None,
     registered_ticket: bool | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("agent", "observer")),
+    user: User = Depends(require_role("agent", "observer", allow_read_grants=(VISIT_READ,))),
 ):
     records = (await db.execute(select(VisitRecord).where(
         *_conditions(keyword, channel, registered_ticket)

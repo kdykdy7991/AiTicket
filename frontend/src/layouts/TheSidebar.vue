@@ -30,10 +30,10 @@
         <span v-if="isActive(item.path)" class="nav-active-indicator" />
       </router-link>
 
-      <div v-if="(authStore.isAdmin || authStore.isObserver || authStore.extraObserverAccess) && !collapsed" class="nav-section-label">{{ authStore.isAdmin ? '管理' : '资料查看' }}</div>
+      <div v-if="authStore.canViewManagement && !collapsed" class="nav-section-label">{{ authStore.isAdmin ? '管理' : '资料查看' }}</div>
       <router-link
         v-for="item in adminMenu"
-        v-show="authStore.isAdmin || authStore.isObserver || authStore.extraObserverAccess"
+        v-show="authStore.canViewManagement"
         :key="item.path"
         :to="item.path"
         class="nav-item"
@@ -92,7 +92,7 @@ const mainMenu = computed(() => {
   const items = [
     { path: '/tickets', label: '工单', icon: iconTickets },
   ]
-  if (authStore.userRole === 'agent' || authStore.isObserver || authStore.extraObserverAccess) items.push({ path: '/visits', label: '来访记录', icon: iconVisits })
+  if (authStore.canViewVisits) items.push({ path: '/visits', label: '来访记录', icon: iconVisits })
   if (authStore.canViewReports) {
     items.push(
       { path: '/report', label: '工单统计', icon: iconReport },
@@ -100,10 +100,10 @@ const mainMenu = computed(() => {
     )
   }
   if (authStore.isAgent) items.push({ path: '/tickets/drafts', label: '我的草稿', icon: iconDraft })
-  if (authStore.isAdmin) {
+  if (authStore.canUseAssistant) {
     items.push({ path: '/assistant', label: '智能助手', icon: iconAssistant })
   }
-  if (authStore.isAdmin || authStore.isObserver || authStore.extraObserverAccess) items.push({ path: '/knowledge', label: '知识库', icon: iconKnowledge })
+  if (authStore.canViewKnowledge) items.push({ path: '/knowledge', label: '知识库', icon: iconKnowledge })
   return items
 })
 

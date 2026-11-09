@@ -15,9 +15,24 @@ export const useAuthStore = defineStore('auth', () => {
   })
   const isAdmin = computed(() => userRole.value === 'admin')
   const isObserver = computed(() => userRole.value === 'observer')
-  const extraObserverAccess = computed(() => !!(user.value as any)?.extra_observer_access)
+  const grants = computed<string[]>(() => (user.value as any)?.grants || [])
+  function hasGrant(key: string) {
+    return grants.value.includes(key)
+  }
+  // 兼容改造前缓存的旧登录信息；新会话一律以能力位为准
+  const hasGlobalRead = computed(
+    () => hasGrant('global_read') || !!(user.value as any)?.extra_observer_access,
+  )
+  function canRead(key: string) {
+    return hasGlobalRead.value || hasGrant(key)
+  }
+  const extraObserverAccess = hasGlobalRead
   const isAgent = computed(() => userRole.value === 'agent' || userRole.value === 'admin')
-  const canViewReports = computed(() => isAgent.value || isObserver.value || extraObserverAccess.value)
+  const canViewReports = computed(() => isAgent.value || isObserver.value || canRead('reports_read'))
+  const canViewVisits = computed(() => userRole.value === 'agent' || isObserver.value || canRead('visit_read'))
+  const canViewKnowledge = computed(() => isAdmin.value || isObserver.value || canRead('knowledge_read'))
+  const canViewManagement = computed(() => isAdmin.value || isObserver.value || canRead('org_read'))
+  const canUseAssistant = computed(() => isAdmin.value || hasGrant('assistant_access'))
   const displayName = computed(() => {
     if (!user.value) return ''
     const u = user.value as any
@@ -59,6 +74,8 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     accessToken, refreshToken, user,
     isLoggedIn, userRole, isAdmin, isObserver, extraObserverAccess, isAgent, canViewReports, displayName,
+    grants, hasGrant, hasGlobalRead, canRead,
+    canViewVisits, canViewKnowledge, canViewManagement, canUseAssistant,
     login, completeLogin, logout,
   }
 })

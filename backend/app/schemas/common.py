@@ -29,6 +29,7 @@ class UserCreate(BaseModel):
     is_group_leader: bool = False
     skill_groups: list[SkillGroupMembership] = Field(default_factory=list)
     dingtalk_id: str | None = None
+    grants: list[str] = Field(default_factory=list)
 
 
 class UserUpdate(BaseModel):
@@ -42,6 +43,8 @@ class UserUpdate(BaseModel):
     skill_groups: list[SkillGroupMembership] | None = None
     dingtalk_id: str | None = None
     is_active: bool | None = None
+    # None means "leave unchanged"; an empty list revokes all grants.
+    grants: list[str] | None = None
 
 
 class UserOut(BaseModel):
@@ -57,6 +60,7 @@ class UserOut(BaseModel):
     dingtalk_id: str | None = None
     last_login_at: datetime | None = None
     created_at: datetime
+    grants: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

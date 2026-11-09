@@ -3,7 +3,7 @@
 import math
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,7 +11,14 @@ from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.core.deps import get_current_user, require_role
 from app.core.exceptions import NotFoundError
+from app.core.permissions import (
+    GRANT_DEFINITIONS, GRANT_KEYS, ORG_READ, REPORTS_READ,
+    grants_for_users, has_grant, sync_user_grants,
+)
 from app.core.security import hash_password
+from app.models.audit import (
+    PASSWORD_CHANGE_ACTIONS, PASSWORD_RESET_BY_ADMIN, AuditLog,
+)
 from app.models.category import TicketCategory, Region
 from app.models.dispatch import DispatchChain
 from app.models.group import Group, SkillGroup, UserSkillGroup
@@ -39,6 +46,44 @@ from app.services.routing import create_rule, resolve_rule, update_rule
 users_router = APIRouter(tags=["users"])
 
 
+@users_router.get("/grant-definitions")
+async def list_grant_definitions(user: User = Depends(get_current_user)):
+    """Labels, descriptions and bundle contents for the admin grant form."""
+    return {"data": GRANT_DEFINITIONS}
+
+
+@users_router.get("/password-change-logs")
+async def list_password_change_logs(
+    user_id: int | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_role("admin")),
+):
+    """Who changed whose password, when, and from which IP (admin only)."""
+    query = select(AuditLog).where(AuditLog.action.in_(PASSWORD_CHANGE_ACTIONS))
+    if user_id is not None:
+        query = query.where(AuditLog.resource_id == user_id)
+    rows = (await db.execute(
+        query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(limit)
+    )).scalars().all()
+    data = []
+    for row in rows:
+        changes = row.changes or {}
+        method = "admin" if row.action == PASSWORD_RESET_BY_ADMIN else "self"
+        data.append({
+            "id": row.id,
+            "actor_id": row.user_id,
+            "actor_name": changes.get("actor_username") or "—",
+            "target_id": row.resource_id,
+            "target_name": changes.get("target_username") or "—",
+            "method": method,
+            "method_label": "管理员重置" if method == "admin" else "本人修改",
+            "ip_address": row.ip_address,
+            "created_at": row.created_at.isoformat(),
+        })
+    return {"data": data}
+
+
 @users_router.get("/users")
 async def list_users(
     role: str | None = None,
@@ -55,7 +100,7 @@ async def list_users(
     if not show_all:
         query = query.where(User.is_active == True)
     # 非管理员只能看到本组成员（用于选负责人/筛选）
-    if user.role not in {"admin", "observer"} and not getattr(user, "extra_observer_access", False):
+    if user.role not in {"admin", "observer"} and not has_grant(user, ORG_READ):
         query = query.where(User.group_id == user.group_id)
     if role:
         query = query.where(User.role == role)
@@ -88,6 +133,9 @@ async def list_users(
                 "complaint_responsibilities": responsibilities,
             })
 
+    # 一次性查出所有用户的额外权限，避免 N+1
+    grants_map = await grants_for_users(db, user_ids)
+
     data = []
     for u in users:
         data.append({
@@ -95,6 +143,7 @@ async def list_users(
             "role": u.role, "group_id": u.group_id, "is_group_leader": u.is_group_leader,
             "is_active": u.is_active, "dingtalk_id": u.dingtalk_id,
             "skill_groups": skill_groups_map.get(u.id, []),
+            "grants": grants_map.get(u.id, []),
             "created_at": u.created_at.isoformat(),
         })
     return {"data": data}
@@ -118,6 +167,9 @@ async def create_user(
         raise HTTPException(422, detail="负责人须选择部门和对应的负责人身份，不能设置为部门对接人")
     if body.role == "observer" and (body.group_id is not None or body.skill_groups or body.is_group_leader):
         raise HTTPException(422, detail="观察员不能加入客服组或对接部门")
+    unknown_grants = set(body.grants) - GRANT_KEYS
+    if unknown_grants:
+        raise HTTPException(422, detail="未知的额外权限：" + ", ".join(sorted(unknown_grants)))
 
     u = User(
         username=body.username, name=body.name, phone=body.phone,
@@ -132,6 +184,8 @@ async def create_user(
     from app.models.group import UserSkillGroup
     for m in body.skill_groups:
         db.add(UserSkillGroup(user_id=u.id, skill_group_id=m.skill_group_id, is_dispatcher=m.is_dispatcher, complaint_leader=m.complaint_leader, complaint_division_leader=m.complaint_division_leader, complaint_responsibilities=m.complaint_responsibilities))
+    if body.grants:
+        await sync_user_grants(db, u.id, set(body.grants), granted_by=user.id)
     await db.flush()
     return {"data": {"id": u.id, "username": u.username, "name": u.name, "role": u.role}}
 
@@ -140,6 +194,7 @@ async def create_user(
 async def update_user(
     user_id: int,
     body: UserUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_role("admin")),
 ):
@@ -184,6 +239,10 @@ async def update_user(
         ).limit(1))).scalar_one_or_none()
         if active_assignment is not None:
             raise HTTPException(409, detail="该用户仍关联在途工单，请先移交后再更改角色")
+    if body.grants is not None:
+        unknown_grants = set(body.grants) - GRANT_KEYS
+        if unknown_grants:
+            raise HTTPException(422, detail="未知的额外权限：" + ", ".join(sorted(unknown_grants)))
 
     # 不能禁用/降级最后一个管理员
     if body.role is not None and body.role != "admin" and u.role == "admin":
@@ -201,6 +260,18 @@ async def update_user(
         u.password_hash = hash_password(body.password)
         if not u.casdoor_subject:
             u.local_login_enabled = True
+        db.add(AuditLog(
+            user_id=user.id,
+            action=PASSWORD_RESET_BY_ADMIN,
+            resource_type="user",
+            resource_id=user_id,
+            changes={
+                "method": "admin",
+                "actor_username": getattr(user, "username", None) or "—",
+                "target_username": u.username,
+            },
+            ip_address=request.client.host if request.client else None,
+        ))
     if body.role is not None:
         u.role = body.role
         if body.role in {"department_leader", "division_leader"}:
@@ -226,6 +297,9 @@ async def update_user(
         )
         for m in body.skill_groups:
             db.add(UserSkillGroup(user_id=user_id, skill_group_id=m.skill_group_id, is_dispatcher=m.is_dispatcher, complaint_leader=m.complaint_leader, complaint_division_leader=m.complaint_division_leader, complaint_responsibilities=m.complaint_responsibilities))
+
+    if body.grants is not None:
+        await sync_user_grants(db, user_id, set(body.grants), granted_by=user.id)
 
     await db.flush()
     return {"data": {"id": u.id, "username": u.username, "name": u.name, "role": u.role}}
@@ -790,7 +864,7 @@ sla_router = APIRouter(tags=["sla"])
 
 
 @sla_router.get("/sla-policies")
-async def list_sla_policies(db: AsyncSession = Depends(get_db), user: User = Depends(require_role("admin", "observer"))):
+async def list_sla_policies(db: AsyncSession = Depends(get_db), user: User = Depends(require_role("admin", "observer", allow_read_grants=(ORG_READ,)))):
     result = await db.execute(select(SLAPolicy).order_by(SLAPolicy.id))
     policies = result.scalars().all()
     data = []
@@ -883,7 +957,7 @@ stats_router = APIRouter(tags=["stats"])
 async def dashboard_stats(
     group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent", "observer")),
+    user: User = Depends(require_role("admin", "agent", "observer", allow_read_grants=(REPORTS_READ,))),
 ):
     from datetime import datetime, timezone
     from sqlalchemy import or_
@@ -985,7 +1059,7 @@ async def report_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent", "observer")),
+    user: User = Depends(require_role("admin", "agent", "observer", allow_read_grants=(REPORTS_READ,))),
 ):
     """按时间范围聚合统计报表。
 
@@ -1274,7 +1348,7 @@ async def trend_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent", "observer")),
+    user: User = Depends(require_role("admin", "agent", "observer", allow_read_grants=(REPORTS_READ,))),
 ):
     """按天返回新增/闭环趋势，供折线图使用。"""
     from datetime import date, datetime, timedelta, timezone
@@ -1345,7 +1419,7 @@ async def service_analysis_stats(
     date_to: str | None = None,
     skill_group_id: int | None = None,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent", "observer")),
+    user: User = Depends(require_role("admin", "agent", "observer", allow_read_grants=(REPORTS_READ,))),
 ):
     """全量工单总览。时间范围按北京时间的建单日期筛选。"""
     from collections import Counter, defaultdict
@@ -1690,7 +1764,7 @@ async def opportunity_analysis_stats(
     owner_id: int | None = None,
     granularity: str = Query("day", pattern="^(day|week)$"),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_role("admin", "agent", "observer")),
+    user: User = Depends(require_role("admin", "agent", "observer", allow_read_grants=(REPORTS_READ,))),
 ):
     """线索工单分析：机会识别、有效性判断与销售承接效率。
 

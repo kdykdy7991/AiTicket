@@ -4,10 +4,13 @@
       <div>
         <h2 class="page-title">用户管理</h2>
       </div>
-      <el-button v-if="auth.isAdmin" type="primary" @click="openCreate">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right: 6px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        新建用户
-      </el-button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <el-button v-if="auth.isAdmin" @click="openPasswordLogs">改密记录</el-button>
+        <el-button v-if="auth.isAdmin" type="primary" @click="openCreate">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" style="margin-right: 6px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          新建用户
+        </el-button>
+      </div>
     </div>
 
     <!-- 筛选 -->
@@ -58,6 +61,12 @@
               </el-tag>
             </span>
             <span v-else class="muted">{{ row.role === 'handler' ? '未配置所属组' : '—' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="额外权限" min-width="120">
+          <template #default="{ row }">
+            <el-tag v-for="key in (row.grants || [])" :key="key" size="small" type="warning" style="margin-right: 4px">{{ grantLabel(key) }}</el-tag>
+            <span v-if="!(row.grants || []).length" class="muted">—</span>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90" align="center">
@@ -134,6 +143,20 @@
             </div>
           </div>
         </el-form-item>
+        <el-form-item v-if="auth.isAdmin" label="额外权限">
+          <el-checkbox-group v-model="form.grants" style="width: 100%">
+            <div style="font-size:12px;color:#7f9bbd;margin:2px 0 4px">读取范围</div>
+            <div v-for="g in readGrants" :key="g.key" style="display:flex;align-items:center;gap:10px;min-height:28px">
+              <el-checkbox :label="g.key">{{ g.label }}</el-checkbox>
+              <span class="muted" style="font-size:12px">{{ g.description }}</span>
+            </div>
+            <div style="font-size:12px;color:#7f9bbd;margin:8px 0 4px">功能入口</div>
+            <div v-for="g in featureGrants" :key="g.key" style="display:flex;align-items:center;gap:10px;min-height:28px">
+              <el-checkbox :label="g.key" :disabled="form.role === 'observer'">{{ g.label }}</el-checkbox>
+              <span class="muted" style="font-size:12px">{{ g.description }}</span>
+            </div>
+          </el-checkbox-group>
+        </el-form-item>
         <el-form-item label="钉钉ID" prop="dingtalk_id">
           <el-input v-model="form.dingtalk_id" placeholder="选填，用于钉钉通知" />
         </el-form-item>
@@ -143,13 +166,41 @@
         <el-button type="primary" :loading="saving" @click="onSubmit">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="logDialogVisible" title="改密记录" width="780px" align-center append-to-body class="ticket-dark-dialog">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <span>按账号筛选</span>
+        <el-select v-model="logFilterUser" clearable placeholder="全部账号" style="width:220px" @change="loadPasswordLogs">
+          <el-option v-for="u in users" :key="u.id" :label="`${u.name}（${u.username}）`" :value="u.id" />
+        </el-select>
+        <el-button @click="loadPasswordLogs">刷新</el-button>
+      </div>
+      <el-table :data="passwordLogs" v-loading="logsLoading" max-height="420">
+        <el-table-column label="时间" width="180">
+          <template #default="{ row }">{{ formatLogTime(row.created_at) }}</template>
+        </el-table-column>
+        <el-table-column label="账号" min-width="150">
+          <template #default="{ row }">{{ row.target_name }}（{{ row.target_id }}）</template>
+        </el-table-column>
+        <el-table-column label="方式" width="120">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.method === 'admin' ? 'warning' : ''">{{ row.method_label }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作者" min-width="140">
+          <template #default="{ row }">{{ row.actor_name }}（{{ row.actor_id }}）</template>
+        </el-table-column>
+        <el-table-column label="IP" width="140" prop="ip_address" />
+      </el-table>
+      <div v-if="!passwordLogs.length && !logsLoading" class="muted" style="text-align:center;padding:16px">暂无记录（仅记录本功能上线后发生的修改）</div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { userApi, type UserItem, type UserPayload } from '@/api/users'
+import { grantApi, passwordLogApi, userApi, type GrantDefinition, type PasswordChangeLog, type UserItem, type UserPayload } from '@/api/users'
 import { metaApi } from '@/api/overviews'
 import { useAuthStore } from '@/stores/auth'
 import type { Group } from '@/types'
@@ -165,6 +216,11 @@ const filterRole = ref('')
 const filterSkillGroup = ref<number | ''>('')
 const keyword = ref('')
 const includeInactive = ref(false)
+
+const logDialogVisible = ref(false)
+const passwordLogs = ref<PasswordChangeLog[]>([])
+const logFilterUser = ref<number | ''>('')
+const logsLoading = ref(false)
 
 const dialogVisible = ref(false)
 const editing = ref(false)
@@ -182,8 +238,41 @@ const form = reactive({
   skill_groups: [] as { skill_group_id: number; is_dispatcher: boolean; complaint_leader: boolean; complaint_division_leader: boolean; complaint_responsibilities: string[] }[],
   is_group_leader: false,
   dingtalk_id: '',
+  grants: [] as string[],
 })
 const complaintTopics = ['渠道相关的重要投诉', '媒体相关的重要投诉', '产品中心重要投诉', '售前与解决方案业务投诉', '交付&售后业务投诉', '海洋应用业务投诉', '政企业务投诉', '产品线投诉', '车载应用投诉', '高精定位应用投诉']
+
+const grantOptions = ref<GrantDefinition[]>([])
+const readGrants = computed(() => grantOptions.value.filter(g => g.kind !== 'feature'))
+const featureGrants = computed(() => grantOptions.value.filter(g => g.kind === 'feature'))
+function grantLabel(key: string) {
+  return grantOptions.value.find(g => g.key === key)?.label || key
+}
+
+function formatLogTime(iso: string) {
+  if (!iso) return '—'
+  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+}
+
+async function loadPasswordLogs() {
+  logsLoading.value = true
+  try {
+    passwordLogs.value = await passwordLogApi.list({
+      user_id: logFilterUser.value === '' ? undefined : logFilterUser.value,
+    })
+  } catch (e) {
+    console.error('[UsersView] 改密记录加载失败', e)
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+function openPasswordLogs() {
+  logFilterUser.value = ''
+  passwordLogs.value = []
+  logDialogVisible.value = true
+  loadPasswordLogs()
+}
 
 const rules: FormRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
@@ -233,6 +322,8 @@ function onRoleChange() {
     form.is_group_leader = false
     form.skill_group_ids = []
     form.skill_groups = []
+    // 观察员是全局只读身份，不能持有功能入口类权限
+    if (form.role === 'observer') form.grants = form.grants.filter(k => grantOptions.value.find(g => g.key === k)?.kind !== 'feature')
   }
 }
 
@@ -266,6 +357,7 @@ function resetForm() {
   form.skill_groups = []
   form.is_group_leader = false
   form.dingtalk_id = ''
+  form.grants = []
 }
 
 function openCreate() {
@@ -288,6 +380,7 @@ function openEdit(row: UserItem) {
   form.skill_groups = (row.skill_groups || []).map(m => ({ skill_group_id: m.skill_group_id, is_dispatcher: m.is_dispatcher, complaint_leader: m.complaint_leader, complaint_division_leader: m.complaint_division_leader, complaint_responsibilities: m.complaint_responsibilities || [] }))
   form.is_group_leader = row.is_group_leader
   form.dingtalk_id = row.dingtalk_id || ''
+  form.grants = [...(row.grants || [])]
   dialogVisible.value = true
 }
 
@@ -308,6 +401,7 @@ async function onSubmit() {
       skill_groups: form.skill_groups,
       is_group_leader: form.role === 'agent' ? form.is_group_leader : false,
       dingtalk_id: form.dingtalk_id || null,
+      grants: form.grants,
     }
     if (form.password) payload.password = form.password
     if (editing.value && editingId.value) {
@@ -346,9 +440,12 @@ async function onActivate(row: UserItem) {
 onMounted(async () => {
   const start = performance.now()
   const metaStart = performance.now()
-  const [g, sg] = await Promise.all([metaApi.getGroups(), metaApi.getSkillGroups()])
+  const [g, sg, defs] = await Promise.all([
+    metaApi.getGroups(), metaApi.getSkillGroups(), grantApi.list().catch(() => []),
+  ])
   groups.value = g
   skillGroups.value = sg
+  grantOptions.value = defs
   console.log(`[UsersView] 分组数据加载: ${(performance.now() - metaStart).toFixed(1)}ms`)
   await loadUsers()
   console.log(`[UsersView] 页面总加载（含分组数据）: ${(performance.now() - start).toFixed(1)}ms`)

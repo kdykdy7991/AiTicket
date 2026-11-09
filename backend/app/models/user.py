@@ -13,8 +13,15 @@ class User(Base):
 
     @property
     def extra_observer_access(self) -> bool:
-        from app.core.config import settings
-        return str(self.id) in {value.strip() for value in settings.EXTRA_OBSERVER_USER_IDS.split(",") if value.strip()}
+        """Legacy alias: true when the user holds every read domain."""
+        from app.core.permissions import has_full_read
+        return has_full_read(self)
+
+    @property
+    def grants(self) -> list[str]:
+        """Active capability grants, sent to the frontend on login."""
+        from app.core.permissions import effective_grants
+        return sorted(effective_grants(self))
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)

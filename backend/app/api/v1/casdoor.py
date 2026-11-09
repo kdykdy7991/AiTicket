@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.permissions import load_grants
 from app.core.security import create_access_token, create_refresh_token
 from app.models.user import User
 from app.schemas.auth import LoginResponse, UserInfo
@@ -200,6 +201,7 @@ async def login_with_casdoor(body: ExchangeRequest, db: AsyncSession = Depends(g
         ).returning(User.token_version)
     )).scalar_one()
     await db.commit()
+    await load_grants(db, user)
     return LoginResponse(
         access_token=create_access_token(user.id, user.role, version),
         refresh_token=create_refresh_token(user.id, version),

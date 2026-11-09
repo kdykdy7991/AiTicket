@@ -9,16 +9,21 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.deps import require_role
+from app.core.permissions import ASSISTANT_ACCESS
 from app.models.user import User
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 _APP_PATH = re.compile(r"^/embed/(pub_[0-9a-fA-F-]{36})/?$")
 
+# Only administrators keep the platform's admin role. A feature-entry grant
+# opens the assistant but must never elevate the user's identity in Debussy.
+_AGENT_PLATFORM_ROLES = {"admin": "admin"}
+
 
 @router.post("/embed/code")
 async def create_embed_code(
     origin: str | None = Header(default=None),
-    user: User = Depends(require_role("admin")),
+    user: User = Depends(require_role("admin", allow_grants=(ASSISTANT_ACCESS,))),
 ):
     """Exchange only a verified ticket user; never expose the client secret."""
     # The agent platform owns the app's allowed origins and iframe CSP. Keep
@@ -43,7 +48,7 @@ async def create_embed_code(
                     "origin": origin,
                     "userId": str(user.id),
                     "name": user.name,
-                    "roles": ["customer_service" if user.role == "agent" else "admin"],
+                    "roles": [_AGENT_PLATFORM_ROLES.get(user.role, "customer_service")],
                 },
             )
             response.raise_for_status()

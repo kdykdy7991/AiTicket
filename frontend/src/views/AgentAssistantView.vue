@@ -11,10 +11,12 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { agentApi } from '@/api/agent'
 import { useAuthStore } from '@/stores/auth'
 
 const auth = useAuthStore()
+const router = useRouter()
 defineOptions({ name: 'AgentAssistantView' })
 const embedContainer = ref<HTMLElement | null>(null)
 const loading = ref(false)
@@ -68,7 +70,7 @@ function onEmbedMessage(event: MessageEvent) {
 }
 
 async function connect() {
-  if (!embedContainer.value || disposed || !auth.isAdmin) return
+  if (!embedContainer.value || disposed || !auth.canUseAssistant) return
   const current = ++generation
   clearEmbed()
   error.value = ''
@@ -113,6 +115,15 @@ async function connect() {
     scheduleRenewal()
   } catch (caught) {
     if (current === generation && !disposed) {
+      const status = (caught as { response?: { status?: number } })?.response?.status
+      if (status === 403) {
+        // 授权被撤销：断开常驻 iframe 与续票，避免继续持有不再授权的会话
+        generation++
+        clearEmbed()
+        error.value = '智能助手使用权限已变更，请返回工单列表'
+        router.push({ name: 'TicketList' })
+        return
+      }
       loading.value = false
       error.value = caught instanceof Error ? caught.message : '智能助手连接失败'
     }

@@ -25,6 +25,7 @@ class UserInfo(BaseModel):
     group_id: int | None = None
     is_group_leader: bool = False
     extra_observer_access: bool = False
+    grants: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 

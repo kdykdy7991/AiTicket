@@ -85,7 +85,7 @@ const routes: RouteRecordRaw[] = [
     path: '/assistant',
     name: 'AgentAssistant',
     component: AgentAssistantView,
-    meta: { title: '智能助手', requiresAdmin: true },
+    meta: { title: '智能助手', requiresAssistant: true },
   },
   {
     path: '/knowledge',
@@ -118,7 +118,7 @@ router.beforeEach((to) => {
     return { name: 'Login', query: { redirect: to.fullPath } }
   }
 
-  if (to.name === 'VisitRecords' && auth.userRole !== 'agent' && !auth.isObserver && !auth.extraObserverAccess) {
+  if (to.name === 'VisitRecords' && !auth.canViewVisits) {
     return { name: 'TicketList' }
   }
 
@@ -126,11 +126,15 @@ router.beforeEach((to) => {
     return { name: 'TicketList' }
   }
 
-  if (to.meta.requiresManagementRead && !(auth.isAdmin || auth.isObserver || auth.extraObserverAccess)) {
+  if (to.meta.requiresAssistant && !auth.canUseAssistant) {
     return { name: 'TicketList' }
   }
 
-  if (to.meta.requiresKnowledgeAccess && !(auth.isAdmin || auth.isObserver || auth.extraObserverAccess)) {
+  if (to.meta.requiresManagementRead && !auth.canViewManagement) {
+    return { name: 'TicketList' }
+  }
+
+  if (to.meta.requiresKnowledgeAccess && !auth.canViewKnowledge) {
     return { name: 'TicketList' }
   }
 

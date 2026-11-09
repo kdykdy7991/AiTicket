@@ -8,6 +8,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 
+# Password change events. ``user_id`` is the actor, ``resource_id`` the target
+# account; the two are equal only for a self-service change.
+PASSWORD_CHANGE_SELF = "password_change_self"
+PASSWORD_RESET_BY_ADMIN = "password_reset_by_admin"
+PASSWORD_CHANGE_ACTIONS = (PASSWORD_CHANGE_SELF, PASSWORD_RESET_BY_ADMIN)
+
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"

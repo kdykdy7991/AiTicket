@@ -27,6 +27,8 @@ export interface User {
   groups?: Group[]
   organization?: Organization | null
   active: boolean
+  grants?: string[]
+  extra_observer_access?: boolean
 }
 
 // —— 客服组端到端工单需求补充（P7）新增类型 ——

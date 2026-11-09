@@ -2,12 +2,13 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
+from app.core.permissions import load_grants
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -15,6 +16,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
+from app.models.audit import AuditLog, PASSWORD_CHANGE_SELF
 from app.models.user import User
 from app.api.v1.casdoor import _configured, verify_password_subject
 from app.core.config import settings
@@ -74,6 +76,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     access_token = create_access_token(user.id, user.role, token_version)
     refresh_token = create_refresh_token(user.id, token_version)
 
+    await load_grants(db, user)
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -113,6 +116,7 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
     access_token = create_access_token(user.id, user.role, user.token_version)
     refresh_token = create_refresh_token(user.id, user.token_version)
 
+    await load_grants(db, user)
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -131,6 +135,7 @@ async def logout(user: User = Depends(get_current_user)):
 @router.post("/auth/change-password")
 async def change_password(
     body: ChangePasswordRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -152,5 +157,17 @@ async def change_password(
             detail="新密码不能与原密码相同",
         )
     user.password_hash = hash_password(body.new_password)
+    db.add(AuditLog(
+        user_id=user.id,
+        action=PASSWORD_CHANGE_SELF,
+        resource_type="user",
+        resource_id=user.id,
+        changes={
+            "method": "self",
+            "actor_username": user.username,
+            "target_username": user.username,
+        },
+        ip_address=request.client.host if request.client else None,
+    ))
     await db.commit()
     return {"message": "密码修改成功"}

@@ -8,6 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.permissions import (
+    READ_GRANT_KEYS, feature_access_allowed, full_read_allowed, has_grant,
+    load_grants, read_grant_allowed,
+)
 from app.core.security import decode_token
 from app.models.user import User
 
@@ -38,6 +42,11 @@ async def get_current_user(
             detail="该账号已在其他设备登录，请重新登录",
         )
 
+    # Grants are resolved from the DB on every request, so an administrator's
+    # change in user management takes effect without requiring a new login on
+    # the backend side.
+    await load_grants(db, user)
+
     # A viewer can inspect data but cannot take part in any business or
     # administration workflow. Keep the guard here so new write endpoints
     # cannot accidentally grant access through a permissive dependency.
@@ -59,11 +68,15 @@ async def get_current_user(
                              and 0 <= index < len(steps) and steps[index].get("complaint_direct"))
             if own_complaint:
                 return user
-        extra_read = getattr(user, "extra_observer_access", False) and (
-            (method == "GET" and path != "/api/v1/tickets/drafts")
-            or (method == "POST" and re.fullmatch(r"/api/v1/knowledge/collections/[^/]+/queries", path))
+        # Holding every read domain keeps the legacy broad GET behaviour;
+        # individual domains only bypass the leader allowlist for endpoints
+        # declared in READ_GRANT_ENDPOINTS. Feature grants match exactly.
+        capability_allowed = (
+            full_read_allowed(user, method, path)
+            or read_grant_allowed(user, method, path, READ_GRANT_KEYS)
+            or feature_access_allowed(user, method, path)
         )
-        if not account and not listing and not extra_read:
+        if not account and not listing and not capability_allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅可访问本人负责的投诉工单")
 
     if user.role == "observer" and request.method not in {"GET", "HEAD", "OPTIONS"}:
@@ -82,14 +95,29 @@ async def get_current_user(
     return user
 
 
-def require_role(*roles: str):
-    """Dependency factory: restrict access to specified roles."""
+def require_role(
+    *roles: str,
+    allow_read_grants: tuple[str, ...] = (),
+    allow_grants: tuple[str, ...] = (),
+):
+    """Dependency factory: restrict access to specified roles.
+
+    ``allow_read_grants`` declares which read-domain capabilities unlock this
+    endpoint. Every such endpoint must be listed in ``READ_GRANT_ENDPOINTS``;
+    there is no longer any inference from the ``"observer"`` string in roles.
+    ``allow_grants`` does the same for feature-entry capabilities.
+    """
     async def _check(request: Request, user: User = Depends(get_current_user)):
-        observer_read = getattr(user, "extra_observer_access", False) and "observer" in roles and (
-            request.method == "GET" or (request.method == "POST" and
-            re.fullmatch(r"/api/v1/knowledge/collections/[^/]+/queries", request.url.path))
+        if user.role in roles:
+            return user
+        method, path = request.method, request.url.path
+        read_access = read_grant_allowed(user, method, path, allow_read_grants)
+        grant_access = (
+            bool(allow_grants)
+            and feature_access_allowed(user, method, path)
+            and any(has_grant(user, key) for key in allow_grants)
         )
-        if user.role not in roles and not observer_read:
+        if not read_access and not grant_access:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权限访问")
         return user
     return _check

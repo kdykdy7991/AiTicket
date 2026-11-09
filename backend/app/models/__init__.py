@@ -2,6 +2,7 @@
 
 from app.models.group import Group, SkillGroup, UserSkillGroup
 from app.models.user import User
+from app.models.grant import UserGrant
 from app.models.category import TicketCategory, Region
 from app.models.ticket import Ticket, Article, TicketStateLog
 from app.models.sla import SLAPolicy, SLARound
@@ -15,7 +16,7 @@ from app.models.visit_record import VisitRecord
 
 __all__ = [
     "Group", "SkillGroup", "UserSkillGroup",
-    "User",
+    "User", "UserGrant",
     "TicketCategory", "Region",
     "Ticket", "Article", "TicketStateLog",
     "SLAPolicy",

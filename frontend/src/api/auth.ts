@@ -8,6 +8,8 @@ interface BackendUserInfo {
   role: string
   group_id: number | null
   is_group_leader: boolean
+  extra_observer_access?: boolean
+  grants?: string[]
 }
 
 interface BackendLoginResponse {
@@ -44,6 +46,8 @@ function adaptUser(u: BackendUserInfo) {
     // 额外字段：用于权限判断（受理按钮、批量操作等）
     group_id: u.group_id,
     is_group_leader: u.is_group_leader,
+    extra_observer_access: u.extra_observer_access ?? false,
+    grants: u.grants ?? [],
   }
 }
 
